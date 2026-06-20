@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -84,6 +85,8 @@ namespace SFMap.Pipeline.Editor
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Building scene…", 0.95f);
                 int objCount = PopulateScene(graph, terrainData, heightmap, worldRect,
                     roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot);
+
+                EditorSceneManager.SaveOpenScenes();
 
                 sw.Stop();
                 Debug.Log($"[SFMapPipeline] Generated in {sw.Elapsed.TotalSeconds:F1}s — " +
