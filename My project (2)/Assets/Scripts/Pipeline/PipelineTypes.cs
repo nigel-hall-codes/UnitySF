@@ -29,7 +29,9 @@ namespace SFMap.Pipeline
 
     public static class GeneratedAssets
     {
-        public const string Root = "Assets/Generated";
+        public static string ActivePreset = "default";
+
+        public static string Root => $"Assets/Generated/{ActivePreset}";
 
         public static string ChunkDir(ChunkCoord c)           => $"{Root}/{c}";
         public static string TerrainAsset(ChunkCoord c)       => $"{ChunkDir(c)}/Terrain.asset";
@@ -39,5 +41,6 @@ namespace SFMap.Pipeline
         public static string BuildingMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Buildings/building_{id}.mesh";
         public static string RoadMaterial()                          => $"{Root}/Materials/RoadSurface.mat";
         public static string SidewalkMaterial()                      => $"{Root}/Materials/SidewalkSurface.mat";
+        public static string ManifestPath()                          => $"{Root}/manifest.json";
     }
 }
