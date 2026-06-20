@@ -12,6 +12,7 @@ namespace SFMap.Pipeline
     public static class IntersectionMeshGenerator
     {
         const float BevelThreshold = 5f; // meters; miter points beyond this become two-vertex bevels
+        const float Raise = 0.05f;       // match RoadMeshGenerator — prevents z-fighting with terrain
 
         public static IReadOnlyList<Mesh> Generate(
             StreetGraph graph,
@@ -79,7 +80,7 @@ namespace SFMap.Pipeline
             // CCW sort by angle in the XZ plane (viewed from +Y)
             arms.Sort((a, b) => a.Angle.CompareTo(b.Angle));
 
-            float y = SampleElevation(node.WorldPosition.x, node.WorldPosition.z, heightmap, worldRect);
+            float y = SampleElevation(node.WorldPosition.x, node.WorldPosition.z, heightmap, worldRect) + Raise;
             var center = new Vector3(node.WorldPosition.x, y, node.WorldPosition.z);
 
             // Compute polygon vertices (XZ offsets from center) via miter/bevel joins
