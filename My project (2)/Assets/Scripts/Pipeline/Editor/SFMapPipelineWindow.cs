@@ -38,6 +38,14 @@ namespace SFMap.Pipeline.Editor
 
         void RunGenerate()
         {
+            if (GameObject.Find("SF Map") != null || GameObject.Find("Buildings") != null)
+            {
+                if (!EditorUtility.DisplayDialog("SF Map Pipeline",
+                    "This will replace existing 'SF Map' and 'Buildings' scene objects. Continue?",
+                    "Regenerate", "Cancel"))
+                    return;
+            }
+
             var sw = Stopwatch.StartNew();
             try
             {
@@ -60,7 +68,7 @@ namespace SFMap.Pipeline.Editor
                 var setbacks = IntersectionMeshGenerator.ComputeSetbacks(graph);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.50f);
-                var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, setbacks);
+                var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, setbacks, roadWidthMultiplier);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.62f);
                 var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, heightmap, worldRect, coord);
@@ -69,16 +77,16 @@ namespace SFMap.Pipeline.Editor
                 var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, worldRect, coord);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating buildings…", 0.86f);
-                BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord);
+                var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Building scene…", 0.95f);
                 int objCount = PopulateScene(terrainData, heightmap, worldRect,
-                    roadMeshes, intersectionMeshes, sidewalkMeshes, graph.Buildings.Count);
+                    roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot);
 
                 sw.Stop();
                 Debug.Log($"[SFMapPipeline] Generated in {sw.Elapsed.TotalSeconds:F1}s — " +
                           $"roads:{roadMeshes.Count} intersections:{intersectionMeshes.Count} " +
-                          $"sidewalks:{sidewalkMeshes.Count} buildings:{graph.Buildings.Count} " +
+                          $"sidewalks:{sidewalkMeshes.Count} buildings:{buildingsRoot.transform.childCount} " +
                           $"scene objects:{objCount}");
             }
             catch (Exception e)
@@ -98,7 +106,7 @@ namespace SFMap.Pipeline.Editor
             IReadOnlyList<Mesh> roadMeshes,
             IReadOnlyList<Mesh> intersectionMeshes,
             IReadOnlyList<Mesh> sidewalkMeshes,
-            int buildingCount)
+            GameObject buildingsRoot)
         {
             var root  = new GameObject("SF Map");
             int count = 0;
@@ -135,13 +143,8 @@ namespace SFMap.Pipeline.Editor
                 count++;
             }
 
-            // BuildingGenerator creates its own "Buildings" root in the scene; reparent it here
-            var buildingsRoot = GameObject.Find("Buildings");
-            if (buildingsRoot != null)
-            {
-                buildingsRoot.transform.SetParent(root.transform, false);
-                count += buildingCount;
-            }
+            buildingsRoot.transform.SetParent(root.transform, false);
+            count += buildingsRoot.transform.childCount;
 
             return count;
         }

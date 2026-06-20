@@ -14,7 +14,8 @@ namespace SFMap.Pipeline
             HeightmapData heightmap,
             Rect worldRect,
             ChunkCoord coord,
-            IReadOnlyDictionary<StreetEdge, (float from, float to)> setbacks = null)
+            IReadOnlyDictionary<StreetEdge, (float from, float to)> setbacks = null,
+            float widthMultiplier = 1f)
         {
             var meshes = new List<Mesh>();
 
@@ -36,8 +37,8 @@ namespace SFMap.Pipeline
 
                     Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
                     Vector3[] trimmed = TrimCenterline(stamped, fromSetback, toSetback);
-                    StampFootprint(edge, trimmed, heightmap, worldRect);
-                    Mesh mesh = BuildMesh(edge, trimmed);
+                    StampFootprint(edge, trimmed, heightmap, worldRect, widthMultiplier);
+                    Mesh mesh = BuildMesh(edge, trimmed, widthMultiplier);
 
 #if UNITY_EDITOR
                     SaveMesh(mesh, coord, edge.OsmWayId);
@@ -69,9 +70,9 @@ namespace SFMap.Pipeline
 
         // Flattens heightmap cells under the road to the interpolated road elevation.
         static void StampFootprint(StreetEdge edge, Vector3[] centerline,
-            HeightmapData heightmap, Rect worldRect)
+            HeightmapData heightmap, Rect worldRect, float widthMultiplier = 1f)
         {
-            float halfW = edge.Width * 0.5f;
+            float halfW = edge.Width * widthMultiplier * 0.5f;
             int res = heightmap.Resolution;
             float cellW = worldRect.width  / (res - 1);
             float cellH = worldRect.height / (res - 1);
@@ -154,12 +155,12 @@ namespace SFMap.Pipeline
         }
 
         // Builds a quad-strip mesh along the stamped centerline.
-        static Mesh BuildMesh(StreetEdge edge, Vector3[] centerline)
+        static Mesh BuildMesh(StreetEdge edge, Vector3[] centerline, float widthMultiplier = 1f)
         {
             int n = centerline.Length;
             if (n < 2) return new Mesh { name = $"road_{edge.OsmWayId}" };
 
-            float halfW = edge.Width * 0.5f;
+            float halfW = edge.Width * widthMultiplier * 0.5f;
 
             // Accumulate arc-lengths for UV.v
             var arcLen = new float[n];
