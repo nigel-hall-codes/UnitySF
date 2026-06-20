@@ -52,6 +52,9 @@ namespace SFMap.Pipeline
         static void CollectContourPoints(string csvPath, Rect clipRect,
             List<Vector2> points, List<float> elevations)
         {
+            // CSV has ~1m point spacing; heightmap cells are ~10m — thin to avoid O(n²) triangulation cost.
+            const float minSpacingSq = 8f * 8f;
+
             using var reader = new StreamReader(csvPath);
             reader.ReadLine(); // header
 
@@ -65,15 +68,16 @@ namespace SFMap.Pipeline
                 if (!int.TryParse(fields[1], out int elevFeet)) continue;
                 float elevM = elevFeet * FeetToMeters;
 
+                var lastAdded = new Vector2(float.MaxValue, float.MaxValue);
                 foreach (var (lon, lat) in ParseLinestring(fields[2]))
                 {
                     var wp = GeoProjection.ToWorldPoint(lon, lat);
                     var xz = new Vector2(wp.x, wp.z);
-                    if (clipRect.Contains(xz))
-                    {
-                        points.Add(xz);
-                        elevations.Add(elevM);
-                    }
+                    if (!clipRect.Contains(xz)) continue;
+                    if ((xz - lastAdded).sqrMagnitude < minSpacingSq) continue;
+                    lastAdded = xz;
+                    points.Add(xz);
+                    elevations.Add(elevM);
                 }
             }
         }
@@ -119,25 +123,14 @@ namespace SFMap.Pipeline
             if (open < 0 || close < 0) yield break;
             string inner = wkt.Substring(open + 1, close - open - 1);
 
-            int start = 0;
-            while (start < inner.Length)
+            foreach (string rawPair in inner.Split(','))
             {
-                int commaAbs = inner.IndexOf(',', start);
-                string pair = commaAbs < 0
-                    ? inner.Substring(start)
-                    : inner.Substring(start, commaAbs - start);
-                pair = pair.Trim();
-
+                string pair = rawPair.Trim();
                 int space = pair.IndexOf(' ');
-                if (space > 0 &&
-                    double.TryParse(pair.Substring(0, space), NumberStyles.Float, CultureInfo.InvariantCulture, out double lon) &&
+                if (space <= 0) continue;
+                if (double.TryParse(pair.Substring(0, space), NumberStyles.Float, CultureInfo.InvariantCulture, out double lon) &&
                     double.TryParse(pair.Substring(space + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out double lat))
-                {
                     yield return (lon, lat);
-                }
-
-                if (commaAbs < 0) break;
-                start = commaAbs + 1;
             }
         }
 

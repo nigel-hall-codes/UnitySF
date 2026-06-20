@@ -20,6 +20,9 @@ namespace SFMap.Pipeline
             ChunkCoord coord)
         {
             var meshes = new List<Mesh>();
+#if UNITY_EDITOR
+            var meshPaths = new List<string>();
+#endif
 
 #if UNITY_EDITOR
             AssetDatabase.StartAssetEditing();
@@ -32,8 +35,10 @@ namespace SFMap.Pipeline
                     if (mesh == null) continue;
 #if UNITY_EDITOR
                     SaveMesh(mesh, coord, node.OsmId);
-#endif
+                    meshPaths.Add(GeneratedAssets.IntersectionMesh(coord, node.OsmId));
+#else
                     meshes.Add(mesh);
+#endif
                 }
 #if UNITY_EDITOR
             }
@@ -42,6 +47,8 @@ namespace SFMap.Pipeline
                 AssetDatabase.StopAssetEditing();
             }
             AssetDatabase.SaveAssets();
+            foreach (var path in meshPaths)
+                meshes.Add(AssetDatabase.LoadAssetAtPath<Mesh>(path));
 #endif
             return meshes;
         }

@@ -163,6 +163,15 @@ public static class PlaceholderCarSetup
         wheel.rimWidth   = 0.15f;
         susp.wheel       = wheel;
 
+        // Rim child — Wheel.Start() calls tr.GetChild(0) to get the rim transform.
+        // A cylinder gives a visual stand-in; the Wheel script only needs the transform.
+        var rimGo = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+        rimGo.name = "Rim";
+        rimGo.transform.SetParent(wheelGo.transform, false);
+        rimGo.transform.localRotation = Quaternion.Euler(0, 0, 90f);
+        rimGo.transform.localScale    = new Vector3(wheel.rimRadius * 2f, wheel.rimWidth, wheel.rimRadius * 2f);
+        Object.DestroyImmediate(rimGo.GetComponent<CapsuleCollider>());
+
         return susp;
     }
 
