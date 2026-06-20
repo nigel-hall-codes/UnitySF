@@ -82,7 +82,7 @@ namespace SFMap.Pipeline.Editor
                 var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Building scene…", 0.95f);
-                int objCount = PopulateScene(terrainData, heightmap, worldRect,
+                int objCount = PopulateScene(graph, terrainData, heightmap, worldRect,
                     roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot);
 
                 sw.Stop();
@@ -102,6 +102,7 @@ namespace SFMap.Pipeline.Editor
         }
 
         int PopulateScene(
+            StreetGraph graph,
             TerrainData terrainData,
             HeightmapData heightmap,
             Rect worldRect,
@@ -151,7 +152,58 @@ namespace SFMap.Pipeline.Editor
             buildingsRoot.transform.SetParent(root.transform, false);
             count += buildingsRoot.transform.childCount;
 
+            PlaceVehicle(graph, worldRect);
+
             return count;
+        }
+
+        static void PlaceVehicle(StreetGraph graph, Rect worldRect)
+        {
+            var edge = PickSpawnEdge(graph, worldRect);
+            if (edge == null)
+            {
+                Debug.LogWarning("[SFMapPipeline] No residential spawn edge found — vehicle not placed.");
+                return;
+            }
+
+            // Wheel radius is the half-height of the pivot above the road surface.
+            const float wheelRadius  = 0.35f;
+            const float spawnOffset  = 0.1f;
+            var spawnPos             = edge.Centerline[0];
+            spawnPos.y              += wheelRadius + spawnOffset;
+
+            var forward = edge.Centerline[1] - edge.Centerline[0];
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f) forward = Vector3.forward;
+            var spawnRot = Quaternion.LookRotation(forward.normalized, Vector3.up);
+
+            PlaceholderCarSetup.CreateAt(spawnPos, spawnRot);
+        }
+
+        static StreetEdge PickSpawnEdge(StreetGraph graph, Rect worldRect)
+        {
+            var center = new Vector3(
+                worldRect.x + worldRect.width  * 0.5f,
+                0f,
+                worldRect.y + worldRect.height * 0.5f);
+
+            StreetEdge best     = null;
+            float      bestDist = float.MaxValue;
+
+            foreach (var edge in graph.Edges)
+            {
+                if (edge.Type != HighwayType.Residential) continue;
+                if (edge.Centerline == null || edge.Centerline.Length < 2) continue;
+
+                var p    = edge.Centerline[0];
+                var dx   = p.x - center.x;
+                var dz   = p.z - center.z;
+                float d2 = dx * dx + dz * dz;
+
+                if (d2 < bestDist) { bestDist = d2; best = edge; }
+            }
+
+            return best;
         }
 
         static GameObject CreateChild(GameObject parent, string name)
@@ -190,6 +242,9 @@ namespace SFMap.Pipeline.Editor
             // Orphaned root in case a previous generate crashed before PopulateScene reparented it
             var orphan = GameObject.Find("Buildings");
             if (orphan != null) DestroyImmediate(orphan);
+
+            var car = GameObject.Find("PlaceholderCar");
+            if (car != null) DestroyImmediate(car);
         }
     }
 }

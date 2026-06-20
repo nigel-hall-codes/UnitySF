@@ -13,6 +13,15 @@ public static class PlaceholderCarSetup
     [MenuItem("RVP/Create Placeholder Car")]
     static void Create()
     {
+        var car = CreateAt(new Vector3(0, 5, 0), Quaternion.identity);
+        CreateCamera(car);
+        Selection.activeGameObject = car;
+        EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+        Debug.Log("[RVP] Placeholder car created at (0, 5, 0). Hit Play to test.");
+    }
+
+    public static GameObject CreateAt(Vector3 position, Quaternion rotation)
+    {
         EnsureLayer("Ignore Wheel Cast");
         EnsureLayer("Detachable Part");
         EnsureTag("Underside");
@@ -22,12 +31,7 @@ public static class PlaceholderCarSetup
 
         CreateGlobalControl();
 
-        var car = BuildCarHierarchy();
-        CreateCamera(car);
-
-        Selection.activeGameObject = car;
-        EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
-        Debug.Log("[RVP] Placeholder car created at (0, 5, 0). Hit Play to test.");
+        return BuildCarHierarchy(position, rotation);
     }
 
     static void CreateCamera(GameObject car)
@@ -67,11 +71,12 @@ public static class PlaceholderCarSetup
             gc.frictionlessMat = frictionless;
     }
 
-    static GameObject BuildCarHierarchy()
+    static GameObject BuildCarHierarchy(Vector3 position, Quaternion rotation)
     {
         // Root ----------------------------------------------------------------
         var car = new GameObject("PlaceholderCar");
-        car.transform.position = new Vector3(0, 5, 0);
+        car.transform.position = position;
+        car.transform.rotation = rotation;
 
         var rb     = car.AddComponent<Rigidbody>();
         rb.mass    = 1200f;
