@@ -117,25 +117,27 @@ namespace SFMap.Pipeline
             int open = wkt.IndexOf('(');
             int close = wkt.LastIndexOf(')');
             if (open < 0 || close < 0) yield break;
-            var inner = wkt.AsSpan(open + 1, close - open - 1);
+            string inner = wkt.Substring(open + 1, close - open - 1);
 
             int start = 0;
             while (start < inner.Length)
             {
-                int comma = inner.Slice(start).IndexOf(',');
-                var pair = comma < 0 ? inner.Slice(start) : inner.Slice(start, comma);
+                int commaAbs = inner.IndexOf(',', start);
+                string pair = commaAbs < 0
+                    ? inner.Substring(start)
+                    : inner.Substring(start, commaAbs - start);
                 pair = pair.Trim();
 
                 int space = pair.IndexOf(' ');
                 if (space > 0 &&
-                    double.TryParse(pair.Slice(0, space), NumberStyles.Float, CultureInfo.InvariantCulture, out double lon) &&
-                    double.TryParse(pair.Slice(space + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out double lat))
+                    double.TryParse(pair.Substring(0, space), NumberStyles.Float, CultureInfo.InvariantCulture, out double lon) &&
+                    double.TryParse(pair.Substring(space + 1), NumberStyles.Float, CultureInfo.InvariantCulture, out double lat))
                 {
                     yield return (lon, lat);
                 }
 
-                if (comma < 0) break;
-                start += comma + 1;
+                if (commaAbs < 0) break;
+                start = commaAbs + 1;
             }
         }
 
