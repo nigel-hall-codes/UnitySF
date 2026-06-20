@@ -15,6 +15,8 @@ public static class PlaceholderCarSetup
     {
         EnsureLayer("Ignore Wheel Cast");
         EnsureLayer("Detachable Part");
+        EnsureTag("Underside");
+        EnsureTag("Pop Tire");
         EnsureInputButton("e");
         EnsureInputButton("q");
 
@@ -195,6 +197,24 @@ public static class PlaceholderCarSetup
     };
 
     // -------------------------------------------------------------------------
+
+    static void EnsureTag(string tagName)
+    {
+        var tagManager = new SerializedObject(
+            AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset")[0]);
+        var tags = tagManager.FindProperty("tags");
+
+        for (int i = 0; i < tags.arraySize; i++)
+        {
+            if (tags.GetArrayElementAtIndex(i).stringValue == tagName)
+                return;
+        }
+
+        tags.InsertArrayElementAtIndex(tags.arraySize);
+        tags.GetArrayElementAtIndex(tags.arraySize - 1).stringValue = tagName;
+        tagManager.ApplyModifiedProperties();
+        Debug.Log($"[RVP] Added tag '{tagName}'");
+    }
 
     static void EnsureLayer(string layerName)
     {
