@@ -10,17 +10,18 @@ namespace SFMap.Pipeline
     // Requires HeightmapData (from ElevationParser) for base-Y sampling.
     public static class BuildingGenerator
     {
-        public static void Generate(
+        public static GameObject Generate(
             IReadOnlyList<BuildingWay> buildings,
             HeightmapData heightmap,
             ChunkBounds chunk,
-            ChunkCoord coord)
+            ChunkCoord coord,
+            float defaultBuildingHeight = 10f)
         {
             var parent = new GameObject("Buildings");
 
             foreach (var b in buildings)
             {
-                var mesh = GenerateMesh(b, heightmap, chunk, coord);
+                var mesh = GenerateMesh(b, heightmap, chunk, coord, defaultBuildingHeight);
                 if (mesh == null) continue;
 
                 var go = new GameObject($"building_{b.OsmId}");
@@ -33,9 +34,11 @@ namespace SFMap.Pipeline
 #if UNITY_EDITOR
             AssetDatabase.SaveAssets();
 #endif
+            return parent;
         }
 
-        static Mesh GenerateMesh(BuildingWay b, HeightmapData heightmap, ChunkBounds chunk, ChunkCoord coord)
+        static Mesh GenerateMesh(BuildingWay b, HeightmapData heightmap, ChunkBounds chunk, ChunkCoord coord,
+            float defaultBuildingHeight)
         {
             // Trim closing vertex if OSM polygon is closed (first == last node)
             int n = b.Footprint.Length;
@@ -52,8 +55,9 @@ namespace SFMap.Pipeline
             for (int i = 0; i < n; i++) { cx += b.Footprint[poly[i]].x; cz += b.Footprint[poly[i]].z; }
             cx /= n; cz /= n;
 
-            float baseY = SampleTerrainHeight(cx, cz, heightmap, chunk);
-            float topY  = baseY + b.Height;
+            float baseY  = SampleTerrainHeight(cx, cz, heightmap, chunk);
+            float height = b.Height > 0f ? b.Height : defaultBuildingHeight;
+            float topY   = baseY + height;
 
             var verts = new List<Vector3>();
             var tris  = new List<int>();

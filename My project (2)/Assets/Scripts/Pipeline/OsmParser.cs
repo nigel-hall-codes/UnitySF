@@ -175,7 +175,7 @@ namespace SFMap.Pipeline
                     .ToArray();
                 if (footprint.Length < 3) continue;
 
-                float height = 10f;
+                float height = 0f;
                 if (tags.TryGetValue("building:levels", out var lvlStr) &&
                     float.TryParse(lvlStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float lvl))
                     height = lvl * 3.5f;
