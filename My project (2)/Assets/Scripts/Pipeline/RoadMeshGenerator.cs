@@ -13,7 +13,8 @@ namespace SFMap.Pipeline
             StreetGraph graph,
             HeightmapData heightmap,
             Rect worldRect,
-            ChunkCoord coord)
+            ChunkCoord coord,
+            IReadOnlyDictionary<StreetEdge, (float from, float to)> setbacks = null)
         {
             var meshes = new List<Mesh>();
 
@@ -26,9 +27,17 @@ namespace SFMap.Pipeline
                 {
                     if (edge.Width <= 0f) continue;
 
+                    float fromSetback = 0f, toSetback = 0f;
+                    if (setbacks != null && setbacks.TryGetValue(edge, out var sb))
+                    {
+                        fromSetback = sb.from;
+                        toSetback   = sb.to;
+                    }
+
                     Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
-                    StampFootprint(edge, stamped, heightmap, worldRect);
-                    Mesh mesh = BuildMesh(edge, stamped);
+                    Vector3[] trimmed = TrimCenterline(stamped, fromSetback, toSetback);
+                    StampFootprint(edge, trimmed, heightmap, worldRect);
+                    Mesh mesh = BuildMesh(edge, trimmed);
 
 #if UNITY_EDITOR
                     SaveMesh(mesh, coord, edge.OsmWayId);
@@ -102,6 +111,46 @@ namespace SFMap.Pipeline
                     }
                 }
             }
+        }
+
+        // Trims fromDist meters from the start and toDist meters from the end of a centerline,
+        // inserting interpolated endpoints so the road mesh stops exactly at the intersection boundary.
+        static Vector3[] TrimCenterline(Vector3[] cl, float fromDist, float toDist)
+        {
+            if (fromDist <= 0f && toDist <= 0f) return cl;
+
+            int n = cl.Length;
+            var arc = new float[n];
+            for (int i = 1; i < n; i++)
+                arc[i] = arc[i - 1] + Vector3.Distance(cl[i - 1], cl[i]);
+
+            float total    = arc[n - 1];
+            float startArc = fromDist;
+            float endArc   = total - toDist;
+
+            if (endArc - startArc < 0.01f) return cl; // degenerate: road fully inside intersections
+
+            var result = new List<Vector3> { SampleAtArc(cl, arc, startArc) };
+            for (int i = 0; i < n; i++)
+                if (arc[i] > startArc && arc[i] < endArc)
+                    result.Add(cl[i]);
+            result.Add(SampleAtArc(cl, arc, endArc));
+
+            return result.ToArray();
+        }
+
+        static Vector3 SampleAtArc(Vector3[] cl, float[] arc, float target)
+        {
+            for (int i = 1; i < cl.Length; i++)
+            {
+                if (arc[i] >= target)
+                {
+                    float segLen = arc[i] - arc[i - 1];
+                    float t = segLen < 1e-6f ? 0f : (target - arc[i - 1]) / segLen;
+                    return Vector3.Lerp(cl[i - 1], cl[i], t);
+                }
+            }
+            return cl[cl.Length - 1];
         }
 
         // Builds a quad-strip mesh along the stamped centerline.

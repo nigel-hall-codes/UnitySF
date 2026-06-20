@@ -109,11 +109,15 @@ namespace SFMap.Pipeline
             foreach (var (nid, count) in refCounts)
             {
                 if (!rawNodes.TryGetValue(nid, out var raw)) continue;
+                bool isSignal = raw.tags.TryGetValue("highway", out var hwTag) && hwTag == "traffic_signals";
                 nodes[nid] = new StreetNode
                 {
                     OsmId = nid,
                     WorldPosition = GeoProjection.ToWorldPoint(raw.lon, raw.lat),
                     IsIntersection = count >= 2,
+                    TrafficControl = count >= 2
+                        ? (isSignal ? IntersectionType.TrafficSignals : IntersectionType.StopSign)
+                        : (IntersectionType?)null,
                 };
             }
             return nodes;
