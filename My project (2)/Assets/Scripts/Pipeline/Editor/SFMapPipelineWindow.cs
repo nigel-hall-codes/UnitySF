@@ -121,10 +121,13 @@ namespace SFMap.Pipeline.Editor
             // Roads and intersections share the road surface material
             var roadMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
 
+            int roadLayer = LayerMask.NameToLayer("Road");
             var roadParent = CreateChild(root, "Roads");
             foreach (var mesh in roadMeshes)
             {
-                PlaceMesh(mesh, roadParent, roadMat);
+                var go = PlaceMesh(mesh, roadParent, roadMat);
+                go.AddComponent<MeshCollider>().sharedMesh = mesh;
+                go.layer = roadLayer;
                 count++;
             }
 
@@ -156,12 +159,13 @@ namespace SFMap.Pipeline.Editor
             return go;
         }
 
-        static void PlaceMesh(Mesh mesh, GameObject parent, Material mat)
+        static GameObject PlaceMesh(Mesh mesh, GameObject parent, Material mat)
         {
             var go = new GameObject(mesh.name);
             go.transform.SetParent(parent.transform, false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            return go;
         }
 
         void ClearGenerated()
