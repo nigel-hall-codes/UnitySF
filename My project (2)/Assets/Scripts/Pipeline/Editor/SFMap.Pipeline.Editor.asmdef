@@ -2,7 +2,8 @@
     "name": "SFMap.Pipeline.Editor",
     "rootNamespace": "SFMap.Pipeline.Editor",
     "references": [
-        "SFMap.Pipeline"
+        "SFMap.Pipeline",
+        "RandomationVP"
     ],
     "includePlatforms": [
         "Editor"
