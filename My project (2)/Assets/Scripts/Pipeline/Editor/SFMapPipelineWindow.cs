@@ -61,22 +61,24 @@ namespace SFMap.Pipeline.Editor
                 var coord     = new ChunkCoord(0, 0);
                 var chunk     = new ChunkBounds { Coord = coord, WorldRect = worldRect };
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating terrain…", 0.30f);
-                var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
-
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.42f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.30f);
                 var setbacks = IntersectionMeshGenerator.ComputeSetbacks(graph);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.50f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.42f);
                 var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, setbacks, roadWidthMultiplier);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.62f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.55f);
                 var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, heightmap, worldRect, coord);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating sidewalk meshes…", 0.74f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating sidewalk meshes…", 0.67f);
                 var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, worldRect, coord);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating buildings…", 0.86f);
+                // Terrain is generated after all road/intersection stamps have been written back
+                // into heightmap.Values, so the Unity terrain asset reflects the flattened footprints.
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating terrain…", 0.78f);
+                var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
+
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating buildings…", 0.87f);
                 var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Building scene…", 0.95f);
