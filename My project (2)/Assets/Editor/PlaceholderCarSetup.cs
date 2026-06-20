@@ -13,6 +13,15 @@ public static class PlaceholderCarSetup
     [MenuItem("RVP/Create Placeholder Car")]
     static void Create()
     {
+        var car = CreateAt(new Vector3(0, 5, 0), Quaternion.identity);
+        CreateCamera(car);
+        Selection.activeGameObject = car;
+        EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+        Debug.Log("[RVP] Placeholder car created at (0, 5, 0). Hit Play to test.");
+    }
+
+    public static GameObject CreateAt(Vector3 position, Quaternion rotation)
+    {
         EnsureLayer("Ignore Wheel Cast");
         EnsureLayer("Detachable Part");
         EnsureTag("Underside");
@@ -22,11 +31,21 @@ public static class PlaceholderCarSetup
 
         CreateGlobalControl();
 
-        var car = BuildCarHierarchy();
+        return BuildCarHierarchy(position, rotation);
+    }
 
-        Selection.activeGameObject = car;
-        EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
-        Debug.Log("[RVP] Placeholder car created at (0, 5, 0). Hit Play to test.");
+    static void CreateCamera(GameObject car)
+    {
+        var camGo = new GameObject("Camera");
+        camGo.AddComponent<Camera>();
+        camGo.AddComponent<AudioListener>();
+        var cc          = camGo.AddComponent<CameraControl>();
+        cc.target       = car.transform;
+        cc.height       = 3f;
+        cc.distance     = 7f;
+        cc.stayFlat     = true;
+        cc.castMask     = LayerMask.GetMask("Default", "Terrain");
+        camGo.AddComponent<BasicCameraInput>();
     }
 
     // -------------------------------------------------------------------------
@@ -52,11 +71,12 @@ public static class PlaceholderCarSetup
             gc.frictionlessMat = frictionless;
     }
 
-    static GameObject BuildCarHierarchy()
+    static GameObject BuildCarHierarchy(Vector3 position, Quaternion rotation)
     {
         // Root ----------------------------------------------------------------
         var car = new GameObject("PlaceholderCar");
-        car.transform.position = new Vector3(0, 5, 0);
+        car.transform.position = position;
+        car.transform.rotation = rotation;
 
         var rb     = car.AddComponent<Rigidbody>();
         rb.mass    = 1200f;
