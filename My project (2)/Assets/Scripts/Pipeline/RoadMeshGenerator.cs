@@ -78,6 +78,10 @@ namespace SFMap.Pipeline
             float cellH = worldRect.height / (res - 1);
             float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
             if (elevRange < 0.001f) elevRange = 1f;
+            // Expand the stamp by half a cell diagonal so cells that are only partially
+            // covered by the road mesh still get flattened, preventing terrain bleed at edges.
+            float pad = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
+            float stampW = halfW + pad;
 
             for (int seg = 0; seg < centerline.Length - 1; seg++)
             {
@@ -90,10 +94,10 @@ namespace SFMap.Pipeline
                 Vector2 dirN = dir2 / segLen;
                 Vector2 perp = new Vector2(-dirN.y, dirN.x);
 
-                int colMin = Mathf.Max(0,       Mathf.FloorToInt((Mathf.Min(p0.x, p1.x) - halfW - worldRect.x) / cellW));
-                int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((Mathf.Max(p0.x, p1.x) + halfW - worldRect.x) / cellW));
-                int rowMin = Mathf.Max(0,       Mathf.FloorToInt((Mathf.Min(p0.z, p1.z) - halfW - worldRect.y) / cellH));
-                int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((Mathf.Max(p0.z, p1.z) + halfW - worldRect.y) / cellH));
+                int colMin = Mathf.Max(0,       Mathf.FloorToInt((Mathf.Min(p0.x, p1.x) - stampW - worldRect.x) / cellW));
+                int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((Mathf.Max(p0.x, p1.x) + stampW - worldRect.x) / cellW));
+                int rowMin = Mathf.Max(0,       Mathf.FloorToInt((Mathf.Min(p0.z, p1.z) - stampW - worldRect.y) / cellH));
+                int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((Mathf.Max(p0.z, p1.z) + stampW - worldRect.y) / cellH));
 
                 for (int row = rowMin; row <= rowMax; row++)
                 {
@@ -104,7 +108,7 @@ namespace SFMap.Pipeline
                         var toP = new Vector2(wx - p0.x, wz - p0.z);
                         float along   = Vector2.Dot(toP, dirN);
                         float lateral = Mathf.Abs(Vector2.Dot(toP, perp));
-                        if (along < 0f || along > segLen || lateral > halfW) continue;
+                        if (along < -pad || along > segLen + pad || lateral > stampW) continue;
 
                         float t = along / segLen;
                         float elev = Mathf.Lerp(p0.y, p1.y, t);
