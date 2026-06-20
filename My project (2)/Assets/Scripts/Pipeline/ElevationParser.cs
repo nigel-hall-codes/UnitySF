@@ -296,7 +296,7 @@ namespace SFMap.Pipeline
             float d20 = Vector2.Dot(v2, v0);
             float d21 = Vector2.Dot(v2, v1);
             float denom = d00 * d11 - d01 * d01;
-            if (denom < 1e-10f) { u = v = w = 0f; return false; }
+            if (Mathf.Abs(denom) < 1e-10f) { u = v = w = 0f; return false; }
             v = (d11 * d20 - d01 * d21) / denom;
             w = (d00 * d21 - d01 * d20) / denom;
             u = 1f - v - w;
