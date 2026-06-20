@@ -23,10 +23,25 @@ public static class PlaceholderCarSetup
         CreateGlobalControl();
 
         var car = BuildCarHierarchy();
+        CreateCamera(car);
 
         Selection.activeGameObject = car;
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         Debug.Log("[RVP] Placeholder car created at (0, 5, 0). Hit Play to test.");
+    }
+
+    static void CreateCamera(GameObject car)
+    {
+        var camGo = new GameObject("Camera");
+        camGo.AddComponent<Camera>();
+        camGo.AddComponent<AudioListener>();
+        var cc          = camGo.AddComponent<CameraControl>();
+        cc.target       = car.transform;
+        cc.height       = 3f;
+        cc.distance     = 7f;
+        cc.stayFlat     = true;
+        cc.castMask     = LayerMask.GetMask("Default", "Terrain");
+        camGo.AddComponent<BasicCameraInput>();
     }
 
     // -------------------------------------------------------------------------
