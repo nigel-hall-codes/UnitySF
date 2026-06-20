@@ -17,19 +17,33 @@ namespace SFMap.Pipeline
         {
             var meshes = new List<Mesh>();
 
-            foreach (var edge in graph.Edges)
+#if UNITY_EDITOR
+            AssetDatabase.StartAssetEditing();
+            try
             {
-                if (edge.Width <= 0f) continue;
+#endif
+                foreach (var edge in graph.Edges)
+                {
+                    if (edge.Width <= 0f) continue;
 
-                Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
-                StampFootprint(edge, stamped, heightmap, worldRect);
-                Mesh mesh = BuildMesh(edge, stamped);
+                    Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
+                    StampFootprint(edge, stamped, heightmap, worldRect);
+                    Mesh mesh = BuildMesh(edge, stamped);
 
 #if UNITY_EDITOR
-                SaveMesh(mesh, coord, edge.OsmWayId);
+                    SaveMesh(mesh, coord, edge.OsmWayId);
 #endif
-                meshes.Add(mesh);
+                    meshes.Add(mesh);
+                }
+#if UNITY_EDITOR
             }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+            }
+            EnsureMaterial();
+            AssetDatabase.SaveAssets();
+#endif
 
             return meshes;
         }
@@ -171,8 +185,17 @@ namespace SFMap.Pipeline
             string dir = $"{GeneratedAssets.ChunkDir(coord)}/Roads";
             EnsureFolder(dir);
             AssetDatabase.CreateAsset(mesh, GeneratedAssets.RoadMesh(coord, osmWayId));
-            AssetDatabase.SaveAssets();
             Debug.Log($"[RoadMeshGenerator] Saved Roads/road_{osmWayId}.mesh");
+        }
+
+        static void EnsureMaterial()
+        {
+            string path = GeneratedAssets.RoadMaterial();
+            if (AssetDatabase.LoadAssetAtPath<Material>(path) != null) return;
+            EnsureFolder(System.IO.Path.GetDirectoryName(path).Replace('\\', '/'));
+            var mat = new Material(Shader.Find("Standard")) { name = "RoadSurface", color = new Color(0.5f, 0.5f, 0.5f) };
+            AssetDatabase.CreateAsset(mat, path);
+            Debug.Log($"[RoadMeshGenerator] Created {path}");
         }
 
         static void EnsureFolder(string path)
