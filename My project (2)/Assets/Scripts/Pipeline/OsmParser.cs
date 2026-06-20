@@ -109,11 +109,15 @@ namespace SFMap.Pipeline
             foreach (var (nid, count) in refCounts)
             {
                 if (!rawNodes.TryGetValue(nid, out var raw)) continue;
+                bool isSignal = raw.tags.TryGetValue("highway", out var hwTag) && hwTag == "traffic_signals";
                 nodes[nid] = new StreetNode
                 {
                     OsmId = nid,
                     WorldPosition = GeoProjection.ToWorldPoint(raw.lon, raw.lat),
                     IsIntersection = count >= 2,
+                    TrafficControl = count >= 2
+                        ? (isSignal ? IntersectionType.TrafficSignals : IntersectionType.StopSign)
+                        : (IntersectionType?)null,
                 };
             }
             return nodes;
@@ -171,7 +175,7 @@ namespace SFMap.Pipeline
                     .ToArray();
                 if (footprint.Length < 3) continue;
 
-                float height = 10f;
+                float height = 0f;
                 if (tags.TryGetValue("building:levels", out var lvlStr) &&
                     float.TryParse(lvlStr, NumberStyles.Float, CultureInfo.InvariantCulture, out float lvl))
                     height = lvl * 3.5f;

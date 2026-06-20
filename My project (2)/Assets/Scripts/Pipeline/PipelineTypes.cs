@@ -37,5 +37,7 @@ namespace SFMap.Pipeline
         public static string IntersectionMesh(ChunkCoord c, long id) => $"{ChunkDir(c)}/Intersections/intersection_{id}.mesh";
         public static string SidewalkMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Sidewalks/sidewalk_{id}.mesh";
         public static string BuildingMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Buildings/building_{id}.mesh";
+        public static string RoadMaterial()                          => $"{Root}/Materials/RoadSurface.mat";
+        public static string SidewalkMaterial()                      => $"{Root}/Materials/SidewalkSurface.mat";
     }
 }

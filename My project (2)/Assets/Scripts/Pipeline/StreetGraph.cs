@@ -4,12 +4,14 @@ using UnityEngine;
 
 namespace SFMap.Pipeline
 {
+    public enum IntersectionType { StopSign, TrafficSignals }
+
     public class StreetNode
     {
         public long OsmId;
         public Vector3 WorldPosition;
         public bool IsIntersection;
-        public HighwayType? TrafficControl;
+        public IntersectionType? TrafficControl;
     }
 
     public class StreetEdge
