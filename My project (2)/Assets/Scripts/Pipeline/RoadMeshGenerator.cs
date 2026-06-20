@@ -165,6 +165,8 @@ namespace SFMap.Pipeline
             return cl[cl.Length - 1];
         }
 
+        const float Raise = 0.05f;
+
         // Builds a quad-strip mesh along the stamped centerline.
         static Mesh BuildMesh(StreetEdge edge, Vector3[] centerline, float widthMultiplier = 1f)
         {
@@ -190,8 +192,9 @@ namespace SFMap.Pipeline
                 else                 fwd = (centerline[i + 1]  - centerline[i - 1]).normalized;
 
                 Vector3 right = Vector3.Cross(Vector3.up, fwd).normalized;
-                verts[i * 2]     = centerline[i] - right * halfW;
-                verts[i * 2 + 1] = centerline[i] + right * halfW;
+                Vector3 center = centerline[i] + Vector3.up * Raise;
+                verts[i * 2]     = center - right * halfW;
+                verts[i * 2 + 1] = center + right * halfW;
 
                 float v = arcLen[i] / totalLen;
                 uvs[i * 2]     = new Vector2(0f, v);
