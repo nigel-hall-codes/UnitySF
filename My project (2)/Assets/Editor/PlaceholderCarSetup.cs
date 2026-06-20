@@ -15,6 +15,8 @@ public static class PlaceholderCarSetup
     {
         EnsureLayer("Ignore Wheel Cast");
         EnsureLayer("Detachable Part");
+        EnsureInputButton("e");
+        EnsureInputButton("q");
 
         CreateGlobalControl();
 
@@ -219,6 +221,39 @@ public static class PlaceholderCarSetup
         }
 
         Debug.LogWarning($"[RVP] Could not add layer '{layerName}': no empty user-layer slots.");
+    }
+
+    static void EnsureInputButton(string buttonName)
+    {
+        var inputManager = new SerializedObject(
+            AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/InputManager.asset")[0]);
+        var axes = inputManager.FindProperty("m_Axes");
+
+        for (int i = 0; i < axes.arraySize; i++)
+        {
+            if (axes.GetArrayElementAtIndex(i).FindPropertyRelative("m_Name").stringValue == buttonName)
+                return;
+        }
+
+        axes.InsertArrayElementAtIndex(axes.arraySize);
+        var entry = axes.GetArrayElementAtIndex(axes.arraySize - 1);
+        entry.FindPropertyRelative("m_Name").stringValue            = buttonName;
+        entry.FindPropertyRelative("descriptiveName").stringValue    = "";
+        entry.FindPropertyRelative("descriptiveNegativeName").stringValue = "";
+        entry.FindPropertyRelative("negativeButton").stringValue     = "";
+        entry.FindPropertyRelative("positiveButton").stringValue     = buttonName;
+        entry.FindPropertyRelative("altNegativeButton").stringValue  = "";
+        entry.FindPropertyRelative("altPositiveButton").stringValue  = "";
+        entry.FindPropertyRelative("gravity").floatValue             = 1000f;
+        entry.FindPropertyRelative("dead").floatValue                = 0.001f;
+        entry.FindPropertyRelative("sensitivity").floatValue         = 1000f;
+        entry.FindPropertyRelative("snap").boolValue                 = false;
+        entry.FindPropertyRelative("invert").boolValue               = false;
+        entry.FindPropertyRelative("type").intValue                  = 0; // Key/Mouse button
+        entry.FindPropertyRelative("axis").intValue                  = 0;
+        entry.FindPropertyRelative("joyNum").intValue                = 0;
+        inputManager.ApplyModifiedProperties();
+        Debug.Log($"[RVP] Added input button '{buttonName}'");
     }
 }
 #endif
