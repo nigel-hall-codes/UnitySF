@@ -55,6 +55,13 @@ namespace SFMap.Pipeline
             public float   Angle; // atan2(z, x) for CCW sort
         }
 
+        struct EdgeArm
+        {
+            public Arm        Arm;
+            public StreetEdge Edge;
+            public bool       IsFrom;
+        }
+
         static Mesh BuildIntersectionMesh(
             StreetNode node, StreetGraph graph,
             HeightmapData heightmap, Rect worldRect)
@@ -78,40 +85,47 @@ namespace SFMap.Pipeline
             return TriangulateFan(node.OsmId, center, poly);
         }
 
-        static List<Arm> CollectArms(StreetNode node, StreetGraph graph)
+        static List<EdgeArm> CollectEdgeArms(StreetNode node, StreetGraph graph)
         {
-            var arms = new List<Arm>();
+            var arms = new List<EdgeArm>();
             foreach (var edge in graph.Edges)
             {
                 if (edge.Width <= 0f) continue;
-
                 Vector3[] cl = edge.Centerline;
                 Vector2 dir;
+                bool isFrom;
 
                 if (edge.From == node && cl.Length >= 2)
                 {
                     Vector3 d = cl[1] - cl[0];
-                    dir = new Vector2(d.x, d.z).normalized;
+                    dir    = new Vector2(d.x, d.z).normalized;
+                    isFrom = true;
                 }
                 else if (edge.To == node && cl.Length >= 2)
                 {
                     Vector3 d = cl[cl.Length - 2] - cl[cl.Length - 1];
-                    dir = new Vector2(d.x, d.z).normalized;
+                    dir    = new Vector2(d.x, d.z).normalized;
+                    isFrom = false;
                 }
-                else
-                {
-                    continue;
-                }
+                else continue;
 
                 if (dir.sqrMagnitude < 0.0001f) continue;
 
-                arms.Add(new Arm
+                arms.Add(new EdgeArm
                 {
-                    Dir       = dir,
-                    HalfWidth = edge.Width * 0.5f,
-                    Angle     = Mathf.Atan2(dir.y, dir.x),
+                    Arm    = new Arm { Dir = dir, HalfWidth = edge.Width * 0.5f, Angle = Mathf.Atan2(dir.y, dir.x) },
+                    Edge   = edge,
+                    IsFrom = isFrom,
                 });
             }
+            return arms;
+        }
+
+        static List<Arm> CollectArms(StreetNode node, StreetGraph graph)
+        {
+            var edgeArms = CollectEdgeArms(node, graph);
+            var arms = new List<Arm>(edgeArms.Count);
+            foreach (var ea in edgeArms) arms.Add(ea.Arm);
             return arms;
         }
 
@@ -203,6 +217,86 @@ namespace SFMap.Pipeline
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        // Returns the setback distances (meters) along each road arm needed to clear the
+        // intersection polygon at node. Called once per adjacent arm pair per join.
+        // tA = distance along arm A's centerline, tB = distance along arm B's centerline.
+        static (float tA, float tB) JoinSetbacks(Arm a, Arm b)
+        {
+            Vector2 perpLeftA  = new Vector2(-a.Dir.y,  a.Dir.x);
+            Vector2 perpRightB = new Vector2( b.Dir.y, -b.Dir.x);
+            Vector2 pa = perpLeftA  * a.HalfWidth;
+            Vector2 pb = perpRightB * b.HalfWidth;
+
+            float dax = a.Dir.x, daz = a.Dir.y;
+            float dbx = b.Dir.x, dbz = b.Dir.y;
+            float det = -dax * dbz + daz * dbx;
+
+            if (Mathf.Abs(det) < 1e-6f)
+            {
+                // Parallel arms — use bevel threshold as fallback
+                return (
+                    Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth)),
+                    Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth))
+                );
+            }
+
+            float dx = pb.x - pa.x;
+            float dz = pb.y - pa.y;
+            // t: param along a.Dir to the join point (Cramer's rule on [da | -db] * [t;s] = pb-pa)
+            float t = (-dx * dbz + dz * dbx) / det;
+            // s: param along b.Dir to the join point
+            float s = ( dax * dz - daz * dx) / det;
+
+            if ((pa + t * a.Dir).magnitude <= BevelThreshold)
+                return (Mathf.Max(0f, t), Mathf.Max(0f, s));
+
+            // Bevel: each arm's vertex is at sqrt(threshold² - halfWidth²) along its direction
+            return (
+                Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth)),
+                Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth))
+            );
+        }
+
+        /// <summary>
+        /// Returns the road setback at each end of every StreetEdge.
+        /// Pass the result to RoadMeshGenerator.Generate() so road quads don't overlap
+        /// intersection polygons.
+        /// </summary>
+        public static Dictionary<StreetEdge, (float from, float to)> ComputeSetbacks(StreetGraph graph)
+        {
+            var result = new Dictionary<StreetEdge, (float from, float to)>();
+
+            foreach (var node in graph.IntersectionNodes)
+            {
+                var edgeArms = CollectEdgeArms(node, graph);
+                if (edgeArms.Count < 2) continue;
+                edgeArms.Sort((a, b) => a.Arm.Angle.CompareTo(b.Arm.Angle));
+
+                int n = edgeArms.Count;
+                var perArm = new float[n];
+
+                for (int i = 0; i < n; i++)
+                {
+                    int j = (i + 1) % n;
+                    (float tA, float tB) = JoinSetbacks(edgeArms[i].Arm, edgeArms[j].Arm);
+                    perArm[i] = Mathf.Max(perArm[i], tA);
+                    perArm[j] = Mathf.Max(perArm[j], tB);
+                }
+
+                for (int i = 0; i < n; i++)
+                {
+                    var ea = edgeArms[i];
+                    result.TryGetValue(ea.Edge, out var pair);
+                    float d = perArm[i];
+                    result[ea.Edge] = ea.IsFrom
+                        ? (Mathf.Max(pair.from, d), pair.to)
+                        : (pair.from, Mathf.Max(pair.to, d));
+                }
+            }
+
+            return result;
         }
 
         // Bilinear elevation sample — identical to RoadMeshGenerator.SampleElevation.

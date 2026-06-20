@@ -182,5 +182,51 @@ namespace SFMap.Tests
             var meshes = RoadMeshGenerator.Generate(graph, hm, worldRect, TestCoord);
             Assert.AreEqual(2, meshes.Count, "Footway should be excluded; 2 driveable edges → 2 meshes");
         }
+
+        // ---- setback / trimming tests ----
+
+        [Test]
+        public void Generate_WithFromSetback_MeshStartsAtSetbackDistance()
+        {
+            // Road from (0,0,0) to (20,0,0). Setback at From = 3m → first cross-section at x ≈ 3.
+            var (graph, hm, rect) = FlatSetup(Vector3.zero, new Vector3(20f, 0f, 0f));
+            StreetEdge edge = graph.Edges[0];
+
+            var setbacks = new Dictionary<StreetEdge, (float from, float to)> { [edge] = (3f, 0f) };
+            var meshes = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord, setbacks);
+
+            Assert.AreEqual(1, meshes.Count);
+            Vector3[] verts = meshes[0].vertices;
+            // 2-point trimmed centerline → 4 verts. First two are the start cross-section.
+            Assert.AreEqual(4, verts.Length);
+            Assert.AreEqual(3f, verts[0].x, 0.01f, "Left vert of start cross-section at x = fromSetback");
+            Assert.AreEqual(3f, verts[1].x, 0.01f, "Right vert of start cross-section at x = fromSetback");
+        }
+
+        [Test]
+        public void Generate_WithToSetback_MeshEndsAtSetbackDistance()
+        {
+            // Road from (0,0,0) to (20,0,0). Setback at To = 4m → last cross-section at x ≈ 16.
+            var (graph, hm, rect) = FlatSetup(Vector3.zero, new Vector3(20f, 0f, 0f));
+            StreetEdge edge = graph.Edges[0];
+
+            var setbacks = new Dictionary<StreetEdge, (float from, float to)> { [edge] = (0f, 4f) };
+            var meshes = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord, setbacks);
+
+            Vector3[] verts = meshes[0].vertices;
+            float endX = (verts[verts.Length - 2].x + verts[verts.Length - 1].x) * 0.5f;
+            Assert.AreEqual(16f, endX, 0.01f, "Last cross-section at total - toSetback");
+        }
+
+        [Test]
+        public void Generate_NullSetbacks_SameVertexCountAsNoParam()
+        {
+            var (graph, hm, rect) = FlatSetup(Vector3.zero, new Vector3(20f, 0f, 0f));
+            var meshesA = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord);
+            var hm2 = new HeightmapData { Values = new float[9, 9], Resolution = 9,
+                MinElevationMeters = 0f, MaxElevationMeters = 10f };
+            var meshesB = RoadMeshGenerator.Generate(graph, hm2, rect, TestCoord, null);
+            Assert.AreEqual(meshesA[0].vertexCount, meshesB[0].vertexCount);
+        }
     }
 }
