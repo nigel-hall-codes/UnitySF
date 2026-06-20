@@ -61,22 +61,24 @@ namespace SFMap.Pipeline.Editor
                 var coord     = new ChunkCoord(0, 0);
                 var chunk     = new ChunkBounds { Coord = coord, WorldRect = worldRect };
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating terrain…", 0.30f);
-                var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
-
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.42f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.30f);
                 var setbacks = IntersectionMeshGenerator.ComputeSetbacks(graph);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.50f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.42f);
                 var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, setbacks, roadWidthMultiplier);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.62f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.55f);
                 var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, heightmap, worldRect, coord);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating sidewalk meshes…", 0.74f);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating sidewalk meshes…", 0.67f);
                 var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, worldRect, coord);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating buildings…", 0.86f);
+                // Terrain is generated after all road/intersection stamps have been written back
+                // into heightmap.Values, so the Unity terrain asset reflects the flattened footprints.
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating terrain…", 0.78f);
+                var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
+
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating buildings…", 0.87f);
                 var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Building scene…", 0.95f);
@@ -121,10 +123,13 @@ namespace SFMap.Pipeline.Editor
             // Roads and intersections share the road surface material
             var roadMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
 
+            int roadLayer = LayerMask.NameToLayer("Road");
             var roadParent = CreateChild(root, "Roads");
             foreach (var mesh in roadMeshes)
             {
-                PlaceMesh(mesh, roadParent, roadMat);
+                var go = PlaceMesh(mesh, roadParent, roadMat);
+                go.AddComponent<MeshCollider>().sharedMesh = mesh;
+                go.layer = roadLayer;
                 count++;
             }
 
@@ -156,12 +161,13 @@ namespace SFMap.Pipeline.Editor
             return go;
         }
 
-        static void PlaceMesh(Mesh mesh, GameObject parent, Material mat)
+        static GameObject PlaceMesh(Mesh mesh, GameObject parent, Material mat)
         {
             var go = new GameObject(mesh.name);
             go.transform.SetParent(parent.transform, false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            return go;
         }
 
         void ClearGenerated()
