@@ -12,7 +12,7 @@ namespace SFMap.Pipeline
     public static class SidewalkMeshGenerator
     {
         const float Width = 1.5f;
-        const float Raise = 0.05f;
+        const float Raise = 0.10f;
 
         public static IReadOnlyList<Mesh> Generate(
             StreetGraph graph,
