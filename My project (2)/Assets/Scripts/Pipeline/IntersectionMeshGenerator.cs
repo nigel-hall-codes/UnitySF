@@ -90,7 +90,53 @@ namespace SFMap.Pipeline
                 ComputeJoin(arms[i], arms[(i + 1) % n], poly);
 
             if (poly.Count < 3) return null;
+
+            // Stamp terrain flat under the intersection polygon before terrain asset is built,
+            // so cells within the polygon area are at node elevation rather than the original
+            // hill contour, preventing terrain from poking through the flat intersection mesh.
+            float nodeElev = y - Raise;
+            StampCircle(node.WorldPosition.x, node.WorldPosition.z, poly, nodeElev, heightmap, worldRect);
+
             return TriangulateFan(node.OsmId, center, poly);
+        }
+
+        // Stamps all heightmap cells within the intersection polygon's bounding circle to elevation.
+        // Uses a circle (radius = max polygon vertex distance + half-cell diagonal) rather than exact
+        // polygon containment — the over-stamp is safe because road/intersection meshes cover it.
+        static void StampCircle(float cx, float cz, List<Vector2> poly, float elevation,
+            HeightmapData heightmap, Rect worldRect)
+        {
+            float maxR = 0f;
+            foreach (var p in poly) maxR = Mathf.Max(maxR, p.magnitude);
+
+            int   res  = heightmap.Resolution;
+            float cellW = worldRect.width  / (res - 1);
+            float cellH = worldRect.height / (res - 1);
+            float pad   = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
+            float r     = maxR + pad;
+            float r2    = r * r;
+
+            float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
+            if (elevRange < 0.001f) elevRange = 1f;
+            float normalized = (elevation - heightmap.MinElevationMeters) / elevRange;
+
+            int colMin = Mathf.Max(0,       Mathf.FloorToInt((cx - r - worldRect.x) / cellW));
+            int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cx + r - worldRect.x) / cellW));
+            int rowMin = Mathf.Max(0,       Mathf.FloorToInt((cz - r - worldRect.y) / cellH));
+            int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cz + r - worldRect.y) / cellH));
+
+            for (int row = rowMin; row <= rowMax; row++)
+            {
+                float wz = worldRect.y + row * cellH;
+                float dz = wz - cz;
+                for (int col = colMin; col <= colMax; col++)
+                {
+                    float wx = worldRect.x + col * cellW;
+                    float dx = wx - cx;
+                    if (dx * dx + dz * dz > r2) continue;
+                    heightmap.Values[row, col] = normalized;
+                }
+            }
         }
 
         static List<EdgeArm> CollectEdgeArms(StreetNode node, StreetGraph graph)

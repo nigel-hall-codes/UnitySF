@@ -40,7 +40,9 @@ namespace SFMap.Pipeline
 
                     Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
                     Vector3[] trimmed = TrimCenterline(stamped, fromSetback, toSetback);
-                    StampFootprint(edge, trimmed, heightmap, worldRect, widthMultiplier);
+                    // Stamp the full (pre-setback) centerline so terrain near intersection nodes
+                    // is also flattened — the intersection mesh overwrites this area later.
+                    StampFootprint(edge, stamped, heightmap, worldRect, widthMultiplier);
                     Mesh mesh = BuildMesh(edge, trimmed, widthMultiplier);
 
 #if UNITY_EDITOR
@@ -75,6 +77,9 @@ namespace SFMap.Pipeline
             return out_;
         }
 
+        // Mirrors SidewalkMeshGenerator.Width; stamp must cover the full sidewalk footprint.
+        const float SidewalkWidth = 1.5f;
+
         // Flattens heightmap cells under the road to the interpolated road elevation.
         static void StampFootprint(StreetEdge edge, Vector3[] centerline,
             HeightmapData heightmap, Rect worldRect, float widthMultiplier = 1f)
@@ -85,10 +90,10 @@ namespace SFMap.Pipeline
             float cellH = worldRect.height / (res - 1);
             float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
             if (elevRange < 0.001f) elevRange = 1f;
-            // Expand the stamp by half a cell diagonal so cells that are only partially
-            // covered by the road mesh still get flattened, preventing terrain bleed at edges.
+            // Pad by sidewalk width + half-cell diagonal so terrain is flat under the full
+            // road-and-sidewalk footprint, preventing terrain bleed at the outer sidewalk edge.
             float pad = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
-            float stampW = halfW + pad;
+            float stampW = halfW + SidewalkWidth + pad;
 
             for (int seg = 0; seg < centerline.Length - 1; seg++)
             {
