@@ -1,0 +1,10 @@
+name: UnitySF
+version: 1.0.0
+description: APM project for UnitySF
+author: nigel-hall-codes
+dependencies:
+  apm:
+  - nigel-hall-codes/sdlc
+  mcp: []
+includes: auto
+scripts: {}

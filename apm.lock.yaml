@@ -1,0 +1,46 @@
+lockfile_version: '1'
+generated_at: '2026-06-20T01:50:51.495010+00:00'
+apm_version: 0.20.0
+dependencies:
+- repo_url: nigel-hall-codes/sdlc
+  host: github.com
+  resolved_commit: b918d1ca5705ab362ff3100f7bca34ffa546233c
+  package_type: hybrid
+  deployed_files:
+  - .claude/skills/sdlc
+  - .claude/skills/sdlc/.gitignore
+  - .claude/skills/sdlc/README.md
+  - .claude/skills/sdlc/SKILL.md
+  - .claude/skills/sdlc/apm.yml
+  - .claude/skills/sdlc/labels.md
+  - .claude/skills/sdlc/personas.md
+  - .claude/skills/sdlc/subcommands/analyze.md
+  - .claude/skills/sdlc/subcommands/capture.md
+  - .claude/skills/sdlc/subcommands/close.md
+  - .claude/skills/sdlc/subcommands/plan.md
+  - .claude/skills/sdlc/subcommands/review.md
+  - .claude/skills/sdlc/subcommands/summarize.md
+  - .claude/skills/sdlc/subcommands/work.md
+  - .claude/skills/sdlc/workflows/idea.md
+  - .claude/skills/sdlc/workflows/leaf.md
+  - .claude/skills/sdlc/workflows/sysdesign.md
+  - .claude/skills/sdlc/workflows/techdesign.md
+  deployed_file_hashes:
+    .claude/skills/sdlc/.gitignore: sha256:71233de57205520a4b645ea644cf4c46599608498b7cd77532c09077c1a19522
+    .claude/skills/sdlc/README.md: sha256:440497be8f557fe4e49972cef45b62e066a4fef6a2679b188e3d6c98e34aeb3b
+    .claude/skills/sdlc/SKILL.md: sha256:f843f5a47febf46e73b854ef17d242ff400b80a63ed0bc2a6bae2efceec21a0d
+    .claude/skills/sdlc/apm.yml: sha256:f6e22a2237de4217029c9c8b193f2627091f2b2abff85733a0f91eb160d66202
+    .claude/skills/sdlc/labels.md: sha256:595be7d825a59ab27bacd02df141f695ba6dd63bfcdab036967046884fa178c2
+    .claude/skills/sdlc/personas.md: sha256:1b356acee5ddb670e97980928767fed4fec0f399208cccb1d257091a0bb8ab96
+    .claude/skills/sdlc/subcommands/analyze.md: sha256:43eebda885670c89ebd40690520f4e25d68a1dc1c7976d6b3e920be9b1139934
+    .claude/skills/sdlc/subcommands/capture.md: sha256:2f62b9259b5de5c491f828ca3d918dcc55c4fba550a5661ac0cf722b640dcf10
+    .claude/skills/sdlc/subcommands/close.md: sha256:2efd95685b954777b2f66870fe3c58b29b02c6786900f693c2aea28192b456f9
+    .claude/skills/sdlc/subcommands/plan.md: sha256:f2a72e69e318505b8ef48905be6e1505fd2f2f7128c95b3135682783910d24b1
+    .claude/skills/sdlc/subcommands/review.md: sha256:aac74c4534165d8112d9fb19bc58345b2285ee271ff2850017e9143edc8692be
+    .claude/skills/sdlc/subcommands/summarize.md: sha256:94b04d8e9071cfbd2a420cf4bf6efe379394f8138f43ea6b1d26458a21c182b7
+    .claude/skills/sdlc/subcommands/work.md: sha256:0b7952c2c1427506f00f82476fd922efe382c50815909e21ae7dd997207b34b0
+    .claude/skills/sdlc/workflows/idea.md: sha256:5211eeb1bf335f22a3d0884995ff7e1865d639f667b358beb8e6b3c45f4fcbca
+    .claude/skills/sdlc/workflows/leaf.md: sha256:36ee42c79dfa346771cd77648b978e326c62d267f8a1779659a915eed4c11a5f
+    .claude/skills/sdlc/workflows/sysdesign.md: sha256:6f6615775ed78d36e70cf309216344cde284207e68fa698db4ed62764a51d54e
+    .claude/skills/sdlc/workflows/techdesign.md: sha256:1c92df02da6a1004044265521345fe0ae94f207883b534d0500eaba7a7f0d81f
+  content_hash: sha256:0dc308f04fa4231592d0df758e30a7f52cc29b38d281c393770ea85d4707faef

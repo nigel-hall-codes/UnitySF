@@ -1,0 +1,43 @@
+
+# APM dependencies
+apm_modules/
+
+# Large map data files
+*.osm
+*.csv
+
+# Unity generated folders
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]ser[Ss]ettings/
+*.pidb.meta
+*.pdb.meta
+*.mdb.meta
+
+# Unity3D generated meta files
+*.pidb
+*.pdb
+*.mdb
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+
+# JetBrains Rider
+*.sln.iml
+
+# OS generated
+.DS_Store
+Thumbs.db
