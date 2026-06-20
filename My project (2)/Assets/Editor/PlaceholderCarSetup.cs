@@ -79,23 +79,29 @@ public static class PlaceholderCarSetup
         Object.DestroyImmediate(body.GetComponent<BoxCollider>());
 
         // Drivetrain ----------------------------------------------------------
-        // GasMotor's [RequireComponent] also adds a DriveForce to the root.
-        var trans           = car.AddComponent<GearboxTransmission>();
-        trans.gears         = DefaultGears();
-        trans.startGear     = 2;   // index 2 = 1st gear
-        trans.skipNeutral   = true;
-        trans.shiftDelay    = 10f;
+        // GetTopmostParentComponent only walks *parent* transforms, so the motor
+        // and transmission must be on a child of the VehicleParent root.
+        var drivetrainGo = new GameObject("Drivetrain");
+        drivetrainGo.transform.SetParent(car.transform, false);
+
+        var trans            = drivetrainGo.AddComponent<GearboxTransmission>();
+        trans.gears          = DefaultGears();
+        trans.startGear      = 2;   // index 2 = 1st gear
+        trans.skipNeutral    = true;
+        trans.shiftDelay     = 10f;
         trans.shiftThreshold = 2f;
         trans.autoCalculateRpmRanges = true;
 
-        var motor              = car.AddComponent<GasMotor>();
+        var motor              = drivetrainGo.AddComponent<GasMotor>();
         motor.transmission     = trans;
         motor.inertia          = 0.5f;
         motor.canReverse       = true;
         motor.driveDividePower = 3f;
 
-        // Input ---------------------------------------------------------------
-        var input             = car.AddComponent<BasicInput>();
+        // Input — also uses GetTopmostParentComponent, so put on a child too.
+        var inputGo           = new GameObject("Input");
+        inputGo.transform.SetParent(car.transform, false);
+        var input             = inputGo.AddComponent<BasicInput>();
         input.accelAxis       = "Vertical";
         input.brakeAxis       = "Vertical";
         input.steerAxis       = "Horizontal";
