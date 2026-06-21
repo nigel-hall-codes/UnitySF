@@ -18,7 +18,8 @@ namespace SFMap.Pipeline
             StreetGraph graph,
             HeightmapData heightmap,
             Rect worldRect,
-            ChunkCoord coord)
+            ChunkCoord coord,
+            IReadOnlyDictionary<StreetEdge, (Vector3? from, Vector3? to)> boundaries)
         {
             var meshes = new List<Mesh>();
 #if UNITY_EDITOR
@@ -35,7 +36,16 @@ namespace SFMap.Pipeline
                     if (edge.Width <= 0f) continue;
 
                     Vector3[] centerline = SampledCenterline(edge, heightmap, worldRect);
-                    Mesh mesh = BuildMesh(edge, centerline);
+                    boundaries.TryGetValue(edge, out var bd);
+                    // Elevate boundary points to match terrain-sampled centerline Y.
+                    Vector3? fromPt = bd.from.HasValue
+                        ? new Vector3(bd.from.Value.x, SampleElevation(bd.from.Value.x, bd.from.Value.z, heightmap, worldRect), bd.from.Value.z)
+                        : (Vector3?)null;
+                    Vector3? toPt = bd.to.HasValue
+                        ? new Vector3(bd.to.Value.x, SampleElevation(bd.to.Value.x, bd.to.Value.z, heightmap, worldRect), bd.to.Value.z)
+                        : (Vector3?)null;
+                    Vector3[] anchored = AnchorCenterline(centerline, fromPt, toPt);
+                    Mesh mesh = BuildMesh(edge, anchored);
 
 #if UNITY_EDITOR
                     SaveMesh(mesh, coord, edge.OsmWayId);
@@ -140,6 +150,29 @@ namespace SFMap.Pipeline
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        static Vector3[] AnchorCenterline(Vector3[] cl, Vector3? fromPt, Vector3? toPt)
+        {
+            if (!fromPt.HasValue && !toPt.HasValue) return cl;
+
+            int n = cl.Length;
+            var arc = new float[n];
+            for (int i = 1; i < n; i++)
+                arc[i] = arc[i - 1] + Vector3.Distance(cl[i - 1], cl[i]);
+            float total = arc[n - 1];
+
+            float startArc = fromPt.HasValue ? Vector3.Distance(cl[0], fromPt.Value) : 0f;
+            float endArc   = toPt.HasValue   ? total - Vector3.Distance(cl[n - 1], toPt.Value) : total;
+
+            if (endArc - startArc < 0.01f) return cl;
+
+            var result = new List<Vector3> { fromPt ?? cl[0] };
+            for (int i = 1; i < n - 1; i++)
+                if (arc[i] > startArc && arc[i] < endArc)
+                    result.Add(cl[i]);
+            result.Add(toPt ?? cl[n - 1]);
+            return result.ToArray();
         }
 
         // Bilinear-interpolated elevation at world (wx, wz) from the heightmap.

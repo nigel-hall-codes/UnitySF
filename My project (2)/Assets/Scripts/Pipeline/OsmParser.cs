@@ -41,6 +41,7 @@ namespace SFMap.Pipeline
             var nodeRefCounts = CountNodeRefs(highwayWays);
             var streetNodes = BuildStreetNodes(nodeRefCounts, rawNodes);
             var edges = BuildEdges(highwayWays, streetNodes);
+            var adjacency = BuildAdjacency(edges);
             var buildings = BuildBuildings(buildingWays, rawNodes);
 
             return new StreetGraph
@@ -48,6 +49,7 @@ namespace SFMap.Pipeline
                 SourceBounds = osmBounds,
                 Nodes = streetNodes,
                 Edges = edges,
+                Adjacency = adjacency,
                 Buildings = buildings,
             };
         }
@@ -159,6 +161,22 @@ namespace SFMap.Pipeline
                 }
             }
             return edges;
+        }
+
+        static IReadOnlyDictionary<StreetNode, IReadOnlyList<StreetEdge>> BuildAdjacency(
+            List<StreetEdge> edges)
+        {
+            var adj = new Dictionary<StreetNode, List<StreetEdge>>();
+            foreach (var edge in edges)
+            {
+                if (!adj.TryGetValue(edge.From, out var fl)) adj[edge.From] = fl = new List<StreetEdge>();
+                fl.Add(edge);
+                if (!adj.TryGetValue(edge.To, out var tl)) adj[edge.To] = tl = new List<StreetEdge>();
+                tl.Add(edge);
+            }
+            var result = new Dictionary<StreetNode, IReadOnlyList<StreetEdge>>(adj.Count);
+            foreach (var kvp in adj) result[kvp.Key] = kvp.Value;
+            return result;
         }
 
         static List<BuildingWay> BuildBuildings(

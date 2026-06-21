@@ -38,6 +38,7 @@ namespace SFMap.Pipeline
         public IReadOnlyDictionary<long, StreetNode> Nodes;
         public IReadOnlyList<StreetEdge> Edges;
         public IReadOnlyList<BuildingWay> Buildings;
+        public IReadOnlyDictionary<StreetNode, IReadOnlyList<StreetEdge>> Adjacency;
 
         public IEnumerable<StreetNode> IntersectionNodes =>
             Nodes.Values.Where(n => n.IsIntersection);

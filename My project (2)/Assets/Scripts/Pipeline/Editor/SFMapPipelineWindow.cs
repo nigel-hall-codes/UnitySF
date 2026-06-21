@@ -88,8 +88,11 @@ namespace SFMap.Pipeline.Editor
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing elevation…", 0.03f);
                 var fullHeightmap = ElevationParser.Parse(CsvPath, fullGraph.SourceBounds, heightmapResolution);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.06f);
-                var setbacks = IntersectionMeshGenerator.ComputeSetbacks(fullGraph);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing intersection polygons…", 0.06f);
+                var polygons = IntersectionMeshGenerator.ComputePolygons(fullGraph);
+
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.08f);
+                var boundaries = IntersectionMeshGenerator.ComputeBoundaries(fullGraph, polygons);
 
                 var mapRoot      = new GameObject("SF Map");
                 var chunkCoords  = new List<ChunkCoord>(totalChunks);
@@ -108,17 +111,17 @@ namespace SFMap.Pipeline.Editor
                         float span = 0.85f / totalChunks;
                         string lbl = $"chunk {chunkIdx}/{totalChunks} ({coord})";
 
-                        var graph    = fullGraph.CropToChunk(chunk);
+                        var graph     = fullGraph.CropToChunk(chunk);
                         var heightmap = fullHeightmap.CropToChunk(chunk, heightmapResolution);
 
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Roads — {lbl}",         t0 + span * 0.00f);
-                        var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, setbacks, roadWidthMultiplier);
+                        var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, boundaries, roadWidthMultiplier);
 
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Intersections — {lbl}", t0 + span * 0.20f);
-                        var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord);
+                        var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, polygons, heightmap, chunk.WorldRect, coord);
 
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Sidewalks — {lbl}",     t0 + span * 0.35f);
-                        var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord);
+                        var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, boundaries);
 
                         // Terrain after road stamps so the asset reflects flattened footprints.
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Terrain — {lbl}",       t0 + span * 0.55f);
