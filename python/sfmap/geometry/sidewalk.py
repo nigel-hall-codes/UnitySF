@@ -15,23 +15,24 @@ _RAISE = 0.10   # metres above terrain — slightly higher than road surface
 def build_sidewalk_meshes(
     graph: StreetGraph,
     hmap: HeightmapData,
-    boundaries: Optional[Dict[int, Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
-) -> Dict[int, MeshArrays]:
+    boundaries: Optional[Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
+) -> Dict[Tuple[int, int, int], MeshArrays]:
     """Build combined left+right sidewalk meshes for every driveable edge.
 
-    Returns a dict keyed by edge.osm_way_id → (vertices, uvs, indices).
+    Returns a dict keyed by (osm_way_id, from_node_id, to_node_id) → (vertices, uvs, indices).
     Each mesh contains both the left and right sidewalk strips (4 verts per
     cross-section: left-outer, left-inner, right-inner, right-outer).
     Vertices are in Unity left-handed coords. Triangles are CW from above.
     """
-    result: Dict[int, MeshArrays] = {}
+    result: Dict[Tuple[int, int, int], MeshArrays] = {}
     for edge in graph.edges:
         if edge.width <= 0.0:
             continue
-        bd_from, bd_to = (boundaries or {}).get(edge.osm_way_id, (None, None))
+        key = (edge.osm_way_id, edge.from_node.osm_id, edge.to_node.osm_id)
+        bd_from, bd_to = (boundaries or {}).get(key, (None, None))
         arrays = _build_single_sidewalk(edge, hmap, bd_from, bd_to)
         if arrays is not None:
-            result[edge.osm_way_id] = arrays
+            result[key] = arrays
     return result
 
 

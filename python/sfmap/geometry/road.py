@@ -19,23 +19,24 @@ MeshArrays = Tuple[
 def build_road_meshes(
     graph: StreetGraph,
     hmap: HeightmapData,
-    boundaries: Optional[Dict[int, Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
+    boundaries: Optional[Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
     width_multiplier: float = 1.0,
-) -> Dict[int, MeshArrays]:
+) -> Dict[Tuple[int, int, int], MeshArrays]:
     """Build road quad-strip meshes for every driveable edge in the graph.
 
-    Returns a dict keyed by edge.osm_way_id → (vertices, uvs, indices).
+    Returns a dict keyed by (osm_way_id, from_node_id, to_node_id) → (vertices, uvs, indices).
     Vertices are in Unity left-handed coords (+X east, +Y up, +Z north).
     Triangles use CW winding when viewed from above (+Y).
     """
-    result: Dict[int, MeshArrays] = {}
+    result: Dict[Tuple[int, int, int], MeshArrays] = {}
     for edge in graph.edges:
         if edge.width <= 0.0:
             continue
-        bd_from, bd_to = (boundaries or {}).get(edge.osm_way_id, (None, None))
+        key = (edge.osm_way_id, edge.from_node.osm_id, edge.to_node.osm_id)
+        bd_from, bd_to = (boundaries or {}).get(key, (None, None))
         arrays = _build_single_road(edge, hmap, bd_from, bd_to, width_multiplier)
         if arrays is not None:
-            result[edge.osm_way_id] = arrays
+            result[key] = arrays
     return result
 
 
