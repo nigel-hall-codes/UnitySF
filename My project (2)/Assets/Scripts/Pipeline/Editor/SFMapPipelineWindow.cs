@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -378,6 +378,7 @@ namespace SFMap.Pipeline.Editor
             string path = GeneratedAssets.ChunkManifestPath();
             AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(manifest, path);
+            AssetDatabase.SaveAssets();
         }
 
         void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks, List<Rect> worldRects, float minElevation)
