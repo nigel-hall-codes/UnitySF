@@ -1,7 +1,11 @@
 {
     "name": "SFMap.Pipeline",
     "rootNamespace": "SFMap.Pipeline",
-    "references": [],
+    "references": [
+        "Unity.Jobs",
+        "Unity.Collections",
+        "Unity.Burst"
+    ],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
