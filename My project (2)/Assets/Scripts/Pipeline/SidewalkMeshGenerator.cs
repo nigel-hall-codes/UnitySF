@@ -19,7 +19,7 @@ namespace SFMap.Pipeline
             HeightmapData heightmap,
             Rect worldRect,
             ChunkCoord coord,
-            IReadOnlyDictionary<StreetEdge, (Vector3? from, Vector3? to)> boundaries)
+            IReadOnlyDictionary<StreetEdge, (Vector3? from, Vector3? to)> boundaries = null)
         {
             var meshes = new List<Mesh>();
 #if UNITY_EDITOR
@@ -36,7 +36,8 @@ namespace SFMap.Pipeline
                     if (edge.Width <= 0f) continue;
 
                     Vector3[] centerline = SampledCenterline(edge, heightmap, worldRect);
-                    boundaries.TryGetValue(edge, out var bd);
+                    (Vector3? from, Vector3? to) bd = default;
+                    if (boundaries != null) boundaries.TryGetValue(edge, out bd);
                     // Elevate boundary points to match terrain-sampled centerline Y.
                     Vector3? fromPt = bd.from.HasValue
                         ? new Vector3(bd.from.Value.x, SampleElevation(bd.from.Value.x, bd.from.Value.z, heightmap, worldRect), bd.from.Value.z)

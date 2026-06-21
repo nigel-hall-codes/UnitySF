@@ -11,9 +11,9 @@ namespace SFMap.Pipeline.Editor
 {
     public class SFMapPipelineWindow : EditorWindow
     {
-        static string OsmPath => Path.Combine(Application.dataPath, "SFMapData", "map.osm");
         static string CsvPath => Path.Combine(Application.dataPath, "SFMapData", "Elevation_Contours_20260619.csv");
 
+        [SerializeField] string osmFilePath          = "";
         [SerializeField] string presetName           = "default";
         [SerializeField] float roadWidthMultiplier   = 1f;
         [SerializeField] float defaultBuildingHeight = 10f;
@@ -27,8 +27,29 @@ namespace SFMap.Pipeline.Editor
         [MenuItem("Window/SF Map Pipeline")]
         public static void Open() => GetWindow<SFMapPipelineWindow>("SF Map Pipeline");
 
+        void OnEnable()
+        {
+            if (string.IsNullOrEmpty(osmFilePath))
+                osmFilePath = Path.Combine(Application.dataPath, "SFMapData", "full_sf_map");
+        }
+
         void OnGUI()
         {
+            EditorGUILayout.LabelField("Data Sources", EditorStyles.boldLabel);
+            EditorGUILayout.BeginHorizontal();
+            osmFilePath = EditorGUILayout.TextField("OSM File", osmFilePath);
+            if (GUILayout.Button("Browse…", GUILayout.Width(70)))
+            {
+                string dir    = Directory.Exists(Path.GetDirectoryName(osmFilePath))
+                                    ? Path.GetDirectoryName(osmFilePath)
+                                    : Path.Combine(Application.dataPath, "SFMapData");
+                string picked = EditorUtility.OpenFilePanel("Select OSM File", dir, "osm");
+                if (!string.IsNullOrEmpty(picked))
+                    osmFilePath = picked;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space();
             EditorGUILayout.LabelField("Config", EditorStyles.boldLabel);
             presetName            = EditorGUILayout.TextField( "Preset Name",                 presetName);
             roadWidthMultiplier   = EditorGUILayout.FloatField("Road Width Multiplier",       roadWidthMultiplier);
@@ -83,7 +104,7 @@ namespace SFMap.Pipeline.Editor
                 ClearSceneObjects();
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing OSM…", 0.00f);
-                var fullGraph = OsmParser.Parse(OsmPath);
+                var fullGraph = OsmParser.Parse(osmFilePath);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing elevation…", 0.03f);
                 var fullHeightmap = ElevationParser.Parse(CsvPath, fullGraph.SourceBounds, heightmapResolution);
@@ -300,7 +321,7 @@ namespace SFMap.Pipeline.Editor
                 $"  \"generated\": \"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}\",\n" +
                 $"  \"chunkSize\": {(int)Mathf.Round(chunkSize)},\n" +
                 $"  \"chunks\": [{chunkArr}],\n" +
-                $"  \"osmFile\": \"map.osm\",\n" +
+                $"  \"osmFile\": \"{Path.GetFileName(osmFilePath)}\",\n" +
                 $"  \"osmBounds\": {{ \"minLat\": {bounds.MinLat:F6}, \"maxLat\": {bounds.MaxLat:F6}, \"minLon\": {bounds.MinLon:F6}, \"maxLon\": {bounds.MaxLon:F6} }},\n" +
                 $"  \"roadWidthMultiplier\": {roadWidthMultiplier:F1},\n" +
                 $"  \"defaultBuildingHeight\": {defaultBuildingHeight:F1},\n" +

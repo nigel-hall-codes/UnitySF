@@ -1,0 +1,7 @@
+name: sdlc
+version: 0.1.0
+description: Issue-driven SDLC orchestrator — parallel agent work via git worktrees, GitHub labels, and persona routing
+author: nigel-hall-codes
+license: MIT
+target: claude
+type: skill

@@ -55,6 +55,7 @@ namespace RVP
                 distance += vp.cameraDistanceChange;
                 height += vp.cameraHeightChange;
                 forwardLook = target.forward;
+                targetForward = target.forward;
                 upLook = target.up;
                 targetBody = target.GetComponent<Rigidbody>();
             }

@@ -192,8 +192,9 @@ namespace SFMap.Tests
             var (graph, hm, rect) = FlatSetup(Vector3.zero, new Vector3(20f, 0f, 0f));
             StreetEdge edge = graph.Edges[0];
 
-            var setbacks = new Dictionary<StreetEdge, (float from, float to)> { [edge] = (3f, 0f) };
-            var meshes = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord, setbacks);
+            var boundaries = new Dictionary<StreetEdge, (Vector3? from, Vector3? to)>
+                { [edge] = (new Vector3(3f, 0f, 0f), null) };
+            var meshes = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord, boundaries);
 
             Assert.AreEqual(1, meshes.Count);
             Vector3[] verts = meshes[0].vertices;
@@ -210,8 +211,9 @@ namespace SFMap.Tests
             var (graph, hm, rect) = FlatSetup(Vector3.zero, new Vector3(20f, 0f, 0f));
             StreetEdge edge = graph.Edges[0];
 
-            var setbacks = new Dictionary<StreetEdge, (float from, float to)> { [edge] = (0f, 4f) };
-            var meshes = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord, setbacks);
+            var boundaries = new Dictionary<StreetEdge, (Vector3? from, Vector3? to)>
+                { [edge] = (null, new Vector3(16f, 0f, 0f)) };
+            var meshes = RoadMeshGenerator.Generate(graph, hm, rect, TestCoord, boundaries);
 
             Vector3[] verts = meshes[0].vertices;
             float endX = (verts[verts.Length - 2].x + verts[verts.Length - 1].x) * 0.5f;

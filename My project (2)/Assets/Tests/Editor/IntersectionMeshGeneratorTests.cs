@@ -38,29 +38,36 @@ namespace SFMap.Tests
         }
 
         [Test]
-        public void ComputeSetbacks_FourWayCross_OneEntryPerEdge()
+        public void ComputeBoundaries_FourWayCross_OneEntryPerEdge()
         {
-            var setbacks = IntersectionMeshGenerator.ComputeSetbacks(FourWayCross());
-            Assert.AreEqual(4, setbacks.Count);
+            var graph = FourWayCross();
+            var polygons = IntersectionMeshGenerator.ComputePolygons(graph);
+            var boundaries = IntersectionMeshGenerator.ComputeBoundaries(graph, polygons);
+            Assert.AreEqual(4, boundaries.Count);
         }
 
         [Test]
-        public void ComputeSetbacks_FourWayCross_SetbackIsHalfWidth()
+        public void ComputeBoundaries_FourWayCross_BoundaryAtHalfWidthFromCenter()
         {
             // At a 90° miter join with residential roads (halfW = 3.5m):
-            //   miter is at (3.5, 3.5) → projection along each arm = 3.5m
-            var setbacks = IntersectionMeshGenerator.ComputeSetbacks(FourWayCross());
-            foreach (var kv in setbacks)
+            //   boundary point is 3.5m along each arm from the center node.
+            var graph = FourWayCross();
+            var polygons = IntersectionMeshGenerator.ComputePolygons(graph);
+            var boundaries = IntersectionMeshGenerator.ComputeBoundaries(graph, polygons);
+            foreach (var kv in boundaries)
             {
-                Assert.AreEqual(3.5f, kv.Value.from, 0.01f,
-                    "Symmetric 90° join → setback equals halfWidth");
-                Assert.AreEqual(0f, kv.Value.to,   0.01f,
-                    "Far end has no intersection → toSetback is 0");
+                Assert.IsTrue(kv.Value.from.HasValue,
+                    "From end is at the intersection → boundary point expected");
+                Assert.AreEqual(3.5f,
+                    Vector3.Distance(Vector3.zero, kv.Value.from.Value), 0.01f,
+                    "Symmetric 90° join → boundary at halfWidth from center");
+                Assert.IsFalse(kv.Value.to.HasValue,
+                    "Far end has no intersection → no boundary point");
             }
         }
 
         [Test]
-        public void ComputeSetbacks_NoIntersections_ReturnsEmpty()
+        public void ComputeBoundaries_NoIntersections_ReturnsEmpty()
         {
             var a = new StreetNode { OsmId = 1, WorldPosition = Vector3.zero,              IsIntersection = false };
             var b = new StreetNode { OsmId = 2, WorldPosition = new Vector3(10f, 0f, 0f), IsIntersection = false };
@@ -75,11 +82,12 @@ namespace SFMap.Tests
                 Buildings = new List<BuildingWay>(),
                 SourceBounds = new OsmBounds(0, 1, 0, 1),
             };
-            Assert.AreEqual(0, IntersectionMeshGenerator.ComputeSetbacks(graph).Count);
+            var polygons = IntersectionMeshGenerator.ComputePolygons(graph);
+            Assert.AreEqual(0, IntersectionMeshGenerator.ComputeBoundaries(graph, polygons).Count);
         }
 
         [Test]
-        public void ComputeSetbacks_BothEndsAtIntersections_SetsBothFromAndTo()
+        public void ComputeBoundaries_BothEndsAtIntersections_SetsBothBoundaryPoints()
         {
             // Edge whose From AND To are both 4-way-like intersections.
             var nodeA = new StreetNode { OsmId = 0, WorldPosition = Vector3.zero,               IsIntersection = true };
@@ -114,10 +122,11 @@ namespace SFMap.Tests
                 SourceBounds = new OsmBounds(0, 1, 0, 1),
             };
 
-            var setbacks = IntersectionMeshGenerator.ComputeSetbacks(graph);
-            Assert.IsTrue(setbacks.ContainsKey(shared));
-            Assert.Greater(setbacks[shared].from, 0f, "From end should have setback");
-            Assert.Greater(setbacks[shared].to,   0f, "To end should have setback");
+            var polygons = IntersectionMeshGenerator.ComputePolygons(graph);
+            var boundaries = IntersectionMeshGenerator.ComputeBoundaries(graph, polygons);
+            Assert.IsTrue(boundaries.ContainsKey(shared));
+            Assert.IsTrue(boundaries[shared].from.HasValue, "From end should have boundary point");
+            Assert.IsTrue(boundaries[shared].to.HasValue,   "To end should have boundary point");
         }
     }
 }

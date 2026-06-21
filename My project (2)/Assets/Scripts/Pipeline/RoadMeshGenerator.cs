@@ -14,7 +14,7 @@ namespace SFMap.Pipeline
             HeightmapData heightmap,
             Rect worldRect,
             ChunkCoord coord,
-            IReadOnlyDictionary<StreetEdge, (Vector3? from, Vector3? to)> boundaries,
+            IReadOnlyDictionary<StreetEdge, (Vector3? from, Vector3? to)> boundaries = null,
             float widthMultiplier = 1f)
         {
             var meshes = new List<Mesh>();
@@ -31,7 +31,8 @@ namespace SFMap.Pipeline
                 {
                     if (edge.Width <= 0f) continue;
 
-                    boundaries.TryGetValue(edge, out var bd);
+                    (Vector3? from, Vector3? to) bd = default;
+                    if (boundaries != null) boundaries.TryGetValue(edge, out bd);
 
                     Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
                     // Elevate boundary points to pre-stamp terrain height, matching StampedCenterline.

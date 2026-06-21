@@ -5,6 +5,7 @@ apm_modules/
 # Large map data files
 *.osm
 *.csv
+**/SFMapData/full_sf_map
 
 # Unity generated folders
 [Ll]ibrary/
