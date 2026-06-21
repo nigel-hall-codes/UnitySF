@@ -18,6 +18,11 @@ namespace SFMap.Pipeline.Editor
         [SerializeField] float roadWidthMultiplier   = 1f;
         [SerializeField] float defaultBuildingHeight = 10f;
         [SerializeField] int   heightmapResolution   = 513;
+        [SerializeField] float chunkSizeMeters       = 2000f;
+        [SerializeField] int   colMin                = 0;
+        [SerializeField] int   colMax                = 0;
+        [SerializeField] int   rowMin                = 0;
+        [SerializeField] int   rowMax                = 0;
 
         [MenuItem("Window/SF Map Pipeline")]
         public static void Open() => GetWindow<SFMapPipelineWindow>("SF Map Pipeline");
@@ -31,6 +36,23 @@ namespace SFMap.Pipeline.Editor
             heightmapResolution   = EditorGUILayout.IntField(  "Heightmap Resolution",        heightmapResolution);
 
             EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Chunk Range", EditorStyles.boldLabel);
+            chunkSizeMeters = EditorGUILayout.FloatField("Chunk Size (m)", chunkSizeMeters);
+            EditorGUILayout.LabelField("Chunk dimensions", $"{chunkSizeMeters:F0} m × {chunkSizeMeters:F0} m", EditorStyles.miniLabel);
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel("Col Range");
+            colMin = EditorGUILayout.IntField(colMin);
+            EditorGUILayout.LabelField("→", GUILayout.Width(20));
+            colMax = EditorGUILayout.IntField(colMax);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.PrefixLabel("Row Range");
+            rowMin = EditorGUILayout.IntField(rowMin);
+            EditorGUILayout.LabelField("→", GUILayout.Width(20));
+            rowMax = EditorGUILayout.IntField(rowMax);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space();
 
             if (GUILayout.Button("Generate Map"))
                 RunGenerate();
@@ -42,6 +64,10 @@ namespace SFMap.Pipeline.Editor
         void RunGenerate()
         {
             GeneratedAssets.ActivePreset = presetName;
+
+            colMax = Mathf.Max(colMax, colMin);
+            rowMax = Mathf.Max(rowMax, rowMin);
+            int totalChunks = (colMax - colMin + 1) * (rowMax - rowMin + 1);
 
             if (GameObject.Find("SF Map") != null || GameObject.Find("Buildings") != null)
             {
@@ -57,50 +83,66 @@ namespace SFMap.Pipeline.Editor
                 ClearSceneObjects();
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing OSM…", 0.00f);
-                var graph = OsmParser.Parse(OsmPath);
+                var fullGraph = OsmParser.Parse(OsmPath);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing elevation…", 0.15f);
-                var heightmap = ElevationParser.Parse(CsvPath, graph.SourceBounds, heightmapResolution);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing elevation…", 0.03f);
+                var fullHeightmap = ElevationParser.Parse(CsvPath, fullGraph.SourceBounds, heightmapResolution);
 
-                var worldRect = GeoProjection.WorldBounds(graph.SourceBounds);
-                var coord     = new ChunkCoord(0, 0);
-                var chunk     = new ChunkBounds { Coord = coord, WorldRect = worldRect };
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing intersection polygons…", 0.06f);
+                var polygons = IntersectionMeshGenerator.ComputePolygons(fullGraph);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing intersection polygons…", 0.30f);
-                var polygons = IntersectionMeshGenerator.ComputePolygons(graph);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.08f);
+                var boundaries = IntersectionMeshGenerator.ComputeBoundaries(fullGraph, polygons);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.38f);
-                var boundaries = IntersectionMeshGenerator.ComputeBoundaries(graph, polygons);
+                var mapRoot      = new GameObject("SF Map");
+                var chunkCoords  = new List<ChunkCoord>(totalChunks);
+                bool vehiclePlaced = false;
+                int  totalObjects  = 0;
+                int  chunkIdx      = 0;
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.46f);
-                var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, boundaries, roadWidthMultiplier);
+                for (int row = rowMin; row <= rowMax; row++)
+                {
+                    for (int col = colMin; col <= colMax; col++)
+                    {
+                        chunkIdx++;
+                        var coord  = new ChunkCoord(col, row);
+                        var chunk  = new ChunkBounds(coord, chunkSizeMeters);
+                        float t0   = 0.10f + (chunkIdx - 1f) / totalChunks * 0.85f;
+                        float span = 0.85f / totalChunks;
+                        string lbl = $"chunk {chunkIdx}/{totalChunks} ({coord})";
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.57f);
-                var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, polygons, heightmap, worldRect, coord);
+                        var graph     = fullGraph.CropToChunk(chunk);
+                        var heightmap = fullHeightmap.CropToChunk(chunk, heightmapResolution);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating sidewalk meshes…", 0.67f);
-                var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, worldRect, coord, boundaries);
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Roads — {lbl}",         t0 + span * 0.00f);
+                        var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, boundaries, roadWidthMultiplier);
 
-                // Terrain is generated after all road/intersection stamps have been written back
-                // into heightmap.Values, so the Unity terrain asset reflects the flattened footprints.
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating terrain…", 0.78f);
-                var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Intersections — {lbl}", t0 + span * 0.20f);
+                        var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, polygons, heightmap, chunk.WorldRect, coord);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating buildings…", 0.87f);
-                var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Sidewalks — {lbl}",     t0 + span * 0.35f);
+                        var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, boundaries);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Building scene…", 0.95f);
-                int objCount = PopulateScene(graph, terrainData, heightmap, worldRect,
-                    roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot);
+                        // Terrain after road stamps so the asset reflects flattened footprints.
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Terrain — {lbl}",       t0 + span * 0.55f);
+                        var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
+
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Buildings — {lbl}",     t0 + span * 0.75f);
+                        var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
+
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Scene — {lbl}",         t0 + span * 0.90f);
+                        totalObjects += PopulateChunk(mapRoot, coord, graph, terrainData, heightmap, chunk.WorldRect,
+                            roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot, ref vehiclePlaced);
+
+                        chunkCoords.Add(coord);
+                    }
+                }
 
                 EditorSceneManager.SaveOpenScenes();
-                WriteManifest(graph.SourceBounds, worldRect, coord);
+                WriteManifest(fullGraph.SourceBounds, chunkSizeMeters, chunkCoords);
 
                 sw.Stop();
-                Debug.Log($"[SFMapPipeline] Generated in {sw.Elapsed.TotalSeconds:F1}s — " +
-                          $"roads:{roadMeshes.Count} intersections:{intersectionMeshes.Count} " +
-                          $"sidewalks:{sidewalkMeshes.Count} buildings:{buildingsRoot.transform.childCount} " +
-                          $"scene objects:{objCount}");
+                Debug.Log($"[SFMapPipeline] Generated {totalChunks} chunk(s) in {sw.Elapsed.TotalSeconds:F1}s — scene objects:{totalObjects}");
             }
             catch (Exception e)
             {
@@ -112,7 +154,9 @@ namespace SFMap.Pipeline.Editor
             }
         }
 
-        int PopulateScene(
+        int PopulateChunk(
+            GameObject mapRoot,
+            ChunkCoord coord,
             StreetGraph graph,
             TerrainData terrainData,
             HeightmapData heightmap,
@@ -120,23 +164,20 @@ namespace SFMap.Pipeline.Editor
             IReadOnlyList<Mesh> roadMeshes,
             IReadOnlyList<Mesh> intersectionMeshes,
             IReadOnlyList<Mesh> sidewalkMeshes,
-            GameObject buildingsRoot)
+            GameObject buildingsRoot,
+            ref bool vehiclePlaced)
         {
-            var root  = new GameObject("SF Map");
             int count = 0;
 
-            // Terrain
             var terrainGo = Terrain.CreateTerrainGameObject(terrainData);
-            terrainGo.name = "Terrain";
-            terrainGo.transform.SetParent(root.transform, false);
+            terrainGo.name = $"Terrain {coord}";
+            terrainGo.transform.SetParent(mapRoot.transform, false);
             terrainGo.transform.position = new Vector3(worldRect.x, heightmap.MinElevationMeters, worldRect.y);
             count++;
 
-            // Roads and intersections share the road surface material
-            var roadMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
-
+            var roadMat   = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
             int roadLayer = LayerMask.NameToLayer("Road");
-            var roadParent = CreateChild(root, "Roads");
+            var roadParent = CreateChild(mapRoot, $"Roads {coord}");
             foreach (var mesh in roadMeshes)
             {
                 var go = PlaceMesh(mesh, roadParent, roadMat);
@@ -145,7 +186,7 @@ namespace SFMap.Pipeline.Editor
                 count++;
             }
 
-            var intParent = CreateChild(root, "Intersections");
+            var intParent = CreateChild(mapRoot, $"Intersections {coord}");
             foreach (var mesh in intersectionMeshes)
             {
                 PlaceMesh(mesh, intParent, roadMat);
@@ -153,17 +194,22 @@ namespace SFMap.Pipeline.Editor
             }
 
             var swMat    = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.SidewalkMaterial());
-            var swParent = CreateChild(root, "Sidewalks");
+            var swParent = CreateChild(mapRoot, $"Sidewalks {coord}");
             foreach (var mesh in sidewalkMeshes)
             {
                 PlaceMesh(mesh, swParent, swMat);
                 count++;
             }
 
-            buildingsRoot.transform.SetParent(root.transform, false);
+            buildingsRoot.name = $"Buildings {coord}";
+            buildingsRoot.transform.SetParent(mapRoot.transform, false);
             count += buildingsRoot.transform.childCount;
 
-            PlaceVehicle(graph, worldRect);
+            if (!vehiclePlaced)
+            {
+                PlaceVehicle(graph, worldRect);
+                vehiclePlaced = true;
+            }
 
             return count;
         }
@@ -233,15 +279,20 @@ namespace SFMap.Pipeline.Editor
             return go;
         }
 
-        void WriteManifest(OsmBounds bounds, Rect worldRect, ChunkCoord coord)
+        void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks)
         {
             string dir = Path.Combine(Application.dataPath, "Generated", presetName);
             Directory.CreateDirectory(dir);
+
+            var parts = new List<string>(chunks.Count);
+            foreach (var c in chunks) parts.Add($"{{\"col\": {c.Col}, \"row\": {c.Row}}}");
+            string chunkArr = string.Join(", ", parts);
+
             string json = "{\n" +
                 $"  \"preset\": \"{presetName}\",\n" +
                 $"  \"generated\": \"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}\",\n" +
-                $"  \"chunkSize\": {(int)Mathf.Round(worldRect.width)},\n" +
-                $"  \"chunks\": [{{\"col\": {coord.Col}, \"row\": {coord.Row}}}],\n" +
+                $"  \"chunkSize\": {(int)Mathf.Round(chunkSize)},\n" +
+                $"  \"chunks\": [{chunkArr}],\n" +
                 $"  \"osmFile\": \"map.osm\",\n" +
                 $"  \"osmBounds\": {{ \"minLat\": {bounds.MinLat:F6}, \"maxLat\": {bounds.MaxLat:F6}, \"minLon\": {bounds.MinLon:F6}, \"maxLon\": {bounds.MaxLon:F6} }},\n" +
                 $"  \"roadWidthMultiplier\": {roadWidthMultiplier:F1},\n" +
