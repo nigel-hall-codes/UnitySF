@@ -41,6 +41,60 @@ namespace SFMap.Pipeline
 
         public IEnumerable<StreetNode> IntersectionNodes =>
             Nodes.Values.Where(n => n.IsIntersection);
+
+        // Returns a new StreetGraph containing only elements whose centroid falls inside chunk.WorldRect.
+        public StreetGraph CropToChunk(ChunkBounds chunk)
+        {
+            var rect = chunk.WorldRect;
+
+            var keptEdges = new List<StreetEdge>();
+            foreach (var e in Edges)
+            {
+                var c = Centroid(e.Centerline);
+                if (rect.Contains(new Vector2(c.x, c.z)))
+                    keptEdges.Add(e);
+            }
+
+            var keptNodeIds = new HashSet<long>();
+            foreach (var e in keptEdges)
+            {
+                keptNodeIds.Add(e.From.OsmId);
+                keptNodeIds.Add(e.To.OsmId);
+            }
+            foreach (var n in Nodes.Values)
+            {
+                if (n.IsIntersection && rect.Contains(new Vector2(n.WorldPosition.x, n.WorldPosition.z)))
+                    keptNodeIds.Add(n.OsmId);
+            }
+
+            var keptNodes = new Dictionary<long, StreetNode>(keptNodeIds.Count);
+            foreach (var id in keptNodeIds)
+                if (Nodes.TryGetValue(id, out var n))
+                    keptNodes[id] = n;
+
+            var keptBuildings = new List<BuildingWay>();
+            foreach (var b in Buildings)
+            {
+                var c = Centroid(b.Footprint);
+                if (rect.Contains(new Vector2(c.x, c.z)))
+                    keptBuildings.Add(b);
+            }
+
+            return new StreetGraph
+            {
+                SourceBounds = SourceBounds,
+                Nodes        = keptNodes,
+                Edges        = keptEdges,
+                Buildings    = keptBuildings,
+            };
+        }
+
+        static Vector3 Centroid(Vector3[] pts)
+        {
+            var sum = Vector3.zero;
+            foreach (var p in pts) sum += p;
+            return sum / pts.Length;
+        }
     }
 
     public enum HighwayType
