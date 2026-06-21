@@ -59,15 +59,15 @@ def compute_polygons(graph: StreetGraph) -> Dict[int, Polygon]:
 def compute_boundaries(
     graph: StreetGraph,
     polygons: Dict[int, Polygon],
-) -> Dict[int, Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]:
+) -> Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]:
     """Phase 2 — compute road-endpoint setback positions from intersection polygons.
 
-    Returns a dict keyed by edge osm_way_id. Each value is a (from_xz, to_xz)
-    pair; an endpoint is None when the edge doesn't connect to an intersection
-    at that end (dead-end stub — road runs all the way to the node centre).
+    Returns a dict keyed by (osm_way_id, from_node_id, to_node_id). Each value is a
+    (from_xz, to_xz) pair; an endpoint is None when the edge doesn't connect to an
+    intersection at that end (dead-end stub — road runs all the way to the node centre).
     Coordinates are absolute world-space (x, z).
     """
-    result: Dict[int, Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]] = {}
+    result: Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]] = {}
 
     for node in graph.intersection_nodes:
         if node.osm_id not in polygons:
@@ -93,11 +93,12 @@ def compute_boundaries(
             bz = node.world_z + ea.arm.dir_z * t
             boundary = (bx, bz)
 
-            existing = result.get(ea.edge.osm_way_id, (None, None))
+            key = (ea.edge.osm_way_id, ea.edge.from_node.osm_id, ea.edge.to_node.osm_id)
+            existing = result.get(key, (None, None))
             if ea.is_from:
-                result[ea.edge.osm_way_id] = (boundary, existing[1])
+                result[key] = (boundary, existing[1])
             else:
-                result[ea.edge.osm_way_id] = (existing[0], boundary)
+                result[key] = (existing[0], boundary)
 
     return result
 
