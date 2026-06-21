@@ -101,8 +101,10 @@ namespace SFMap.Pipeline.Editor
                     return;
             }
 
+            EnsureResourcesFolder();
             var sw      = Stopwatch.StartNew();
             var swStage = Stopwatch.StartNew();
+            AssetDatabase.StartAssetEditing();
             try
             {
                 ClearSceneObjects();
@@ -126,8 +128,6 @@ namespace SFMap.Pipeline.Editor
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.08f);
                 var boundaries = IntersectionMeshGenerator.ComputeBoundaries(fullGraph, polygons);
                 Debug.Log($"[SFMapPipeline] Road boundaries: {swStage.Elapsed.TotalSeconds:F3}s");
-
-                EnsureResourcesFolder();
 
                 var mapRoot        = new GameObject("SF Map");
                 var chunkCoords    = new List<ChunkCoord>(totalChunks);
@@ -210,6 +210,8 @@ namespace SFMap.Pipeline.Editor
             }
             finally
             {
+                AssetDatabase.StopAssetEditing();
+                AssetDatabase.SaveAssets();
                 EditorUtility.ClearProgressBar();
             }
         }
@@ -374,7 +376,6 @@ namespace SFMap.Pipeline.Editor
             string path = GeneratedAssets.ChunkManifestPath();
             AssetDatabase.DeleteAsset(path);
             AssetDatabase.CreateAsset(manifest, path);
-            AssetDatabase.SaveAssets();
         }
 
         void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks, List<Rect> worldRects, float minElevation)

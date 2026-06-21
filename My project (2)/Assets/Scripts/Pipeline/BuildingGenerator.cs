@@ -31,9 +31,6 @@ namespace SFMap.Pipeline
                 go.AddComponent<MeshCollider>().sharedMesh = mesh;
             }
 
-#if UNITY_EDITOR
-            AssetDatabase.SaveAssets();
-#endif
             return parent;
         }
 
