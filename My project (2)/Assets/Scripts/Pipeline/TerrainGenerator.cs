@@ -24,7 +24,6 @@ namespace SFMap.Pipeline
             EnsureFolder(chunkDir);
             string assetPath = GeneratedAssets.TerrainAsset(coord);
             AssetDatabase.CreateAsset(terrainData, assetPath);
-            AssetDatabase.SaveAssets();
             Debug.Log($"[TerrainGenerator] Saved {assetPath}");
 #endif
 
