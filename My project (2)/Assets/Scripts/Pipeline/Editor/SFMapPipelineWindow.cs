@@ -101,22 +101,31 @@ namespace SFMap.Pipeline.Editor
                     return;
             }
 
-            var sw = Stopwatch.StartNew();
+            var sw      = Stopwatch.StartNew();
+            var swStage = Stopwatch.StartNew();
             try
             {
                 ClearSceneObjects();
 
+                swStage.Restart();
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing OSM…", 0.00f);
                 var fullGraph = OsmParser.Parse(osmFilePath);
+                Debug.Log($"[SFMapPipeline] OSM parse: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                swStage.Restart();
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Parsing elevation…", 0.03f);
                 var fullHeightmap = ElevationParser.Parse(CsvPath, fullGraph.SourceBounds, heightmapResolution);
+                Debug.Log($"[SFMapPipeline] Elevation parse: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                swStage.Restart();
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing intersection polygons…", 0.06f);
                 var polygons = IntersectionMeshGenerator.ComputePolygons(fullGraph);
+                Debug.Log($"[SFMapPipeline] Intersection polygons: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                swStage.Restart();
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.08f);
                 var boundaries = IntersectionMeshGenerator.ComputeBoundaries(fullGraph, polygons);
+                Debug.Log($"[SFMapPipeline] Road boundaries: {swStage.Elapsed.TotalSeconds:F3}s");
 
                 EnsureResourcesFolder();
 
@@ -141,29 +150,47 @@ namespace SFMap.Pipeline.Editor
                         var graph     = fullGraph.CropToChunk(chunk);
                         var heightmap = fullHeightmap.CropToChunk(chunk, heightmapResolution);
 
+                        var swChunk = Stopwatch.StartNew();
+
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Roads — {lbl}",         t0 + span * 0.00f);
                         var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, boundaries, roadWidthMultiplier);
+                        Debug.Log($"[SFMapPipeline] {coord} roads: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Intersections — {lbl}", t0 + span * 0.20f);
                         var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, polygons, heightmap, chunk.WorldRect, coord);
+                        Debug.Log($"[SFMapPipeline] {coord} intersections: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Sidewalks — {lbl}",     t0 + span * 0.35f);
                         var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, chunk.WorldRect, coord, boundaries);
+                        Debug.Log($"[SFMapPipeline] {coord} sidewalks: {swStage.Elapsed.TotalSeconds:F3}s");
 
                         // Terrain after road stamps so the asset reflects flattened footprints.
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Terrain — {lbl}",       t0 + span * 0.55f);
                         var terrainData = TerrainGenerator.Generate(heightmap, chunk, coord);
+                        Debug.Log($"[SFMapPipeline] {coord} terrain: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Buildings — {lbl}",     t0 + span * 0.75f);
                         var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
+                        Debug.Log($"[SFMapPipeline] {coord} buildings: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Scene — {lbl}",         t0 + span * 0.88f);
                         var (count, chunkRoot) = PopulateChunk(mapRoot, coord, graph, terrainData, heightmap, chunk.WorldRect,
                             roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot, ref vehiclePlaced);
                         totalObjects += count;
+                        Debug.Log($"[SFMapPipeline] {coord} scene: {swStage.Elapsed.TotalSeconds:F3}s");
 
+                        swStage.Restart();
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Prefab — {lbl}",        t0 + span * 0.96f);
                         PrefabUtility.SaveAsPrefabAsset(chunkRoot, GeneratedAssets.ChunkPrefabPath(coord));
+                        Debug.Log($"[SFMapPipeline] {coord} prefab save: {swStage.Elapsed.TotalSeconds:F3}s");
+
+                        Debug.Log($"[SFMapPipeline] {coord} total: {swChunk.Elapsed.TotalSeconds:F3}s");
 
                         chunkCoords.Add(coord);
                         chunkWorldRects.Add(chunk.WorldRect);
