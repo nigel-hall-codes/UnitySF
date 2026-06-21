@@ -89,6 +89,8 @@ namespace SFMap.Pipeline.Editor
         {
             GeneratedAssets.ActivePreset = presetName;
 
+            var previousHashes = ReadPreviousHashes();
+
             colMax = Mathf.Max(colMax, colMin);
             rowMax = Mathf.Max(rowMax, rowMin);
             int totalChunks = (colMax - colMin + 1) * (rowMax - rowMin + 1);
@@ -406,6 +408,39 @@ namespace SFMap.Pipeline.Editor
                 "}";
             File.WriteAllText(Path.Combine(dir, "manifest.json"), json);
             AssetDatabase.ImportAsset(GeneratedAssets.ManifestPath());
+        }
+
+        Dictionary<string, string> ReadPreviousHashes()
+        {
+            string path = Path.Combine(Application.dataPath, "Generated", presetName, "manifest.json");
+            if (!File.Exists(path))
+                return new Dictionary<string, string>();
+            return ParseChunkHashes(File.ReadAllText(path));
+        }
+
+        static Dictionary<string, string> ParseChunkHashes(string json)
+        {
+            var result = new Dictionary<string, string>();
+            int sectionStart = json.IndexOf("\"chunkHashes\"", StringComparison.Ordinal);
+            if (sectionStart < 0) return result;
+            int braceOpen = json.IndexOf('{', sectionStart);
+            if (braceOpen < 0) return result;
+            int braceClose = json.IndexOf('}', braceOpen);
+            if (braceClose < 0) return result;
+            string inner = json.Substring(braceOpen + 1, braceClose - braceOpen - 1);
+            int pos = 0;
+            while (pos < inner.Length)
+            {
+                int keyStart = inner.IndexOf('"', pos);           if (keyStart < 0) break;
+                int keyEnd   = inner.IndexOf('"', keyStart + 1);  if (keyEnd   < 0) break;
+                int colon    = inner.IndexOf(':', keyEnd);         if (colon    < 0) break;
+                int valStart = inner.IndexOf('"', colon);         if (valStart < 0) break;
+                int valEnd   = inner.IndexOf('"', valStart + 1);  if (valEnd   < 0) break;
+                result[inner.Substring(keyStart + 1, keyEnd - keyStart - 1)] =
+                       inner.Substring(valStart + 1, valEnd - valStart - 1);
+                pos = valEnd + 1;
+            }
+            return result;
         }
 
         void ClearGenerated()
