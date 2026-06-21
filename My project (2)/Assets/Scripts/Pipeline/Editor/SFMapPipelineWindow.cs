@@ -66,17 +66,20 @@ namespace SFMap.Pipeline.Editor
                 var coord     = new ChunkCoord(0, 0);
                 var chunk     = new ChunkBounds { Coord = coord, WorldRect = worldRect };
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.30f);
-                var setbacks = IntersectionMeshGenerator.ComputeSetbacks(graph);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing intersection polygons…", 0.30f);
+                var polygons = IntersectionMeshGenerator.ComputePolygons(graph);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.42f);
-                var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, setbacks, roadWidthMultiplier);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.38f);
+                var boundaries = IntersectionMeshGenerator.ComputeBoundaries(graph, polygons);
 
-                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.55f);
-                var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, heightmap, worldRect, coord);
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating road meshes…", 0.46f);
+                var roadMeshes = RoadMeshGenerator.Generate(graph, heightmap, worldRect, coord, boundaries, roadWidthMultiplier);
+
+                EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating intersection meshes…", 0.57f);
+                var intersectionMeshes = IntersectionMeshGenerator.Generate(graph, polygons, heightmap, worldRect, coord);
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Generating sidewalk meshes…", 0.67f);
-                var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, worldRect, coord);
+                var sidewalkMeshes = SidewalkMeshGenerator.Generate(graph, heightmap, worldRect, coord, boundaries);
 
                 // Terrain is generated after all road/intersection stamps have been written back
                 // into heightmap.Values, so the Unity terrain asset reflects the flattened footprints.

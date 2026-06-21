@@ -9,13 +9,103 @@ namespace SFMap.Pipeline
     // Stage 6: for each intersection node, computes a convex polygon via miter/bevel joins
     // (ported from A/B Street) and triangulates it into a flat Unity mesh.
     // Saves to Assets/Generated/Intersections/.
+    //
+    // Intersection-first pipeline:
+    //   1. ComputePolygons  — build polygon shapes for all intersections
+    //   2. ComputeBoundaries — derive world-space road endpoint positions from those polygons
+    //   3. Generate          — stamp terrain + triangulate meshes from precomputed polygons
     public static class IntersectionMeshGenerator
     {
         const float BevelThreshold = 5f; // meters; miter points beyond this become two-vertex bevels
         const float Raise = 0.05f;       // match RoadMeshGenerator — prevents z-fighting with terrain
 
+        // One arm = one road radiating away from the intersection node.
+        // Dir is in XZ space: Dir.x = world X (East), Dir.y = world Z (North).
+        struct Arm
+        {
+            public Vector2 Dir;
+            public float   HalfWidth;
+            public float   Angle; // atan2(z, x) for CCW sort
+        }
+
+        struct EdgeArm
+        {
+            public Arm        Arm;
+            public StreetEdge Edge;
+            public bool       IsFrom;
+        }
+
+        // Phase 1 — compute intersection polygon shapes (XZ offsets from node center).
+        // Must be called before ComputeBoundaries and Generate.
+        public static Dictionary<StreetNode, List<Vector2>> ComputePolygons(StreetGraph graph)
+        {
+            var result = new Dictionary<StreetNode, List<Vector2>>();
+            foreach (var node in graph.IntersectionNodes)
+            {
+                var arms = CollectArms(node, graph);
+                if (arms.Count < 2) continue;
+                arms.Sort((a, b) => a.Angle.CompareTo(b.Angle));
+
+                var poly = new List<Vector2>();
+                int n = arms.Count;
+                for (int i = 0; i < n; i++)
+                    ComputeJoin(arms[i], arms[(i + 1) % n], poly);
+
+                if (poly.Count >= 3)
+                    result[node] = poly;
+            }
+            return result;
+        }
+
+        // Phase 2 — for each road edge endpoint at an intersection, compute the exact
+        // world-space boundary point where the road mesh should start or end.
+        // Non-intersection endpoints (dead-ends) are absent from the result — road runs to node.
+        public static Dictionary<StreetEdge, (Vector3? from, Vector3? to)> ComputeBoundaries(
+            StreetGraph graph, Dictionary<StreetNode, List<Vector2>> polygons)
+        {
+            var result = new Dictionary<StreetEdge, (Vector3? from, Vector3? to)>();
+
+            foreach (var node in graph.IntersectionNodes)
+            {
+                if (!polygons.ContainsKey(node)) continue;
+
+                var edgeArms = CollectEdgeArms(node, graph);
+                if (edgeArms.Count < 2) continue;
+                edgeArms.Sort((a, b) => a.Arm.Angle.CompareTo(b.Arm.Angle));
+
+                int n = edgeArms.Count;
+                var perArm = new float[n];
+
+                for (int i = 0; i < n; i++)
+                {
+                    int j = (i + 1) % n;
+                    (float tA, float tB) = JoinSetbacks(edgeArms[i].Arm, edgeArms[j].Arm);
+                    perArm[i] = Mathf.Max(perArm[i], tA);
+                    perArm[j] = Mathf.Max(perArm[j], tB);
+                }
+
+                for (int i = 0; i < n; i++)
+                {
+                    var ea = edgeArms[i];
+                    Vector2 dir = ea.Arm.Dir;
+                    float t = perArm[i];
+                    // Y=0 here; generators elevate to terrain height before use.
+                    Vector3 boundaryPt = node.WorldPosition + new Vector3(dir.x, 0f, dir.y) * t;
+
+                    result.TryGetValue(ea.Edge, out var pair);
+                    result[ea.Edge] = ea.IsFrom
+                        ? (boundaryPt, pair.to)
+                        : (pair.from, boundaryPt);
+                }
+            }
+
+            return result;
+        }
+
+        // Phase 3 — stamp terrain + build meshes from precomputed polygons.
         public static IReadOnlyList<Mesh> Generate(
             StreetGraph graph,
+            Dictionary<StreetNode, List<Vector2>> polygons,
             HeightmapData heightmap,
             Rect worldRect,
             ChunkCoord coord)
@@ -32,8 +122,15 @@ namespace SFMap.Pipeline
 #endif
                 foreach (var node in graph.IntersectionNodes)
                 {
-                    Mesh mesh = BuildIntersectionMesh(node, graph, heightmap, worldRect);
-                    if (mesh == null) continue;
+                    if (!polygons.TryGetValue(node, out var poly)) continue;
+
+                    float y = SampleElevation(node.WorldPosition.x, node.WorldPosition.z, heightmap, worldRect) + Raise;
+                    var center = new Vector3(node.WorldPosition.x, y, node.WorldPosition.z);
+
+                    float nodeElev = y - Raise;
+                    StampCircle(node.WorldPosition.x, node.WorldPosition.z, poly, nodeElev, heightmap, worldRect);
+
+                    Mesh mesh = TriangulateFan(node.OsmId, center, poly);
 #if UNITY_EDITOR
                     SaveMesh(mesh, coord, node.OsmId);
                     meshPaths.Add(GeneratedAssets.IntersectionMesh(coord, node.OsmId));
@@ -54,95 +151,13 @@ namespace SFMap.Pipeline
             return meshes;
         }
 
-        // One arm = one road radiating away from the intersection node.
-        // Dir is in XZ space: Dir.x = world X (East), Dir.y = world Z (North).
-        struct Arm
-        {
-            public Vector2 Dir;
-            public float   HalfWidth;
-            public float   Angle; // atan2(z, x) for CCW sort
-        }
-
-        struct EdgeArm
-        {
-            public Arm        Arm;
-            public StreetEdge Edge;
-            public bool       IsFrom;
-        }
-
-        static Mesh BuildIntersectionMesh(
-            StreetNode node, StreetGraph graph,
-            HeightmapData heightmap, Rect worldRect)
-        {
-            var arms = CollectArms(node, graph);
-            if (arms.Count < 2) return null;
-
-            // CCW sort by angle in the XZ plane (viewed from +Y)
-            arms.Sort((a, b) => a.Angle.CompareTo(b.Angle));
-
-            float y = SampleElevation(node.WorldPosition.x, node.WorldPosition.z, heightmap, worldRect) + Raise;
-            var center = new Vector3(node.WorldPosition.x, y, node.WorldPosition.z);
-
-            // Compute polygon vertices (XZ offsets from center) via miter/bevel joins
-            var poly = new List<Vector2>();
-            int n = arms.Count;
-            for (int i = 0; i < n; i++)
-                ComputeJoin(arms[i], arms[(i + 1) % n], poly);
-
-            if (poly.Count < 3) return null;
-
-            // Stamp terrain flat under the intersection polygon before terrain asset is built,
-            // so cells within the polygon area are at node elevation rather than the original
-            // hill contour, preventing terrain from poking through the flat intersection mesh.
-            float nodeElev = y - Raise;
-            StampCircle(node.WorldPosition.x, node.WorldPosition.z, poly, nodeElev, heightmap, worldRect);
-
-            return TriangulateFan(node.OsmId, center, poly);
-        }
-
-        // Stamps all heightmap cells within the intersection polygon's bounding circle to elevation.
-        // Uses a circle (radius = max polygon vertex distance + half-cell diagonal) rather than exact
-        // polygon containment — the over-stamp is safe because road/intersection meshes cover it.
-        static void StampCircle(float cx, float cz, List<Vector2> poly, float elevation,
-            HeightmapData heightmap, Rect worldRect)
-        {
-            float maxR = 0f;
-            foreach (var p in poly) maxR = Mathf.Max(maxR, p.magnitude);
-
-            int   res  = heightmap.Resolution;
-            float cellW = worldRect.width  / (res - 1);
-            float cellH = worldRect.height / (res - 1);
-            float pad   = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
-            float r     = maxR + pad;
-            float r2    = r * r;
-
-            float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
-            if (elevRange < 0.001f) elevRange = 1f;
-            float normalized = (elevation - heightmap.MinElevationMeters) / elevRange;
-
-            int colMin = Mathf.Max(0,       Mathf.FloorToInt((cx - r - worldRect.x) / cellW));
-            int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cx + r - worldRect.x) / cellW));
-            int rowMin = Mathf.Max(0,       Mathf.FloorToInt((cz - r - worldRect.y) / cellH));
-            int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cz + r - worldRect.y) / cellH));
-
-            for (int row = rowMin; row <= rowMax; row++)
-            {
-                float wz = worldRect.y + row * cellH;
-                float dz = wz - cz;
-                for (int col = colMin; col <= colMax; col++)
-                {
-                    float wx = worldRect.x + col * cellW;
-                    float dx = wx - cx;
-                    if (dx * dx + dz * dz > r2) continue;
-                    heightmap.Values[row, col] = normalized;
-                }
-            }
-        }
-
+        // Uses adjacency list for O(degree) lookup instead of O(E) scan.
         static List<EdgeArm> CollectEdgeArms(StreetNode node, StreetGraph graph)
         {
             var arms = new List<EdgeArm>();
-            foreach (var edge in graph.Edges)
+            if (!graph.Adjacency.TryGetValue(node, out var nodeEdges)) return arms;
+
+            foreach (var edge in nodeEdges)
             {
                 if (edge.Width <= 0f) continue;
                 Vector3[] cl = edge.Centerline;
@@ -200,16 +215,13 @@ namespace SFMap.Pipeline
             Vector2 pa = perpLeftA  * a.HalfWidth;
             Vector2 pb = perpRightB * b.HalfWidth;
 
-            // Solve pa + t*da = pb + s*db  (2D linear system in t and s)
             float dax = a.Dir.x, daz = a.Dir.y;
             float dbx = b.Dir.x, dbz = b.Dir.y;
-
             float det = -dax * dbz + daz * dbx;
 
             Vector2 miter;
             if (Mathf.Abs(det) < 1e-6f)
             {
-                // Parallel boundary lines — use midpoint as fallback
                 miter = (pa + pb) * 0.5f;
             }
             else
@@ -226,14 +238,45 @@ namespace SFMap.Pipeline
             }
             else
             {
-                // Bevel: place two vertices on the respective boundary rays.
-                // Each is the point on the ray at world distance BevelThreshold from center:
-                //   distance^2 = halfWidth^2 + t^2  →  t = sqrt(threshold^2 - halfWidth^2)
                 float tA = Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth));
                 float tB = Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth));
                 poly.Add(pa + a.Dir * tA);
                 poly.Add(pb + b.Dir * tB);
             }
+        }
+
+        // Returns setback distance (meters) along each arm to the intersection polygon boundary.
+        static (float tA, float tB) JoinSetbacks(Arm a, Arm b)
+        {
+            Vector2 perpLeftA  = new Vector2(-a.Dir.y,  a.Dir.x);
+            Vector2 perpRightB = new Vector2( b.Dir.y, -b.Dir.x);
+            Vector2 pa = perpLeftA  * a.HalfWidth;
+            Vector2 pb = perpRightB * b.HalfWidth;
+
+            float dax = a.Dir.x, daz = a.Dir.y;
+            float dbx = b.Dir.x, dbz = b.Dir.y;
+            float det = -dax * dbz + daz * dbx;
+
+            if (Mathf.Abs(det) < 1e-6f)
+            {
+                return (
+                    Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth)),
+                    Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth))
+                );
+            }
+
+            float dx = pb.x - pa.x;
+            float dz = pb.y - pa.y;
+            float t = (-dx * dbz + dz * dbx) / det;
+            float s = ( dax * dz - daz * dx) / det;
+
+            if ((pa + t * a.Dir).magnitude <= BevelThreshold)
+                return (Mathf.Max(0f, t), Mathf.Max(0f, s));
+
+            return (
+                Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth)),
+                Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth))
+            );
         }
 
         // Fan triangulation from center. Polygon vertices are CCW from above → reverse winding
@@ -258,7 +301,6 @@ namespace SFMap.Pipeline
                 uvs[i + 1]   = new Vector2(poly[i].x / (2f * maxR) + 0.5f, poly[i].y / (2f * maxR) + 0.5f);
 
                 int j = (i + 1) % n;
-                // Reversed winding (j before i) → normals point up for a CCW polygon
                 tris[i * 3]     = 0;
                 tris[i * 3 + 1] = j + 1;
                 tris[i * 3 + 2] = i + 1;
@@ -273,87 +315,43 @@ namespace SFMap.Pipeline
             return mesh;
         }
 
-        // Returns the setback distances (meters) along each road arm needed to clear the
-        // intersection polygon at node. Called once per adjacent arm pair per join.
-        // tA = distance along arm A's centerline, tB = distance along arm B's centerline.
-        static (float tA, float tB) JoinSetbacks(Arm a, Arm b)
+        // Stamps all heightmap cells within the intersection polygon's bounding circle to elevation.
+        static void StampCircle(float cx, float cz, List<Vector2> poly, float elevation,
+            HeightmapData heightmap, Rect worldRect)
         {
-            Vector2 perpLeftA  = new Vector2(-a.Dir.y,  a.Dir.x);
-            Vector2 perpRightB = new Vector2( b.Dir.y, -b.Dir.x);
-            Vector2 pa = perpLeftA  * a.HalfWidth;
-            Vector2 pb = perpRightB * b.HalfWidth;
+            float maxR = 0f;
+            foreach (var p in poly) maxR = Mathf.Max(maxR, p.magnitude);
 
-            float dax = a.Dir.x, daz = a.Dir.y;
-            float dbx = b.Dir.x, dbz = b.Dir.y;
-            float det = -dax * dbz + daz * dbx;
+            int   res   = heightmap.Resolution;
+            float cellW = worldRect.width  / (res - 1);
+            float cellH = worldRect.height / (res - 1);
+            float pad   = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
+            float r     = maxR + pad;
+            float r2    = r * r;
 
-            if (Mathf.Abs(det) < 1e-6f)
+            float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
+            if (elevRange < 0.001f) elevRange = 1f;
+            float normalized = (elevation - heightmap.MinElevationMeters) / elevRange;
+
+            int colMin = Mathf.Max(0,       Mathf.FloorToInt((cx - r - worldRect.x) / cellW));
+            int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cx + r - worldRect.x) / cellW));
+            int rowMin = Mathf.Max(0,       Mathf.FloorToInt((cz - r - worldRect.y) / cellH));
+            int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cz + r - worldRect.y) / cellH));
+
+            for (int row = rowMin; row <= rowMax; row++)
             {
-                // Parallel arms — use bevel threshold as fallback
-                return (
-                    Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth)),
-                    Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth))
-                );
-            }
-
-            float dx = pb.x - pa.x;
-            float dz = pb.y - pa.y;
-            // t: param along a.Dir to the join point (Cramer's rule on [da | -db] * [t;s] = pb-pa)
-            float t = (-dx * dbz + dz * dbx) / det;
-            // s: param along b.Dir to the join point
-            float s = ( dax * dz - daz * dx) / det;
-
-            if ((pa + t * a.Dir).magnitude <= BevelThreshold)
-                return (Mathf.Max(0f, t), Mathf.Max(0f, s));
-
-            // Bevel: each arm's vertex is at sqrt(threshold² - halfWidth²) along its direction
-            return (
-                Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - a.HalfWidth * a.HalfWidth)),
-                Mathf.Sqrt(Mathf.Max(0f, BevelThreshold * BevelThreshold - b.HalfWidth * b.HalfWidth))
-            );
-        }
-
-        /// <summary>
-        /// Returns the road setback at each end of every StreetEdge.
-        /// Pass the result to RoadMeshGenerator.Generate() so road quads don't overlap
-        /// intersection polygons.
-        /// </summary>
-        public static Dictionary<StreetEdge, (float from, float to)> ComputeSetbacks(StreetGraph graph)
-        {
-            var result = new Dictionary<StreetEdge, (float from, float to)>();
-
-            foreach (var node in graph.IntersectionNodes)
-            {
-                var edgeArms = CollectEdgeArms(node, graph);
-                if (edgeArms.Count < 2) continue;
-                edgeArms.Sort((a, b) => a.Arm.Angle.CompareTo(b.Arm.Angle));
-
-                int n = edgeArms.Count;
-                var perArm = new float[n];
-
-                for (int i = 0; i < n; i++)
+                float wz = worldRect.y + row * cellH;
+                float dz = wz - cz;
+                for (int col = colMin; col <= colMax; col++)
                 {
-                    int j = (i + 1) % n;
-                    (float tA, float tB) = JoinSetbacks(edgeArms[i].Arm, edgeArms[j].Arm);
-                    perArm[i] = Mathf.Max(perArm[i], tA);
-                    perArm[j] = Mathf.Max(perArm[j], tB);
-                }
-
-                for (int i = 0; i < n; i++)
-                {
-                    var ea = edgeArms[i];
-                    result.TryGetValue(ea.Edge, out var pair);
-                    float d = perArm[i];
-                    result[ea.Edge] = ea.IsFrom
-                        ? (Mathf.Max(pair.from, d), pair.to)
-                        : (pair.from, Mathf.Max(pair.to, d));
+                    float wx = worldRect.x + col * cellW;
+                    float dx = wx - cx;
+                    if (dx * dx + dz * dz > r2) continue;
+                    heightmap.Values[row, col] = normalized;
                 }
             }
-
-            return result;
         }
 
-        // Bilinear elevation sample — identical to RoadMeshGenerator.SampleElevation.
         static float SampleElevation(float wx, float wz, HeightmapData heightmap, Rect worldRect)
         {
             float u = Mathf.Clamp01((wx - worldRect.x) / worldRect.width);
