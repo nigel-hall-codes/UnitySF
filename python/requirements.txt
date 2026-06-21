@@ -1,0 +1,5 @@
+pyosmium
+scipy
+numpy
+shapely
+triangle
