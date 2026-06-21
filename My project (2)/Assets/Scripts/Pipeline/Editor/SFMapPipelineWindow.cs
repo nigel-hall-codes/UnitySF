@@ -38,6 +38,7 @@ namespace SFMap.Pipeline.Editor
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Chunk Range", EditorStyles.boldLabel);
             chunkSizeMeters = EditorGUILayout.FloatField("Chunk Size (m)", chunkSizeMeters);
+            EditorGUILayout.LabelField("Chunk dimensions", $"{chunkSizeMeters:F0} m × {chunkSizeMeters:F0} m", EditorStyles.miniLabel);
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.PrefixLabel("Col Range");
             colMin = EditorGUILayout.IntField(colMin);
@@ -127,7 +128,7 @@ namespace SFMap.Pipeline.Editor
                         var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
 
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Scene — {lbl}",         t0 + span * 0.90f);
-                        totalObjects += PopulateChunk(mapRoot, graph, terrainData, heightmap, chunk.WorldRect,
+                        totalObjects += PopulateChunk(mapRoot, coord, graph, terrainData, heightmap, chunk.WorldRect,
                             roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot, ref vehiclePlaced);
 
                         chunkCoords.Add(coord);
@@ -152,6 +153,7 @@ namespace SFMap.Pipeline.Editor
 
         int PopulateChunk(
             GameObject mapRoot,
+            ChunkCoord coord,
             StreetGraph graph,
             TerrainData terrainData,
             HeightmapData heightmap,
@@ -165,14 +167,14 @@ namespace SFMap.Pipeline.Editor
             int count = 0;
 
             var terrainGo = Terrain.CreateTerrainGameObject(terrainData);
-            terrainGo.name = "Terrain";
+            terrainGo.name = $"Terrain {coord}";
             terrainGo.transform.SetParent(mapRoot.transform, false);
             terrainGo.transform.position = new Vector3(worldRect.x, heightmap.MinElevationMeters, worldRect.y);
             count++;
 
             var roadMat   = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
             int roadLayer = LayerMask.NameToLayer("Road");
-            var roadParent = CreateChild(mapRoot, "Roads");
+            var roadParent = CreateChild(mapRoot, $"Roads {coord}");
             foreach (var mesh in roadMeshes)
             {
                 var go = PlaceMesh(mesh, roadParent, roadMat);
@@ -181,7 +183,7 @@ namespace SFMap.Pipeline.Editor
                 count++;
             }
 
-            var intParent = CreateChild(mapRoot, "Intersections");
+            var intParent = CreateChild(mapRoot, $"Intersections {coord}");
             foreach (var mesh in intersectionMeshes)
             {
                 PlaceMesh(mesh, intParent, roadMat);
@@ -189,13 +191,14 @@ namespace SFMap.Pipeline.Editor
             }
 
             var swMat    = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.SidewalkMaterial());
-            var swParent = CreateChild(mapRoot, "Sidewalks");
+            var swParent = CreateChild(mapRoot, $"Sidewalks {coord}");
             foreach (var mesh in sidewalkMeshes)
             {
                 PlaceMesh(mesh, swParent, swMat);
                 count++;
             }
 
+            buildingsRoot.name = $"Buildings {coord}";
             buildingsRoot.transform.SetParent(mapRoot.transform, false);
             count += buildingsRoot.transform.childCount;
 

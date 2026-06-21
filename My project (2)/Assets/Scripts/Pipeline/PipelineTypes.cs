@@ -48,8 +48,8 @@ namespace SFMap.Pipeline
 
             int col0 = Mathf.Clamp(Mathf.FloorToInt(nx), 0, Resolution - 2);
             int row0 = Mathf.Clamp(Mathf.FloorToInt(nz), 0, Resolution - 2);
-            float tx = nx - col0;
-            float tz = nz - row0;
+            float tx = Mathf.Clamp01(nx - col0);
+            float tz = Mathf.Clamp01(nz - row0);
 
             float v00 = Values[row0,     col0    ];
             float v10 = Values[row0,     col0 + 1];
