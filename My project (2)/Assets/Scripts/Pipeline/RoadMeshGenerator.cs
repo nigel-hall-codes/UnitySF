@@ -22,35 +22,49 @@ namespace SFMap.Pipeline
             var meshPaths = new List<string>();
 #endif
 
+            // Phase 1: read-only heightmap pass — sample all centerlines and boundary elevations
+            // before any cell is modified so bilinear samples remain consistent.
+            var activeEdges  = new List<StreetEdge>();
+            var stampedCls   = new List<Vector3[]>();
+            var fromPoints   = new List<Vector3?>();
+            var toPoints     = new List<Vector3?>();
+
+            foreach (var edge in graph.Edges)
+            {
+                if (edge.Width <= 0f) continue;
+
+                (Vector3? from, Vector3? to) bd = default;
+                if (boundaries != null) boundaries.TryGetValue(edge, out bd);
+
+                activeEdges.Add(edge);
+                stampedCls.Add(StampedCenterline(edge, heightmap, worldRect));
+                // Elevate boundary points to pre-stamp terrain height, matching StampedCenterline.
+                fromPoints.Add(bd.from.HasValue
+                    ? new Vector3(bd.from.Value.x, SampleElevation(bd.from.Value.x, bd.from.Value.z, heightmap, worldRect), bd.from.Value.z)
+                    : (Vector3?)null);
+                toPoints.Add(bd.to.HasValue
+                    ? new Vector3(bd.to.Value.x, SampleElevation(bd.to.Value.x, bd.to.Value.z, heightmap, worldRect), bd.to.Value.z)
+                    : (Vector3?)null);
+            }
+
+            // Phase 2: dispatch all road-segment stamp jobs in parallel and await completion.
+            // Stamp the full centerline so terrain near intersection nodes is flattened —
+            // the intersection mesh overwrites this area later.
+            HeightmapStampJobs.StampAllRoadSegments(activeEdges, stampedCls, heightmap, worldRect, widthMultiplier);
+
+            // Phase 3: build meshes (no further heightmap reads or writes).
 #if UNITY_EDITOR
             AssetDatabase.StartAssetEditing();
             try
             {
 #endif
-                foreach (var edge in graph.Edges)
+                for (int i = 0; i < activeEdges.Count; i++)
                 {
-                    if (edge.Width <= 0f) continue;
-
-                    (Vector3? from, Vector3? to) bd = default;
-                    if (boundaries != null) boundaries.TryGetValue(edge, out bd);
-
-                    Vector3[] stamped = StampedCenterline(edge, heightmap, worldRect);
-                    // Elevate boundary points to pre-stamp terrain height, matching StampedCenterline.
-                    Vector3? fromPt = bd.from.HasValue
-                        ? new Vector3(bd.from.Value.x, SampleElevation(bd.from.Value.x, bd.from.Value.z, heightmap, worldRect), bd.from.Value.z)
-                        : (Vector3?)null;
-                    Vector3? toPt = bd.to.HasValue
-                        ? new Vector3(bd.to.Value.x, SampleElevation(bd.to.Value.x, bd.to.Value.z, heightmap, worldRect), bd.to.Value.z)
-                        : (Vector3?)null;
-                    // Stamp the full centerline so terrain near intersection nodes is flattened —
-                    // the intersection mesh overwrites this area later.
-                    StampFootprint(edge, stamped, heightmap, worldRect, widthMultiplier);
-                    Vector3[] anchored = AnchorCenterline(stamped, fromPt, toPt);
-                    Mesh mesh = BuildMesh(edge, anchored, widthMultiplier);
-
+                    Vector3[] anchored = AnchorCenterline(stampedCls[i], fromPoints[i], toPoints[i]);
+                    Mesh mesh = BuildMesh(activeEdges[i], anchored, widthMultiplier);
 #if UNITY_EDITOR
-                    SaveMesh(mesh, coord, edge.OsmWayId);
-                    meshPaths.Add(GeneratedAssets.RoadMesh(coord, edge.OsmWayId));
+                    SaveMesh(mesh, coord, activeEdges[i].OsmWayId);
+                    meshPaths.Add(GeneratedAssets.RoadMesh(coord, activeEdges[i].OsmWayId));
 #else
                     meshes.Add(mesh);
 #endif
@@ -77,59 +91,6 @@ namespace SFMap.Pipeline
             for (int i = 0; i < cl.Length; i++)
                 out_[i] = new Vector3(cl[i].x, SampleElevation(cl[i].x, cl[i].z, heightmap, worldRect), cl[i].z);
             return out_;
-        }
-
-        // Mirrors SidewalkMeshGenerator.Width; stamp must cover the full sidewalk footprint.
-        const float SidewalkWidth = 1.5f;
-
-        // Flattens heightmap cells under the road to the interpolated road elevation.
-        static void StampFootprint(StreetEdge edge, Vector3[] centerline,
-            HeightmapData heightmap, Rect worldRect, float widthMultiplier = 1f)
-        {
-            float halfW = edge.Width * widthMultiplier * 0.5f;
-            int res = heightmap.Resolution;
-            float cellW = worldRect.width  / (res - 1);
-            float cellH = worldRect.height / (res - 1);
-            float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
-            if (elevRange < 0.001f) elevRange = 1f;
-            // Pad by sidewalk width + half-cell diagonal so terrain is flat under the full
-            // road-and-sidewalk footprint, preventing terrain bleed at the outer sidewalk edge.
-            float pad = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
-            float stampW = halfW + SidewalkWidth + pad;
-
-            for (int seg = 0; seg < centerline.Length - 1; seg++)
-            {
-                Vector3 p0 = centerline[seg];
-                Vector3 p1 = centerline[seg + 1];
-
-                Vector2 dir2 = new Vector2(p1.x - p0.x, p1.z - p0.z);
-                float segLen = dir2.magnitude;
-                if (segLen < 0.001f) continue;
-                Vector2 dirN = dir2 / segLen;
-                Vector2 perp = new Vector2(-dirN.y, dirN.x);
-
-                int colMin = Mathf.Max(0,       Mathf.FloorToInt((Mathf.Min(p0.x, p1.x) - stampW - worldRect.x) / cellW));
-                int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((Mathf.Max(p0.x, p1.x) + stampW - worldRect.x) / cellW));
-                int rowMin = Mathf.Max(0,       Mathf.FloorToInt((Mathf.Min(p0.z, p1.z) - stampW - worldRect.y) / cellH));
-                int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((Mathf.Max(p0.z, p1.z) + stampW - worldRect.y) / cellH));
-
-                for (int row = rowMin; row <= rowMax; row++)
-                {
-                    float wz = worldRect.y + row * cellH;
-                    for (int col = colMin; col <= colMax; col++)
-                    {
-                        float wx = worldRect.x + col * cellW;
-                        var toP = new Vector2(wx - p0.x, wz - p0.z);
-                        float along   = Vector2.Dot(toP, dirN);
-                        float lateral = Mathf.Abs(Vector2.Dot(toP, perp));
-                        if (along < -pad || along > segLen + pad || lateral > stampW) continue;
-
-                        float t = along / segLen;
-                        float elev = Mathf.Lerp(p0.y, p1.y, t);
-                        heightmap.Values[row, col] = (elev - heightmap.MinElevationMeters) / elevRange;
-                    }
-                }
-            }
         }
 
         // Anchors the centerline to exact intersection boundary points, dropping any interior

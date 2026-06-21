@@ -115,25 +115,55 @@ namespace SFMap.Pipeline
             var meshPaths = new List<string>();
 #endif
 
+            int   res   = heightmap.Resolution;
+            float cellW = worldRect.width  / (res - 1);
+            float cellH = worldRect.height / (res - 1);
+            float pad   = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
+            float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
+            if (elevRange < 0.001f) elevRange = 1f;
+
+            // Phase 3a: read-only heightmap pass — sample center elevations and compute circle params.
+            var nodeList = new List<StreetNode>();
+            var polyList = new List<List<Vector2>>();
+            var centerList = new List<Vector3>();
+            var circles = new List<(float cx, float cz, float r, float normalized)>();
+
+            foreach (var node in graph.IntersectionNodes)
+            {
+                if (!polygons.TryGetValue(node, out var poly)) continue;
+
+                float y        = SampleElevation(node.WorldPosition.x, node.WorldPosition.z, heightmap, worldRect) + Raise;
+                float nodeElev = y - Raise;
+
+                float maxR = 0f;
+                foreach (var p in poly) { float m = p.magnitude; if (m > maxR) maxR = m; }
+
+                nodeList.Add(node);
+                polyList.Add(poly);
+                centerList.Add(new Vector3(node.WorldPosition.x, y, node.WorldPosition.z));
+                circles.Add((
+                    node.WorldPosition.x,
+                    node.WorldPosition.z,
+                    maxR + pad,
+                    (nodeElev - heightmap.MinElevationMeters) / elevRange));
+            }
+
+            // Phase 3b: dispatch all circle stamp jobs in parallel and await completion.
+            if (circles.Count > 0)
+                HeightmapStampJobs.StampAllCircles(circles, heightmap, worldRect);
+
+            // Phase 3c: build meshes (no further heightmap reads or writes).
 #if UNITY_EDITOR
             AssetDatabase.StartAssetEditing();
             try
             {
 #endif
-                foreach (var node in graph.IntersectionNodes)
+                for (int i = 0; i < nodeList.Count; i++)
                 {
-                    if (!polygons.TryGetValue(node, out var poly)) continue;
-
-                    float y = SampleElevation(node.WorldPosition.x, node.WorldPosition.z, heightmap, worldRect) + Raise;
-                    var center = new Vector3(node.WorldPosition.x, y, node.WorldPosition.z);
-
-                    float nodeElev = y - Raise;
-                    StampCircle(node.WorldPosition.x, node.WorldPosition.z, poly, nodeElev, heightmap, worldRect);
-
-                    Mesh mesh = TriangulateFan(node.OsmId, center, poly);
+                    Mesh mesh = TriangulateFan(nodeList[i].OsmId, centerList[i], polyList[i]);
 #if UNITY_EDITOR
-                    SaveMesh(mesh, coord, node.OsmId);
-                    meshPaths.Add(GeneratedAssets.IntersectionMesh(coord, node.OsmId));
+                    SaveMesh(mesh, coord, nodeList[i].OsmId);
+                    meshPaths.Add(GeneratedAssets.IntersectionMesh(coord, nodeList[i].OsmId));
 #else
                     meshes.Add(mesh);
 #endif
@@ -312,43 +342,6 @@ namespace SFMap.Pipeline
             mesh.RecalculateNormals();
             mesh.RecalculateBounds();
             return mesh;
-        }
-
-        // Stamps all heightmap cells within the intersection polygon's bounding circle to elevation.
-        static void StampCircle(float cx, float cz, List<Vector2> poly, float elevation,
-            HeightmapData heightmap, Rect worldRect)
-        {
-            float maxR = 0f;
-            foreach (var p in poly) maxR = Mathf.Max(maxR, p.magnitude);
-
-            int   res   = heightmap.Resolution;
-            float cellW = worldRect.width  / (res - 1);
-            float cellH = worldRect.height / (res - 1);
-            float pad   = Mathf.Sqrt(cellW * cellW + cellH * cellH) * 0.5f;
-            float r     = maxR + pad;
-            float r2    = r * r;
-
-            float elevRange = heightmap.MaxElevationMeters - heightmap.MinElevationMeters;
-            if (elevRange < 0.001f) elevRange = 1f;
-            float normalized = (elevation - heightmap.MinElevationMeters) / elevRange;
-
-            int colMin = Mathf.Max(0,       Mathf.FloorToInt((cx - r - worldRect.x) / cellW));
-            int colMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cx + r - worldRect.x) / cellW));
-            int rowMin = Mathf.Max(0,       Mathf.FloorToInt((cz - r - worldRect.y) / cellH));
-            int rowMax = Mathf.Min(res - 1, Mathf.CeilToInt ((cz + r - worldRect.y) / cellH));
-
-            for (int row = rowMin; row <= rowMax; row++)
-            {
-                float wz = worldRect.y + row * cellH;
-                float dz = wz - cz;
-                for (int col = colMin; col <= colMax; col++)
-                {
-                    float wx = worldRect.x + col * cellW;
-                    float dx = wx - cx;
-                    if (dx * dx + dz * dz > r2) continue;
-                    heightmap.Values[row, col] = normalized;
-                }
-            }
         }
 
         static float SampleElevation(float wx, float wz, HeightmapData heightmap, Rect worldRect)
