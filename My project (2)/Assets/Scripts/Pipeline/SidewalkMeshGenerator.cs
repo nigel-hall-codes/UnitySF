@@ -62,7 +62,6 @@ namespace SFMap.Pipeline
                 AssetDatabase.StopAssetEditing();
             }
             EnsureMaterial();
-            AssetDatabase.SaveAssets();
             foreach (var path in meshPaths)
                 meshes.Add(AssetDatabase.LoadAssetAtPath<Mesh>(path));
 #endif

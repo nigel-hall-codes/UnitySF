@@ -80,6 +80,9 @@ namespace SFMap.Pipeline.Editor
 
             if (GUILayout.Button("Clear Generated Assets"))
                 ClearGenerated();
+
+            if (GUILayout.Button("Clear Elevation Cache"))
+                ElevationParser.ClearCache(CsvPath, heightmapResolution);
         }
 
         void RunGenerate()
@@ -98,7 +101,9 @@ namespace SFMap.Pipeline.Editor
                     return;
             }
 
+            EnsureResourcesFolder();
             var sw = Stopwatch.StartNew();
+            AssetDatabase.StartAssetEditing();
             try
             {
                 ClearSceneObjects();
@@ -152,9 +157,13 @@ namespace SFMap.Pipeline.Editor
                         EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Buildings — {lbl}",     t0 + span * 0.75f);
                         var buildingsRoot = BuildingGenerator.Generate(graph.Buildings, heightmap, chunk, coord, defaultBuildingHeight);
 
-                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Scene — {lbl}",         t0 + span * 0.90f);
-                        totalObjects += PopulateChunk(mapRoot, coord, graph, terrainData, heightmap, chunk.WorldRect,
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Scene — {lbl}",         t0 + span * 0.88f);
+                        var (count, chunkRoot) = PopulateChunk(mapRoot, coord, graph, terrainData, heightmap, chunk.WorldRect,
                             roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot, ref vehiclePlaced);
+                        totalObjects += count;
+
+                        EditorUtility.DisplayProgressBar("SF Map Pipeline", $"Prefab — {lbl}",        t0 + span * 0.96f);
+                        PrefabUtility.SaveAsPrefabAsset(chunkRoot, GeneratedAssets.ChunkPrefabPath(coord));
 
                         chunkCoords.Add(coord);
                         chunkWorldRects.Add(chunk.WorldRect);
@@ -163,6 +172,7 @@ namespace SFMap.Pipeline.Editor
 
                 EditorSceneManager.SaveOpenScenes();
                 WriteManifest(fullGraph.SourceBounds, chunkSizeMeters, chunkCoords, chunkWorldRects, fullHeightmap.MinElevationMeters);
+                SaveChunkManifest(chunkSizeMeters, fullHeightmap.MinElevationMeters, chunkCoords, chunkWorldRects);
 
                 sw.Stop();
                 Debug.Log($"[SFMapPipeline] Generated {totalChunks} chunk(s) in {sw.Elapsed.TotalSeconds:F1}s — scene objects:{totalObjects}");
@@ -173,11 +183,13 @@ namespace SFMap.Pipeline.Editor
             }
             finally
             {
+                AssetDatabase.StopAssetEditing();
+                AssetDatabase.SaveAssets();
                 EditorUtility.ClearProgressBar();
             }
         }
 
-        int PopulateChunk(
+        (int count, GameObject chunkRoot) PopulateChunk(
             GameObject mapRoot,
             ChunkCoord coord,
             StreetGraph graph,
@@ -192,15 +204,18 @@ namespace SFMap.Pipeline.Editor
         {
             int count = 0;
 
+            var chunkRoot = new GameObject(coord.ToString());
+            chunkRoot.transform.SetParent(mapRoot.transform, false);
+
             var terrainGo = Terrain.CreateTerrainGameObject(terrainData);
             terrainGo.name = $"Terrain {coord}";
-            terrainGo.transform.SetParent(mapRoot.transform, false);
+            terrainGo.transform.SetParent(chunkRoot.transform, false);
             terrainGo.transform.position = new Vector3(worldRect.x, heightmap.MinElevationMeters, worldRect.y);
             count++;
 
             var roadMat   = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
             int roadLayer = LayerMask.NameToLayer("Road");
-            var roadParent = CreateChild(mapRoot, $"Roads {coord}");
+            var roadParent = CreateChild(chunkRoot, $"Roads {coord}");
             foreach (var mesh in roadMeshes)
             {
                 var go = PlaceMesh(mesh, roadParent, roadMat);
@@ -209,7 +224,7 @@ namespace SFMap.Pipeline.Editor
                 count++;
             }
 
-            var intParent = CreateChild(mapRoot, $"Intersections {coord}");
+            var intParent = CreateChild(chunkRoot, $"Intersections {coord}");
             foreach (var mesh in intersectionMeshes)
             {
                 PlaceMesh(mesh, intParent, roadMat);
@@ -217,7 +232,7 @@ namespace SFMap.Pipeline.Editor
             }
 
             var swMat    = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.SidewalkMaterial());
-            var swParent = CreateChild(mapRoot, $"Sidewalks {coord}");
+            var swParent = CreateChild(chunkRoot, $"Sidewalks {coord}");
             foreach (var mesh in sidewalkMeshes)
             {
                 PlaceMesh(mesh, swParent, swMat);
@@ -225,7 +240,7 @@ namespace SFMap.Pipeline.Editor
             }
 
             buildingsRoot.name = $"Buildings {coord}";
-            buildingsRoot.transform.SetParent(mapRoot.transform, false);
+            buildingsRoot.transform.SetParent(chunkRoot.transform, false);
             count += buildingsRoot.transform.childCount;
 
             if (!vehiclePlaced)
@@ -234,7 +249,7 @@ namespace SFMap.Pipeline.Editor
                 vehiclePlaced = true;
             }
 
-            return count;
+            return (count, chunkRoot);
         }
 
         static void PlaceVehicle(StreetGraph graph, Rect worldRect)
@@ -300,6 +315,40 @@ namespace SFMap.Pipeline.Editor
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return go;
+        }
+
+        static void EnsureResourcesFolder()
+        {
+            if (!AssetDatabase.IsValidFolder("Assets/Resources"))
+                AssetDatabase.CreateFolder("Assets", "Resources");
+            if (!AssetDatabase.IsValidFolder("Assets/Resources/Generated"))
+                AssetDatabase.CreateFolder("Assets/Resources", "Generated");
+            string presetFolder = $"Assets/Resources/Generated/{GeneratedAssets.ActivePreset}";
+            if (!AssetDatabase.IsValidFolder(presetFolder))
+                AssetDatabase.CreateFolder("Assets/Resources/Generated", GeneratedAssets.ActivePreset);
+        }
+
+        void SaveChunkManifest(float chunkSize, float minElevation, List<ChunkCoord> coords, List<Rect> worldRects)
+        {
+            var manifest = ScriptableObject.CreateInstance<ChunkManifest>();
+            manifest.preset          = presetName;
+            manifest.chunkSizeMeters = chunkSize;
+            manifest.minElevation    = minElevation;
+            manifest.chunks          = new ChunkManifestEntry[coords.Count];
+            for (int i = 0; i < coords.Count; i++)
+            {
+                manifest.chunks[i] = new ChunkManifestEntry
+                {
+                    col    = coords[i].Col,
+                    row    = coords[i].Row,
+                    worldX = worldRects[i].x,
+                    worldZ = worldRects[i].y,
+                };
+            }
+
+            string path = GeneratedAssets.ChunkManifestPath();
+            AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(manifest, path);
         }
 
         void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks, List<Rect> worldRects, float minElevation)

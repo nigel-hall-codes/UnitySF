@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -11,10 +12,95 @@ namespace SFMap.Pipeline
     {
         const float FeetToMeters = 0.3048f;
         const float ClipBufferMeters = 200f;
+        const int   CacheMagic = 0x454D4843; // "EMHC"
+
+        static string CachePath(string csvPath, int resolution) =>
+            $"{csvPath}.r{resolution}.heightcache";
+
+        public static void ClearCache(string csvPath, int resolution)
+        {
+            string p = CachePath(csvPath, resolution);
+            if (File.Exists(p)) File.Delete(p);
+            Debug.Log("[ElevationParser] Cache cleared.");
+        }
+
+        static HeightmapData? TryLoadCache(string csvPath, int resolution, Rect expectedWorldRect)
+        {
+            string p = CachePath(csvPath, resolution);
+            if (!File.Exists(p)) return null;
+            if (File.GetLastWriteTimeUtc(csvPath) > File.GetLastWriteTimeUtc(p)) return null;
+
+            try
+            {
+                using var br = new BinaryReader(File.OpenRead(p));
+                if (br.ReadInt32() != CacheMagic) return null;
+                if (br.ReadInt32() != resolution)  return null;
+
+                float minElev = br.ReadSingle();
+                float maxElev = br.ReadSingle();
+                float rx = br.ReadSingle(), ry = br.ReadSingle(), rw = br.ReadSingle(), rh = br.ReadSingle();
+
+                var cachedRect = new Rect(rx, ry, rw, rh);
+                if (Mathf.Abs(cachedRect.x      - expectedWorldRect.x)      > 1f ||
+                    Mathf.Abs(cachedRect.y      - expectedWorldRect.y)      > 1f ||
+                    Mathf.Abs(cachedRect.width  - expectedWorldRect.width)  > 1f ||
+                    Mathf.Abs(cachedRect.height - expectedWorldRect.height) > 1f)
+                    return null;
+
+                var values = new float[resolution, resolution];
+                for (int row = 0; row < resolution; row++)
+                    for (int col = 0; col < resolution; col++)
+                        values[row, col] = br.ReadSingle();
+
+                return new HeightmapData
+                {
+                    Values             = values,
+                    Resolution         = resolution,
+                    WorldRect          = cachedRect,
+                    MinElevationMeters = minElev,
+                    MaxElevationMeters = maxElev,
+                };
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        static void SaveCache(string csvPath, int resolution, HeightmapData data)
+        {
+            try
+            {
+                using var bw = new BinaryWriter(File.Create(CachePath(csvPath, resolution)));
+                bw.Write(CacheMagic);
+                bw.Write(resolution);
+                bw.Write(data.MinElevationMeters);
+                bw.Write(data.MaxElevationMeters);
+                bw.Write(data.WorldRect.x);
+                bw.Write(data.WorldRect.y);
+                bw.Write(data.WorldRect.width);
+                bw.Write(data.WorldRect.height);
+                for (int row = 0; row < resolution; row++)
+                    for (int col = 0; col < resolution; col++)
+                        bw.Write(data.Values[row, col]);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[ElevationParser] Could not save cache: {e.Message}");
+            }
+        }
 
         public static HeightmapData Parse(string csvFilePath, OsmBounds osmBounds, int resolution = 513)
         {
             var worldRect = GeoProjection.WorldBounds(osmBounds);
+
+            var cached = TryLoadCache(csvFilePath, resolution, worldRect);
+            if (cached.HasValue)
+            {
+                Debug.Log($"[ElevationParser] Loaded heightmap from cache ({resolution}×{resolution}).");
+                return cached.Value;
+            }
+
             var clipRect = Expand(worldRect, ClipBufferMeters);
 
             var points = new List<Vector2>();
@@ -37,7 +123,7 @@ namespace SFMap.Pipeline
             var values = new float[resolution, resolution];
             FillHeightmap(values, resolution, worldRect, points, elevations, tris, minElev, maxElev);
 
-            return new HeightmapData
+            var result = new HeightmapData
             {
                 Values             = values,
                 Resolution         = resolution,
@@ -45,6 +131,8 @@ namespace SFMap.Pipeline
                 MinElevationMeters = minElev,
                 MaxElevationMeters = maxElev,
             };
+            SaveCache(csvFilePath, resolution, result);
+            return result;
         }
 
         static Rect Expand(Rect r, float margin) =>

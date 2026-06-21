@@ -144,7 +144,6 @@ namespace SFMap.Pipeline
             {
                 AssetDatabase.StopAssetEditing();
             }
-            AssetDatabase.SaveAssets();
             foreach (var path in meshPaths)
                 meshes.Add(AssetDatabase.LoadAssetAtPath<Mesh>(path));
 #endif
