@@ -39,8 +39,9 @@ namespace SFMap.Pipeline
 
             return new HeightmapData
             {
-                Values = values,
-                Resolution = resolution,
+                Values             = values,
+                Resolution         = resolution,
+                WorldRect          = worldRect,
                 MinElevationMeters = minElev,
                 MaxElevationMeters = maxElev,
             };
