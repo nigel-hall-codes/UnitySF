@@ -65,7 +65,7 @@ def stamp_intersections(
 def stamp_roads(
     hmap: HeightmapData,
     graph: StreetGraph,
-    boundaries: Optional[Dict[int, Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
+    boundaries: Optional[Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
 ) -> None:
     """Flatten heightmap cells under each road segment (in-place).
 
@@ -131,7 +131,7 @@ def stamp_all(
     hmap: HeightmapData,
     graph: StreetGraph,
     polygons: Dict[int, Polygon],
-    boundaries: Optional[Dict[int, Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
+    boundaries: Optional[Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
 ) -> None:
     """Apply the full stamp sequence: intersections first, then roads.
 
