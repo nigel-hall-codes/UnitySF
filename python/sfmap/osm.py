@@ -324,10 +324,11 @@ def _build_graph(
             continue
         is_signal = raw.tags.get("highway") == "traffic_signals"
         is_intersection = count >= 2
+        wx, wz = to_world_xz(raw.lon, raw.lat, origin)
         street_nodes[nid] = StreetNode(
             osm_id=nid,
-            world_x=to_world_xz(raw.lon, raw.lat, origin)[0],
-            world_z=to_world_xz(raw.lon, raw.lat, origin)[1],
+            world_x=wx,
+            world_z=wz,
             is_intersection=is_intersection,
             traffic_control=(
                 IntersectionType.TRAFFIC_SIGNALS if is_intersection and is_signal
