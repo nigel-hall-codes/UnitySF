@@ -91,8 +91,9 @@ namespace SFMap.Pipeline.Editor
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road setbacks…", 0.06f);
                 var setbacks = IntersectionMeshGenerator.ComputeSetbacks(fullGraph);
 
-                var mapRoot      = new GameObject("SF Map");
-                var chunkCoords  = new List<ChunkCoord>(totalChunks);
+                var mapRoot        = new GameObject("SF Map");
+                var chunkCoords    = new List<ChunkCoord>(totalChunks);
+                var chunkWorldRects = new List<Rect>(totalChunks);
                 bool vehiclePlaced = false;
                 int  totalObjects  = 0;
                 int  chunkIdx      = 0;
@@ -132,11 +133,12 @@ namespace SFMap.Pipeline.Editor
                             roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot, ref vehiclePlaced);
 
                         chunkCoords.Add(coord);
+                        chunkWorldRects.Add(chunk.WorldRect);
                     }
                 }
 
                 EditorSceneManager.SaveOpenScenes();
-                WriteManifest(fullGraph.SourceBounds, chunkSizeMeters, chunkCoords);
+                WriteManifest(fullGraph.SourceBounds, chunkSizeMeters, chunkCoords, chunkWorldRects, fullHeightmap.MinElevationMeters);
 
                 sw.Stop();
                 Debug.Log($"[SFMapPipeline] Generated {totalChunks} chunk(s) in {sw.Elapsed.TotalSeconds:F1}s — scene objects:{totalObjects}");
@@ -276,13 +278,18 @@ namespace SFMap.Pipeline.Editor
             return go;
         }
 
-        void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks)
+        void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks, List<Rect> worldRects, float minElevation)
         {
             string dir = Path.Combine(Application.dataPath, "Generated", presetName);
             Directory.CreateDirectory(dir);
 
             var parts = new List<string>(chunks.Count);
-            foreach (var c in chunks) parts.Add($"{{\"col\": {c.Col}, \"row\": {c.Row}}}");
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                var c = chunks[i];
+                var r = worldRects[i];
+                parts.Add($"{{\"col\": {c.Col}, \"row\": {c.Row}, \"worldX\": {r.x:F3}, \"worldZ\": {r.y:F3}}}");
+            }
             string chunkArr = string.Join(", ", parts);
 
             string json = "{\n" +
@@ -294,7 +301,8 @@ namespace SFMap.Pipeline.Editor
                 $"  \"osmBounds\": {{ \"minLat\": {bounds.MinLat:F6}, \"maxLat\": {bounds.MaxLat:F6}, \"minLon\": {bounds.MinLon:F6}, \"maxLon\": {bounds.MaxLon:F6} }},\n" +
                 $"  \"roadWidthMultiplier\": {roadWidthMultiplier:F1},\n" +
                 $"  \"defaultBuildingHeight\": {defaultBuildingHeight:F1},\n" +
-                $"  \"heightmapResolution\": {heightmapResolution}\n" +
+                $"  \"heightmapResolution\": {heightmapResolution},\n" +
+                $"  \"minElevation\": {minElevation:F3}\n" +
                 "}";
             File.WriteAllText(Path.Combine(dir, "manifest.json"), json);
             AssetDatabase.ImportAsset(GeneratedAssets.ManifestPath());
