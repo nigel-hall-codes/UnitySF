@@ -14,6 +14,7 @@ namespace SFMap.Pipeline.Editor
         static string OsmPath => Path.Combine(Application.dataPath, "SFMapData", "map.osm");
         static string CsvPath => Path.Combine(Application.dataPath, "SFMapData", "Elevation_Contours_20260619.csv");
 
+        [SerializeField] string presetName           = "default";
         [SerializeField] float roadWidthMultiplier   = 1f;
         [SerializeField] float defaultBuildingHeight = 10f;
         [SerializeField] int   heightmapResolution   = 513;
@@ -24,6 +25,7 @@ namespace SFMap.Pipeline.Editor
         void OnGUI()
         {
             EditorGUILayout.LabelField("Config", EditorStyles.boldLabel);
+            presetName            = EditorGUILayout.TextField( "Preset Name",                 presetName);
             roadWidthMultiplier   = EditorGUILayout.FloatField("Road Width Multiplier",       roadWidthMultiplier);
             defaultBuildingHeight = EditorGUILayout.FloatField("Default Building Height (m)", defaultBuildingHeight);
             heightmapResolution   = EditorGUILayout.IntField(  "Heightmap Resolution",        heightmapResolution);
@@ -39,6 +41,8 @@ namespace SFMap.Pipeline.Editor
 
         void RunGenerate()
         {
+            GeneratedAssets.ActivePreset = presetName;
+
             if (GameObject.Find("SF Map") != null || GameObject.Find("Buildings") != null)
             {
                 if (!EditorUtility.DisplayDialog("SF Map Pipeline",
@@ -87,6 +91,7 @@ namespace SFMap.Pipeline.Editor
                     roadMeshes, intersectionMeshes, sidewalkMeshes, buildingsRoot);
 
                 EditorSceneManager.SaveOpenScenes();
+                WriteManifest(graph.SourceBounds, worldRect, coord);
 
                 sw.Stop();
                 Debug.Log($"[SFMapPipeline] Generated in {sw.Elapsed.TotalSeconds:F1}s — " +
@@ -225,15 +230,36 @@ namespace SFMap.Pipeline.Editor
             return go;
         }
 
+        void WriteManifest(OsmBounds bounds, Rect worldRect, ChunkCoord coord)
+        {
+            string dir = Path.Combine(Application.dataPath, "Generated", presetName);
+            Directory.CreateDirectory(dir);
+            string json = "{\n" +
+                $"  \"preset\": \"{presetName}\",\n" +
+                $"  \"generated\": \"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}\",\n" +
+                $"  \"chunkSize\": {(int)Mathf.Round(worldRect.width)},\n" +
+                $"  \"chunks\": [{{\"col\": {coord.Col}, \"row\": {coord.Row}}}],\n" +
+                $"  \"osmFile\": \"map.osm\",\n" +
+                $"  \"osmBounds\": {{ \"minLat\": {bounds.MinLat:F6}, \"maxLat\": {bounds.MaxLat:F6}, \"minLon\": {bounds.MinLon:F6}, \"maxLon\": {bounds.MaxLon:F6} }},\n" +
+                $"  \"roadWidthMultiplier\": {roadWidthMultiplier:F1},\n" +
+                $"  \"defaultBuildingHeight\": {defaultBuildingHeight:F1},\n" +
+                $"  \"heightmapResolution\": {heightmapResolution}\n" +
+                "}";
+            File.WriteAllText(Path.Combine(dir, "manifest.json"), json);
+            AssetDatabase.ImportAsset(GeneratedAssets.ManifestPath());
+        }
+
         void ClearGenerated()
         {
+            GeneratedAssets.ActivePreset = presetName;
             ClearSceneObjects();
 
-            if (AssetDatabase.IsValidFolder(GeneratedAssets.Root))
+            string presetDir = GeneratedAssets.Root;
+            if (AssetDatabase.IsValidFolder(presetDir))
             {
-                AssetDatabase.DeleteAsset(GeneratedAssets.Root);
+                AssetDatabase.DeleteAsset(presetDir);
                 AssetDatabase.Refresh();
-                Debug.Log("[SFMapPipeline] Cleared Assets/Generated/");
+                Debug.Log($"[SFMapPipeline] Cleared {presetDir}");
             }
         }
 
