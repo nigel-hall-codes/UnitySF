@@ -101,6 +101,7 @@ namespace SFMap.Pipeline.Editor
                     return;
             }
 
+            EnsureResourcesFolder();
             var sw = Stopwatch.StartNew();
             AssetDatabase.StartAssetEditing();
             try
@@ -118,8 +119,6 @@ namespace SFMap.Pipeline.Editor
 
                 EditorUtility.DisplayProgressBar("SF Map Pipeline", "Computing road boundaries…", 0.08f);
                 var boundaries = IntersectionMeshGenerator.ComputeBoundaries(fullGraph, polygons);
-
-                EnsureResourcesFolder();
 
                 var mapRoot        = new GameObject("SF Map");
                 var chunkCoords    = new List<ChunkCoord>(totalChunks);
