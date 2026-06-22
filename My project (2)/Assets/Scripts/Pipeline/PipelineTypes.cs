@@ -1,3 +1,4 @@
+﻿using System.IO;
 using UnityEngine;
 
 namespace SFMap.Pipeline
@@ -87,6 +88,8 @@ namespace SFMap.Pipeline
 
     public static class GeneratedAssets
     {
+        public const int GeneratorVersion = 1;
+
         public static string ActivePreset = "default";
 
         public static string Root          => $"Assets/Generated/{ActivePreset}";
@@ -109,5 +112,21 @@ namespace SFMap.Pipeline
         // Paths passed to Resources.Load at runtime (no "Assets/Resources/" prefix, no extension)
         public static string RuntimeChunkPrefab(ChunkCoord c) => $"Generated/{ActivePreset}/{c}";
         public static string RuntimeChunkManifest()           => $"Generated/{ActivePreset}/ChunkManifest";
+
+        public static string ChunkFingerprint(
+            string osmFilePath, string csvPath,
+            float chunkSizeMeters, int col, int row,
+            float roadWidthMultiplier, float defaultBuildingHeight,
+            int heightmapResolution)
+        {
+            long osmMtime = File.GetLastWriteTimeUtc(osmFilePath).Ticks;
+            long csvMtime = File.GetLastWriteTimeUtc(csvPath).Ticks;
+            string raw = $"{osmMtime}|{csvMtime}|{chunkSizeMeters:F3}|{col}|{row}" +
+                         $"|{roadWidthMultiplier:F3}|{defaultBuildingHeight:F3}" +
+                         $"|{heightmapResolution}|v{GeneratorVersion}";
+            ulong h = 14695981039346656037UL;
+            foreach (char c in raw) { h ^= c; h *= 1099511628211UL; }
+            return h.ToString("x16");
+        }
     }
 }
