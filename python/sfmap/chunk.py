@@ -24,6 +24,30 @@ from .stamping import stamp_all
 _Boundaries = Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]
 
 
+def _merge_by_id(
+    arrays_by_key: Dict[Tuple[int, int, int], Tuple[list, list, list]],
+) -> Dict[int, Tuple[list, list, list]]:
+    """Merge mesh arrays sharing an osm way id into one (verts, uvs, indices).
+
+    The OSM parser splits a way into several edges at intersections, so multiple
+    edge meshes share ``way_id`` (= key[0]). The importer names every mesh asset
+    ``<type>_<osm_id>``, so distinct entries with the same id would collide on
+    one asset path. Merging them into a single mesh per way keeps each id unique.
+    """
+    merged: Dict[int, Tuple[list, list, list]] = {}
+    for (way_id, _f, _t), (verts, uvs, indices) in arrays_by_key.items():
+        if not verts or not indices:
+            continue
+        if way_id not in merged:
+            merged[way_id] = ([], [], [])
+        m_verts, m_uvs, m_indices = merged[way_id]
+        offset = len(m_verts)
+        m_verts.extend(verts)
+        m_uvs.extend(uvs)
+        m_indices.extend(i + offset for i in indices)
+    return merged
+
+
 def chunk_world_rect(col: int, row: int, chunk_size: float) -> Tuple[float, float, float, float]:
     """Return (x_min, z_min, width, height) for chunk (col, row).
 
@@ -110,10 +134,10 @@ def bake_chunk(
 
     meshes: list[MeshEntry] = []
 
-    # Roads (keyed by (way_id, from, to) → arrays). osm_id = way_id, matching old asset names.
-    for (way_id, _f, _t), (verts, uvs, indices) in build_road_meshes(graph, hmap, boundaries).items():
-        if verts and indices:
-            meshes.append(MeshEntry(MeshType.ROAD, way_id, verts, [], uvs, indices))
+    # Roads — merge the split segments of each way into one mesh so osm_id (= way id)
+    # is unique within the chunk (the importer keys assets by <type>_<osm_id>).
+    for way_id, (verts, uvs, indices) in _merge_by_id(build_road_meshes(graph, hmap, boundaries)).items():
+        meshes.append(MeshEntry(MeshType.ROAD, way_id, verts, [], uvs, indices))
 
     # Intersections — fan-triangulated per node from the shared polygons.
     for node in graph.intersection_nodes:
@@ -125,11 +149,10 @@ def bake_chunk(
         if verts and indices:
             meshes.append(MeshEntry(MeshType.INTERSECTION, node.osm_id, verts, [], uvs, indices))
 
-    # Sidewalks (optional).
+    # Sidewalks (optional) — same per-way merge as roads.
     if include_sidewalks:
-        for (way_id, _f, _t), (verts, uvs, indices) in build_sidewalk_meshes(graph, hmap, boundaries).items():
-            if verts and indices:
-                meshes.append(MeshEntry(MeshType.SIDEWALK, way_id, verts, [], uvs, indices))
+        for way_id, (verts, uvs, indices) in _merge_by_id(build_sidewalk_meshes(graph, hmap, boundaries)).items():
+            meshes.append(MeshEntry(MeshType.SIDEWALK, way_id, verts, [], uvs, indices))
 
     # Buildings (keyed by building osm_id → arrays).
     for osm_id, (verts, uvs, indices) in build_building_meshes(graph, hmap).items():
