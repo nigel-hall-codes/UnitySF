@@ -138,6 +138,8 @@ namespace SFMap.Pipeline.Editor
                 bool vehiclePlaced = false;
                 int  totalObjects  = 0;
                 int  chunkIdx      = 0;
+                int  skipCount     = 0;
+                int  regenCount    = 0;
 
                 for (int row = rowMin; row <= rowMax; row++)
                 {
@@ -168,6 +170,7 @@ namespace SFMap.Pipeline.Editor
                                 chunkCoords.Add(coord);
                                 chunkWorldRects.Add(chunk.WorldRect);
                                 newHashes[coord.ToString()] = fingerprint;
+                                skipCount++;
                                 continue;
                             }
                         }
@@ -218,6 +221,7 @@ namespace SFMap.Pipeline.Editor
                         Debug.Log($"[SFMapPipeline] {coord} total: {swChunk.Elapsed.TotalSeconds:F3}s");
 
                         newHashes[coord.ToString()] = fingerprint;
+                        regenCount++;
                         chunkCoords.Add(coord);
                         chunkWorldRects.Add(chunk.WorldRect);
                     }
@@ -228,7 +232,7 @@ namespace SFMap.Pipeline.Editor
                 SaveChunkManifest(chunkSizeMeters, fullHeightmap.MinElevationMeters, chunkCoords, chunkWorldRects);
 
                 sw.Stop();
-                Debug.Log($"[SFMapPipeline] Generated {totalChunks} chunk(s) in {sw.Elapsed.TotalSeconds:F1}s — scene objects:{totalObjects}");
+                Debug.Log($"[SFMapPipeline] {skipCount}/{totalChunks} chunks skipped (up to date), {regenCount} regenerated — {sw.Elapsed.TotalSeconds:F1}s");
             }
             catch (Exception e)
             {
