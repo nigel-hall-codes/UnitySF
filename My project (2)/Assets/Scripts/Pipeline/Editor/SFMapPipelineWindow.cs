@@ -90,6 +90,7 @@ namespace SFMap.Pipeline.Editor
             GeneratedAssets.ActivePreset = presetName;
 
             var previousHashes = ReadPreviousHashes();
+            var newHashes      = new Dictionary<string, string>();
 
             colMax = Mathf.Max(colMax, colMin);
             rowMax = Mathf.Max(rowMax, rowMin);
@@ -149,6 +150,28 @@ namespace SFMap.Pipeline.Editor
                         float span = 0.85f / totalChunks;
                         string lbl = $"chunk {chunkIdx}/{totalChunks} ({coord})";
 
+                        string fingerprint = GeneratedAssets.ChunkFingerprint(
+                            osmFilePath, CsvPath, chunkSizeMeters, col, row,
+                            roadWidthMultiplier, defaultBuildingHeight, heightmapResolution);
+                        if (previousHashes.TryGetValue(coord.ToString(), out string storedHash) &&
+                            storedHash == fingerprint)
+                        {
+                            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(
+                                GeneratedAssets.ChunkPrefabPath(coord));
+                            if (prefab != null)
+                            {
+                                EditorUtility.DisplayProgressBar("SF Map Pipeline",
+                                    $"Skipping (up to date) — {lbl}", t0);
+                                var instance = (GameObject)PrefabUtility.InstantiatePrefab(
+                                    prefab, mapRoot.transform);
+                                instance.name = coord.ToString();
+                                chunkCoords.Add(coord);
+                                chunkWorldRects.Add(chunk.WorldRect);
+                                newHashes[coord.ToString()] = fingerprint;
+                                continue;
+                            }
+                        }
+
                         var graph     = fullGraph.CropToChunk(chunk);
                         var heightmap = fullHeightmap.CropToChunk(chunk, heightmapResolution);
 
@@ -194,6 +217,7 @@ namespace SFMap.Pipeline.Editor
 
                         Debug.Log($"[SFMapPipeline] {coord} total: {swChunk.Elapsed.TotalSeconds:F3}s");
 
+                        newHashes[coord.ToString()] = fingerprint;
                         chunkCoords.Add(coord);
                         chunkWorldRects.Add(chunk.WorldRect);
                     }
