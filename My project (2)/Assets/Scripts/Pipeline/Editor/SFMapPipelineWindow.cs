@@ -224,7 +224,7 @@ namespace SFMap.Pipeline.Editor
                 }
 
                 EditorSceneManager.SaveOpenScenes();
-                WriteManifest(fullGraph.SourceBounds, chunkSizeMeters, chunkCoords, chunkWorldRects, fullHeightmap.MinElevationMeters);
+                WriteManifest(fullGraph.SourceBounds, chunkSizeMeters, chunkCoords, chunkWorldRects, fullHeightmap.MinElevationMeters, newHashes);
                 SaveChunkManifest(chunkSizeMeters, fullHeightmap.MinElevationMeters, chunkCoords, chunkWorldRects);
 
                 sw.Stop();
@@ -405,7 +405,7 @@ namespace SFMap.Pipeline.Editor
             AssetDatabase.SaveAssets();
         }
 
-        void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks, List<Rect> worldRects, float minElevation)
+        void WriteManifest(OsmBounds bounds, float chunkSize, List<ChunkCoord> chunks, List<Rect> worldRects, float minElevation, Dictionary<string, string> chunkHashes)
         {
             string dir = Path.Combine(Application.dataPath, "Generated", presetName);
             Directory.CreateDirectory(dir);
@@ -419,6 +419,13 @@ namespace SFMap.Pipeline.Editor
             }
             string chunkArr = string.Join(", ", parts);
 
+            var hashParts = new List<string>(chunkHashes.Count);
+            foreach (var kv in chunkHashes)
+                hashParts.Add($"    \"{kv.Key}\": \"{kv.Value}\"");
+            string hashesJson = hashParts.Count > 0
+                ? "{\n" + string.Join(",\n", hashParts) + "\n  }"
+                : "{}";
+
             string json = "{\n" +
                 $"  \"preset\": \"{presetName}\",\n" +
                 $"  \"generated\": \"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ssZ}\",\n" +
@@ -429,7 +436,8 @@ namespace SFMap.Pipeline.Editor
                 $"  \"roadWidthMultiplier\": {roadWidthMultiplier:F1},\n" +
                 $"  \"defaultBuildingHeight\": {defaultBuildingHeight:F1},\n" +
                 $"  \"heightmapResolution\": {heightmapResolution},\n" +
-                $"  \"minElevation\": {minElevation:F3}\n" +
+                $"  \"minElevation\": {minElevation:F3},\n" +
+                $"  \"chunkHashes\": {hashesJson}\n" +
                 "}";
             File.WriteAllText(Path.Combine(dir, "manifest.json"), json);
             AssetDatabase.ImportAsset(GeneratedAssets.ManifestPath());
