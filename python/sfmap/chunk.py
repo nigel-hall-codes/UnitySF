@@ -48,12 +48,19 @@ def _merge_by_id(
     return merged
 
 
-def chunk_world_rect(col: int, row: int, chunk_size: float) -> Tuple[float, float, float, float]:
+def chunk_world_rect(
+    col: int, row: int, chunk_size: float, base_x: float = 0.0, base_z: float = 0.0
+) -> Tuple[float, float, float, float]:
     """Return (x_min, z_min, width, height) for chunk (col, row).
 
-    Matches the old C# ChunkBounds: the chunk's SW corner is (col*size, row*size).
+    The chunk's SW corner is (base_x + col*size, base_z + row*size). ``base_x``/
+    ``base_z`` anchor the grid at the data's SW corner; they default to 0 so the
+    legacy "grid starts at world origin" behaviour is preserved when unspecified.
+    Note the projection centres world coordinates on the OSM bounds, so the data
+    straddles the origin — the caller must pass the geometry's min corner here or
+    the negative-XZ portion of the map falls outside the grid and is dropped.
     """
-    return col * chunk_size, row * chunk_size, chunk_size, chunk_size
+    return base_x + col * chunk_size, base_z + row * chunk_size, chunk_size, chunk_size
 
 
 def resample_heightmap(
@@ -117,13 +124,16 @@ def bake_chunk(
     chunk_size: float,
     hmap_res: int,
     include_sidewalks: bool = True,
+    base_x: float = 0.0,
+    base_z: float = 0.0,
 ) -> ChunkData:
     """Produce the ChunkData for one chunk (col, row).
 
     polygons/boundaries are computed once on the full graph and shared across chunks;
     they are keyed by osm id / edge key so they apply correctly to the cropped graph.
+    base_x/base_z anchor the chunk grid at the data's SW corner (see chunk_world_rect).
     """
-    x_min, z_min, size, _ = chunk_world_rect(col, row, chunk_size)
+    x_min, z_min, size, _ = chunk_world_rect(col, row, chunk_size, base_x, base_z)
 
     graph = full_graph.crop_to_chunk(x_min, z_min, x_min + size, z_min + size)
     hmap = resample_heightmap(full_hmap, x_min, z_min, size, hmap_res)

@@ -1,6 +1,7 @@
 """sfmap_bake — offline bake OSM + elevation data into per-chunk .bin files."""
 
 import argparse
+import math
 import sys
 import time
 from datetime import datetime, timezone
@@ -24,8 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--elev", required=True, metavar="FILE", help="Input elevation CSV")
     p.add_argument("--preset", default="default", metavar="NAME", help="Preset name (default: default)")
     p.add_argument("--chunk-size", type=float, default=1964.0, metavar="METERS", help="Chunk size in world metres (default: 1964)")
-    p.add_argument("--chunks-x", type=int, default=2, metavar="N", help="Number of chunks along X axis (default: 2)")
-    p.add_argument("--chunks-z", type=int, default=2, metavar="N", help="Number of chunks along Z axis (default: 2)")
+    p.add_argument("--chunks-x", type=int, default=None, metavar="N", help="Number of chunks along X axis (default: auto-fit to data extent)")
+    p.add_argument("--chunks-z", type=int, default=None, metavar="N", help="Number of chunks along Z axis (default: auto-fit to data extent)")
     p.add_argument("--out", default="./chunks/", metavar="DIR", help="Output directory (default: ./chunks/)")
     p.add_argument("--only", nargs="+", type=parse_chunk_pair, metavar="col,row", help="Bake only the specified chunks (e.g. --only 0,0 1,0)")
     p.add_argument("--hmap-res", type=int, default=513, metavar="N", help="Heightmap resolution per chunk (default: 513)")
@@ -33,18 +34,43 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _chunk_list(args) -> list:
-    """Resolve the (col, row) chunks to bake from --chunks-x/-z and --only."""
-    if args.only:
+def _chunk_list(only, chunks_x: int, chunks_z: int) -> list:
+    """Resolve the (col, row) chunks to bake from the grid size and --only."""
+    if only:
         # Explicit set — bake exactly these, de-duplicated, in stable order.
         seen = set()
         out = []
-        for cr in args.only:
+        for cr in only:
             if cr not in seen:
                 seen.add(cr)
                 out.append(cr)
         return out
-    return [(col, row) for row in range(args.chunks_z) for col in range(args.chunks_x)]
+    return [(col, row) for row in range(chunks_z) for col in range(chunks_x)]
+
+
+def _geometry_extent(graph):
+    """Return (min_x, min_z, max_x, max_z) over every croppable element in the graph.
+
+    The OSM <bounds> element undercounts the real extent: boundary-crossing ways
+    pull in nodes outside the declared box, and the projection centres world
+    coordinates on the bounds centre. Anchoring the chunk grid to this actual
+    bounding box (rather than the bounds rect or world origin) is what keeps the
+    whole map inside the grid. Covers nodes, edge centerlines, and building
+    footprints — the three things crop_to_chunk filters on.
+    """
+    xs, zs = [], []
+    for n in graph.nodes.values():
+        xs.append(n.world_x)
+        zs.append(n.world_z)
+    for e in graph.edges:
+        for x, z in e.centerline:
+            xs.append(x)
+            zs.append(z)
+    for b in graph.buildings:
+        for x, z in b.footprint:
+            xs.append(x)
+            zs.append(z)
+    return min(xs), min(zs), max(xs), max(zs)
 
 
 def main() -> int:
@@ -72,8 +98,22 @@ def main() -> int:
     polygons = intersection.compute_polygons(full_graph)
     boundaries = intersection.compute_boundaries(full_graph, polygons)
 
+    # --- Anchor the chunk grid at the data's SW corner ---------------------
+    # The projection centres world coords on the OSM bounds, so geometry straddles
+    # the origin into negative XZ. Anchoring the grid at (0,0) would drop everything
+    # left of / below the origin; anchor it at the real geometry min instead.
+    min_x, min_z, max_x, max_z = _geometry_extent(full_graph)
+    base_x, base_z = min_x, min_z
+    chunks_x = args.chunks_x if args.chunks_x is not None \
+        else max(1, math.ceil((max_x - base_x) / args.chunk_size))
+    chunks_z = args.chunks_z if args.chunks_z is not None \
+        else max(1, math.ceil((max_z - base_z) / args.chunk_size))
+    print(f"[sfmap_bake] geometry extent x[{min_x:.1f}, {max_x:.1f}] "
+          f"z[{min_z:.1f}, {max_z:.1f}] -> grid {chunks_x}x{chunks_z} "
+          f"@ {args.chunk_size:.0f}m anchored at ({base_x:.1f}, {base_z:.1f})")
+
     # --- Per-chunk bake ----------------------------------------------------
-    chunks = _chunk_list(args)
+    chunks = _chunk_list(args.only, chunks_x, chunks_z)
     include_sidewalks = not args.no_sidewalks
     chunk_origins = []
     for i, (col, row) in enumerate(chunks):
@@ -81,6 +121,7 @@ def main() -> int:
         chunk = bake_chunk(
             col, row, full_graph, full_hmap, polygons, boundaries,
             args.chunk_size, args.hmap_res, include_sidewalks,
+            base_x=base_x, base_z=base_z,
         )
         serialize.write_chunk(chunk, args.out)
         chunk_origins.append((col, row, chunk.world_x, chunk.world_z))
@@ -92,8 +133,8 @@ def main() -> int:
     serialize.write_manifest(
         preset=args.preset,
         chunk_size_m=args.chunk_size,
-        chunks_x=args.chunks_x,
-        chunks_z=args.chunks_z,
+        chunks_x=chunks_x,
+        chunks_z=chunks_z,
         osm_file=args.osm,
         osm_bounds_dict={
             "minLat": bounds.min_lat, "maxLat": bounds.max_lat,
