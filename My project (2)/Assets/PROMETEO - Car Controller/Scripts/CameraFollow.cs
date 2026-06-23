@@ -11,7 +11,7 @@ public class CameraFollow : MonoBehaviour {
 	public float lookSpeed = 5;
 	[Range(10, 360)]
 	public float orbitSpeed = 120f;
-	public bool autoFollow = true;
+	public bool autoRotate = true;
 
 	Vector3 initialCameraPosition;
 	Vector3 initialCarPosition;
@@ -26,8 +26,6 @@ public class CameraFollow : MonoBehaviour {
 
 	void FixedUpdate()
 	{
-		if (!autoFollow) return;
-
 		// Accumulate orbit yaw from right analog stick
 		float lookX = 0f;
 		if (HasAxis("CameraLookX"))
@@ -38,6 +36,8 @@ public class CameraFollow : MonoBehaviour {
 		Vector3 orbitOffset = Quaternion.AngleAxis(_orbitYaw, Vector3.up) * absoluteInitCameraPosition;
 		Vector3 _targetPos = carTransform.position + orbitOffset;
 		transform.position = Vector3.Lerp(transform.position, _targetPos, followSpeed * Time.deltaTime);
+
+		if (!autoRotate) return;
 
 		// Look at car
 		Vector3 _lookDirection = carTransform.position - transform.position;
