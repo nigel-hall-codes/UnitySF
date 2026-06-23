@@ -25,6 +25,7 @@ namespace SFMap.Pipeline
 
         public static string ChunkDir(ChunkCoord c)                  => $"{Root}/{c}";
         public static string TerrainAsset(ChunkCoord c)              => $"{ChunkDir(c)}/Terrain.asset";
+        public static string TerrainBaseLayer()                      => $"{Root}/Materials/TerrainBaseLayer.terrainlayer";
         public static string RoadMesh(ChunkCoord c, long id)         => $"{ChunkDir(c)}/Roads/road_{id}.mesh";
         public static string IntersectionMesh(ChunkCoord c, long id) => $"{ChunkDir(c)}/Intersections/intersection_{id}.mesh";
         public static string SidewalkMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Sidewalks/sidewalk_{id}.mesh";
