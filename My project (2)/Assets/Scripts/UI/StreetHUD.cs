@@ -22,6 +22,7 @@ namespace SFMap.UI
             if (FindObjectOfType<StreetHUD>() != null) return;
             var go = new GameObject(nameof(StreetHUD));
             go.AddComponent<StreetHUD>();
+            DontDestroyOnLoad(go);
         }
 
         void Awake() => Build();

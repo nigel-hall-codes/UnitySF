@@ -323,6 +323,7 @@ namespace SFMap.Pipeline.Editor
             if (!File.Exists(src)) return;
 
             string dst = GeneratedAssets.ChunkRoadNamesAsset(coord);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst));
             File.Copy(src, dst, overwrite: true);
             AssetDatabase.ImportAsset(dst);
         }
