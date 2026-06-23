@@ -79,6 +79,7 @@ namespace SFMap.Pipeline.Editor
             }
 
             EnsureTopLevelFolders();
+            EnsureMaterials();
 
             var mapRoot    = new GameObject("SF Map");
             var coordList  = new List<ChunkManifestEntry>();
@@ -284,6 +285,31 @@ namespace SFMap.Pipeline.Editor
         }
 
         // ------------------------------------------------------------------ helpers
+
+        static void EnsureMaterials()
+        {
+            EnsureFolder(GeneratedAssets.Root, "Materials");
+
+            string roadPath = GeneratedAssets.RoadMaterial();
+            if (AssetDatabase.LoadAssetAtPath<Material>(roadPath) == null)
+            {
+                var mat = new Material(Shader.Find("Standard"));
+                mat.color = new Color(0.25f, 0.25f, 0.25f);
+                mat.SetFloat("_Metallic", 0f);
+                mat.SetFloat("_Glossiness", 0f);
+                AssetDatabase.CreateAsset(mat, roadPath);
+            }
+
+            string swPath = GeneratedAssets.SidewalkMaterial();
+            if (AssetDatabase.LoadAssetAtPath<Material>(swPath) == null)
+            {
+                var mat = new Material(Shader.Find("Standard"));
+                mat.color = new Color(0.75f, 0.75f, 0.75f);
+                mat.SetFloat("_Metallic", 0f);
+                mat.SetFloat("_Glossiness", 0f);
+                AssetDatabase.CreateAsset(mat, swPath);
+            }
+        }
 
         static void EnsureTopLevelFolders()
         {
