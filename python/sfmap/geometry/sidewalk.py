@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
-from .road import MeshArrays, _anchor_centerline, _cross_up, _forward, _sample_elevation
+from .road import MeshArrays, _anchor_centerline, _clip_polyline_to_rect, _cross_up, _forward, _sample_elevation
 
 _WIDTH = 1.5    # metres per sidewalk strip (left and right)
 _RAISE = 0.10   # metres above terrain — slightly higher than road surface
@@ -42,7 +42,12 @@ def _build_single_sidewalk(
     bd_from: Optional[Tuple[float, float]],
     bd_to: Optional[Tuple[float, float]],
 ) -> Optional[MeshArrays]:
-    cl_xz = edge.centerline
+    bx0 = hmap.world_x_min
+    bz0 = hmap.world_z_min
+    bx1 = hmap.world_x_min + hmap.world_width
+    bz1 = hmap.world_z_min + hmap.world_height
+
+    cl_xz = _clip_polyline_to_rect(edge.centerline, bx0, bz0, bx1, bz1)
     sampled = [
         (x, _sample_elevation(hmap, x, z), z)
         for x, z in cl_xz
@@ -50,9 +55,9 @@ def _build_single_sidewalk(
 
     from_pt = None
     to_pt = None
-    if bd_from is not None:
+    if bd_from is not None and bx0 <= bd_from[0] <= bx1 and bz0 <= bd_from[1] <= bz1:
         from_pt = (bd_from[0], _sample_elevation(hmap, bd_from[0], bd_from[1]), bd_from[1])
-    if bd_to is not None:
+    if bd_to is not None and bx0 <= bd_to[0] <= bx1 and bz0 <= bd_to[1] <= bz1:
         to_pt = (bd_to[0], _sample_elevation(hmap, bd_to[0], bd_to[1]), bd_to[1])
 
     centerline = _anchor_centerline(sampled, from_pt, to_pt)
