@@ -68,12 +68,15 @@ namespace SFMap.UI
         Transform ResolveHeadingSource()
         {
             if (headingSource) return headingSource;
-            // Cache once found; re-resolve only if the source goes away (e.g. the
-            // car is streamed out and back in).
             if (_resolved) return _resolved;
             var follow = FindObjectOfType<PrometeoFollowCamera>();
             if (follow && follow.target) return _resolved = follow.target;
-            return _resolved = (Camera.main ? Camera.main.transform : null);
+            // CameraFollow (PrometeoCamera) carries carTransform — use the car directly
+            // so the compass reflects the vehicle heading, not the camera lookAt angle.
+            var camFollow = FindObjectOfType<CameraFollow>();
+            if (camFollow && camFollow.carTransform) return _resolved = camFollow.carTransform;
+            var cam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            return _resolved = (cam ? cam.transform : null);
         }
 
         void Update()
