@@ -59,6 +59,18 @@ namespace SFMap.Pipeline
         bool _ready;
         CancellationTokenSource _cts;
 
+        // ---- Read-only surface for tooling (e.g. the developer fly mode) ----
+
+        /// True once the manifest has loaded and the grid origin is known.
+        public bool IsReady => _ready;
+
+        /// Number of chunk instances currently resident in the scene.
+        public int LoadedChunkCount => _loaded.Count;
+
+        /// Map a world position onto the chunk grid. Returns <c>default</c> until
+        /// <see cref="IsReady"/>, since the grid origin isn't known before then.
+        public ChunkCoord ChunkAt(Vector3 world) => _ready ? WorldToChunk(world) : default;
+
         async void OnEnable()
         {
             _cts = CancellationTokenSource.CreateLinkedTokenSource(destroyCancellationToken);
