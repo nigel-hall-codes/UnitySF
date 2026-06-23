@@ -11,6 +11,7 @@ public class CameraFollow : MonoBehaviour {
 	public float lookSpeed = 5;
 	[Range(10, 360)]
 	public float orbitSpeed = 120f;
+	public bool autoFollow = true;
 
 	Vector3 initialCameraPosition;
 	Vector3 initialCarPosition;
@@ -25,6 +26,8 @@ public class CameraFollow : MonoBehaviour {
 
 	void FixedUpdate()
 	{
+		if (!autoFollow) return;
+
 		// Accumulate orbit yaw from right analog stick
 		float lookX = 0f;
 		if (HasAxis("CameraLookX"))

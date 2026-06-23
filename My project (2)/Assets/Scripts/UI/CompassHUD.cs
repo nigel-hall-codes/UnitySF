@@ -71,10 +71,18 @@ namespace SFMap.UI
             if (_resolved) return _resolved;
             var follow = FindObjectOfType<PrometeoFollowCamera>();
             if (follow && follow.target) return _resolved = follow.target;
-            // CameraFollow (PrometeoCamera) carries carTransform — use the car directly
-            // so the compass reflects the vehicle heading, not the camera lookAt angle.
-            var camFollow = FindObjectOfType<CameraFollow>();
-            if (camFollow && camFollow.carTransform) return _resolved = camFollow.carTransform;
+            // CameraFollow lives in Assembly-CSharp (no asmdef), so reference it by name
+            // to avoid a cross-assembly compile error from this asmdef assembly.
+            var camFollowType = System.Type.GetType("CameraFollow, Assembly-CSharp");
+            if (camFollowType != null)
+            {
+                var comp = FindObjectOfType(camFollowType) as Component;
+                if (comp != null)
+                {
+                    var field = camFollowType.GetField("carTransform");
+                    if (field?.GetValue(comp) is Transform t) return _resolved = t;
+                }
+            }
             var cam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
             return _resolved = (cam ? cam.transform : null);
         }
