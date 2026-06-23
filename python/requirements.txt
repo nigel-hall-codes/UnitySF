@@ -1,4 +1,5 @@
-pyosmium
+# PyPI project is "osmium" (provides the `import osmium` module; formerly "pyosmium")
+osmium
 scipy
 numpy
 shapely
