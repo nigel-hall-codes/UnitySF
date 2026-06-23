@@ -36,7 +36,9 @@ namespace SFMap.Pipeline.Editor
         [SerializeField] string presetName = "default";
 
         // 7-color pastel palette for buildings. Each building picks one by hashing
-        // its osm_id, so colors are stable and varied with no pipeline changes.
+        // its osm_id and the colour is baked into the building's vertex colors, so
+        // a whole chunk of buildings shares one material (and one draw call) while
+        // staying varied. Adding colours here needs no other pipeline changes.
         static readonly Color[] BuildingPalette =
         {
             new Color(0.847f, 0.655f, 0.694f), // dusty rose
@@ -186,17 +188,21 @@ namespace SFMap.Pipeline.Editor
             var baseLayer = EnsureBaseTerrainLayer();
 
             // Bulk-create this chunk's terrain + mesh assets inside one StartAssetEditing
-            // block. Without it the AssetDatabase imports each of the (often thousands of)
-            // mesh assets individually, which makes a multi-chunk import take hours;
-            // StopAssetEditing imports them all in a single pass.
+            // block. Without it the AssetDatabase imports each road/sidewalk mesh asset
+            // individually, which makes a multi-chunk import slow; StopAssetEditing imports
+            // them all in a single pass. (Buildings/intersections are combined, so they
+            // contribute just one asset each per chunk.)
             TerrainData terrainData = null;
-            var byType = new Dictionary<MeshType, List<(Mesh mesh, long id)>>
-            {
-                [MeshType.Road]         = new(),
-                [MeshType.Intersection] = new(),
-                [MeshType.Sidewalk]     = new(),
-                [MeshType.Building]     = new(),
-            };
+
+            // Roads and sidewalks stay one-asset-and-GameObject-per-mesh (roads carry
+            // per-mesh colliders + the Road layer; both are out of scope for combining).
+            var roadMeshes     = new List<Mesh>();
+            var sidewalkMeshes = new List<Mesh>();
+            // Buildings and intersections are non-interactive static geometry: built in
+            // memory (no per-mesh asset), then merged into one combined mesh per chunk.
+            var buildingParts     = new List<Mesh>();
+            var intersectionParts = new List<Mesh>();
+            Mesh combinedBuildings = null, combinedIntersections = null;
 
             AssetDatabase.StartAssetEditing();
             try
@@ -224,27 +230,40 @@ namespace SFMap.Pipeline.Editor
 
                     if (vertCnt == 0 || idxCnt == 0) continue;
 
-                    var mesh = new Mesh { name = MeshName(meshType, osmId) };
-                    mesh.indexFormat = vertCnt > 65535
-                        ? UnityEngine.Rendering.IndexFormat.UInt32
-                        : UnityEngine.Rendering.IndexFormat.UInt16;
-                    mesh.SetVertices(verts);
-                    mesh.SetTriangles(indices, 0);
-                    mesh.SetUVs(0, uvs);
+                    var mesh = BuildMesh(MeshName(meshType, osmId), verts, normals, uvs, indices);
 
-                    if (AllZero(normals))
-                        mesh.RecalculateNormals();
-                    else
-                        mesh.SetNormals(normals);
-
-                    mesh.RecalculateBounds();
-
-                    string assetPath = MeshAssetPath(coord, meshType, osmId);
-                    CreateOrReplaceAsset(mesh, assetPath);
-
-                    if (byType.ContainsKey(meshType))
-                        byType[meshType].Add((mesh, osmId));
+                    switch (meshType)
+                    {
+                        case MeshType.Road:
+                            CreateOrReplaceAsset(mesh, GeneratedAssets.RoadMesh(coord, osmId));
+                            roadMeshes.Add(mesh);
+                            break;
+                        case MeshType.Sidewalk:
+                            CreateOrReplaceAsset(mesh, GeneratedAssets.SidewalkMesh(coord, osmId));
+                            sidewalkMeshes.Add(mesh);
+                            break;
+                        case MeshType.Intersection:
+                            intersectionParts.Add(mesh);
+                            break;
+                        case MeshType.Building:
+                            // Bake the building's palette colour into vertex colors so the
+                            // combined mesh keeps per-building colour with one material.
+                            Color32 c = BuildingPalette[(int)(Math.Abs(osmId) % BuildingPalette.Length)];
+                            var colors = new Color32[vertCnt];
+                            for (int v = 0; v < vertCnt; v++) colors[v] = c;
+                            mesh.SetColors(colors);
+                            buildingParts.Add(mesh);
+                            break;
+                    }
                 }
+
+                // Merge the static, non-interactive geometry into one mesh per chunk.
+                // Vertices are already world-space (GameObjects sit at the origin), so
+                // combine without transforms — placement is byte-identical.
+                combinedBuildings     = CombineParts(buildingParts,     $"buildings_{coord}",
+                                                      GeneratedAssets.BuildingsCombinedMesh(coord));
+                combinedIntersections = CombineParts(intersectionParts, $"intersections_{coord}",
+                                                      GeneratedAssets.IntersectionsCombinedMesh(coord));
             }
             finally
             {
@@ -262,32 +281,35 @@ namespace SFMap.Pipeline.Editor
 
             var roadMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
             var swMat   = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.SidewalkMaterial());
-            var bldgMats = new Material[BuildingPalette.Length];
-            for (int i = 0; i < bldgMats.Length; i++)
-                bldgMats[i] = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.BuildingMaterial(i));
+            var bldgMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.BuildingMaterial());
             int roadLayer = LayerMask.NameToLayer("Road");
 
+            // Roads/sidewalks: one GameObject per mesh (roads keep their collider + layer).
             var roadParent = CreateChild(chunkRoot, $"Roads {coord}");
-            foreach (var (mesh, _) in byType[MeshType.Road])
+            foreach (var mesh in roadMeshes)
             {
                 var go = PlaceMesh(mesh, roadParent, roadMat);
                 go.AddComponent<MeshCollider>().sharedMesh = mesh;
                 go.layer = roadLayer;
             }
 
-            var intParent = CreateChild(chunkRoot, $"Intersections {coord}");
-            foreach (var (mesh, _) in byType[MeshType.Intersection])
-                PlaceMesh(mesh, intParent, roadMat);
-
             var swParent = CreateChild(chunkRoot, $"Sidewalks {coord}");
-            foreach (var (mesh, _) in byType[MeshType.Sidewalk])
+            foreach (var mesh in sidewalkMeshes)
                 PlaceMesh(mesh, swParent, swMat);
 
-            var bldgParent = CreateChild(chunkRoot, $"Buildings {coord}");
-            foreach (var (mesh, osmId) in byType[MeshType.Building])
+            // Intersections/buildings: one combined mesh on a single GameObject per type.
+            var intGo = CreateChild(chunkRoot, $"Intersections {coord}");
+            if (combinedIntersections != null)
             {
-                int idx = (int)(Math.Abs(osmId) % bldgMats.Length);
-                PlaceMesh(mesh, bldgParent, bldgMats[idx]);
+                intGo.AddComponent<MeshFilter>().sharedMesh = combinedIntersections;
+                intGo.AddComponent<MeshRenderer>().sharedMaterial = roadMat;
+            }
+
+            var bldgGo = CreateChild(chunkRoot, $"Buildings {coord}");
+            if (combinedBuildings != null)
+            {
+                bldgGo.AddComponent<MeshFilter>().sharedMesh = combinedBuildings;
+                bldgGo.AddComponent<MeshRenderer>().sharedMaterial = bldgMat;
             }
 
             return minElevM;
@@ -331,17 +353,23 @@ namespace SFMap.Pipeline.Editor
                 AssetDatabase.CreateAsset(mat, swPath);
             }
 
-            // One flat pastel material per palette entry; building meshes pick one by
-            // hashing their osm_id (see ImportChunk).
-            for (int i = 0; i < BuildingPalette.Length; i++)
+            // One shared building material. Per-building colour comes from vertex
+            // colors (baked in ImportChunk), so the BuildingVertexColor shader tints
+            // albedo by vertex colour and a whole chunk renders in one draw call.
+            string bldgPath = GeneratedAssets.BuildingMaterial();
+            if (AssetDatabase.LoadAssetAtPath<Material>(bldgPath) == null)
             {
-                string path = GeneratedAssets.BuildingMaterial(i);
-                if (AssetDatabase.LoadAssetAtPath<Material>(path) != null)
-                    continue;
-                var mat = new Material(Shader.Find("Standard")) { color = BuildingPalette[i] };
+                var shader = Shader.Find("SFMap/BuildingVertexColor");
+                if (shader == null)
+                {
+                    Debug.LogError("[SFMapImporter] Shader 'SFMap/BuildingVertexColor' not found " +
+                                   "(expected at Assets/Shaders/BuildingVertexColor.shader).");
+                    return;
+                }
+                var mat = new Material(shader) { color = Color.white };
                 mat.SetFloat("_Metallic", 0f);
-                mat.SetFloat("_Glossiness", 0.05f); // Standard shader "Smoothness"
-                AssetDatabase.CreateAsset(mat, path);
+                mat.SetFloat("_Glossiness", 0.05f);
+                AssetDatabase.CreateAsset(mat, bldgPath);
             }
         }
 
@@ -412,14 +440,53 @@ namespace SFMap.Pipeline.Editor
             _                     => $"mesh_{osmId}",
         };
 
-        static string MeshAssetPath(ChunkCoord coord, MeshType t, long osmId) => t switch
+        static Mesh BuildMesh(string name, Vector3[] verts, Vector3[] normals, Vector2[] uvs, int[] indices)
         {
-            MeshType.Road         => GeneratedAssets.RoadMesh(coord, osmId),
-            MeshType.Intersection => GeneratedAssets.IntersectionMesh(coord, osmId),
-            MeshType.Sidewalk     => GeneratedAssets.SidewalkMesh(coord, osmId),
-            MeshType.Building     => GeneratedAssets.BuildingMesh(coord, osmId),
-            _                     => $"{GeneratedAssets.ChunkDir(coord)}/mesh_{osmId}.mesh",
-        };
+            var mesh = new Mesh { name = name };
+            mesh.indexFormat = verts.Length > 65535
+                ? UnityEngine.Rendering.IndexFormat.UInt32
+                : UnityEngine.Rendering.IndexFormat.UInt16;
+            mesh.SetVertices(verts);
+            mesh.SetTriangles(indices, 0);
+            mesh.SetUVs(0, uvs);
+
+            if (AllZero(normals))
+                mesh.RecalculateNormals();
+            else
+                mesh.SetNormals(normals);
+
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        // Merge in-memory part meshes into a single chunk mesh asset and return it
+        // (null when there are no parts). Parts are combined without transforms — their
+        // vertices are already world-space — so the result sits at the origin exactly
+        // like the originals. Source normals/UVs/colors are preserved (no recalc, which
+        // would average across touching buildings). The temporary parts are released.
+        static Mesh CombineParts(List<Mesh> parts, string name, string assetPath)
+        {
+            if (parts.Count == 0)
+                return null;
+
+            var instances = new CombineInstance[parts.Count];
+            for (int i = 0; i < parts.Count; i++)
+                instances[i] = new CombineInstance { mesh = parts[i], subMeshIndex = 0 };
+
+            var combined = new Mesh
+            {
+                name        = name,
+                indexFormat = UnityEngine.Rendering.IndexFormat.UInt32, // combined verts exceed 65535
+            };
+            combined.CombineMeshes(instances, mergeSubMeshes: true, useMatrices: false);
+            combined.RecalculateBounds();
+
+            foreach (var p in parts)
+                DestroyImmediate(p);
+
+            CreateOrReplaceAsset(combined, assetPath);
+            return combined;
+        }
 
         static Vector3[] ReadVec3Array(BinaryReader r, int count)
         {
