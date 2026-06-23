@@ -191,6 +191,8 @@ def _anchor_centerline(
     to_pt: Optional[Tuple[float, float, float]],
 ) -> List[Tuple[float, float, float]]:
     """Trim centerline to intersection boundary points, dropping interior vertices."""
+    if not cl:
+        return cl
     if from_pt is None and to_pt is None:
         return cl
 
