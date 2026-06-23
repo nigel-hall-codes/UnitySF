@@ -47,7 +47,14 @@ def _build_single_road(
     bd_to: Optional[Tuple[float, float]],
     width_multiplier: float,
 ) -> Optional[MeshArrays]:
-    cl_xz = edge.centerline
+    bx0 = hmap.world_x_min
+    bz0 = hmap.world_z_min
+    bx1 = hmap.world_x_min + hmap.world_width
+    bz1 = hmap.world_z_min + hmap.world_height
+
+    # Clip centerline to chunk heightmap bounds so out-of-bounds points don't
+    # get clamped to the wrong edge elevation.
+    cl_xz = _clip_polyline_to_rect(edge.centerline, bx0, bz0, bx1, bz1)
 
     # Sample terrain elevation at each centerline point (heightmap is post-stamp).
     sampled = [
@@ -55,12 +62,14 @@ def _build_single_road(
         for x, z in cl_xz
     ]
 
-    # Elevate boundary XZ points to match terrain elevation.
+    # Only use boundary anchors that lie within the heightmap bounds; anchors
+    # from an intersection in an adjacent chunk would sample a clamped (wrong)
+    # edge elevation and make the road float near the chunk boundary.
     from_pt = None
     to_pt = None
-    if bd_from is not None:
+    if bd_from is not None and bx0 <= bd_from[0] <= bx1 and bz0 <= bd_from[1] <= bz1:
         from_pt = (bd_from[0], _sample_elevation(hmap, bd_from[0], bd_from[1]), bd_from[1])
-    if bd_to is not None:
+    if bd_to is not None and bx0 <= bd_to[0] <= bx1 and bz0 <= bd_to[1] <= bz1:
         to_pt = (bd_to[0], _sample_elevation(hmap, bd_to[0], bd_to[1]), bd_to[1])
 
     centerline = _anchor_centerline(sampled, from_pt, to_pt)
@@ -116,12 +125,74 @@ def _sample_elevation(hmap: HeightmapData, x: float, z: float) -> float:
     return hmap.min_elevation_m + norm * (hmap.max_elevation_m - hmap.min_elevation_m)
 
 
+def _clip_polyline_to_rect(
+    cl: List[Tuple[float, float]],
+    x_min: float, z_min: float,
+    x_max: float, z_max: float,
+) -> List[Tuple[float, float]]:
+    """Clip a 2D XZ polyline to [x_min,x_max]×[z_min,z_max], inserting crossings.
+
+    Segments that cross the boundary get an interpolated point at the crossing.
+    Points outside are dropped. Returns the clipped polyline (may be empty).
+    """
+    def _inside(x: float, z: float) -> bool:
+        return x_min <= x <= x_max and z_min <= z <= z_max
+
+    def _clip_seg(p0x: float, p0z: float, p1x: float, p1z: float):
+        """Parametric clip; returns (t_enter, t_exit) for the visible portion, or None."""
+        t0, t1 = 0.0, 1.0
+        dx, dz = p1x - p0x, p1z - p0z
+        for p, d, lo, hi in ((p0x, dx, x_min, x_max), (p0z, dz, z_min, z_max)):
+            if abs(d) < 1e-10:
+                if not (lo <= p <= hi):
+                    return None
+            else:
+                ta, tb = (lo - p) / d, (hi - p) / d
+                if ta > tb:
+                    ta, tb = tb, ta
+                t0, t1 = max(t0, ta), min(t1, tb)
+                if t0 > t1 + 1e-10:
+                    return None
+        return t0, t1
+
+    result: List[Tuple[float, float]] = []
+    if not cl:
+        return result
+
+    x0, z0 = cl[0]
+    if _inside(x0, z0):
+        result.append((x0, z0))
+
+    for i in range(1, len(cl)):
+        px, pz = cl[i - 1]
+        x, z = cl[i]
+        in_p = _inside(px, pz)
+        in_c = _inside(x, z)
+
+        if not in_p or not in_c:
+            ts = _clip_seg(px, pz, x, z)
+            if ts is not None:
+                t0, t1 = ts
+                dx, dz = x - px, z - pz
+                if not in_p and t0 > 1e-10:
+                    result.append((px + t0 * dx, pz + t0 * dz))
+                if not in_c and t1 < 1.0 - 1e-10:
+                    result.append((px + t1 * dx, pz + t1 * dz))
+
+        if in_c:
+            result.append((x, z))
+
+    return result
+
+
 def _anchor_centerline(
     cl: List[Tuple[float, float, float]],
     from_pt: Optional[Tuple[float, float, float]],
     to_pt: Optional[Tuple[float, float, float]],
 ) -> List[Tuple[float, float, float]]:
     """Trim centerline to intersection boundary points, dropping interior vertices."""
+    if not cl:
+        return cl
     if from_pt is None and to_pt is None:
         return cl
 

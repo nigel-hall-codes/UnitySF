@@ -8,6 +8,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from .elevation import HeightmapData
+from .geometry.road import _clip_polyline_to_rect
 from .osm import StreetEdge, StreetGraph
 
 _SIDEWALK_WIDTH = 1.5  # metres — must match road.py to stamp the full footprint
@@ -86,8 +87,18 @@ def stamp_roads(
         half_w = edge.width * 0.5
         stamp_w = half_w + _SIDEWALK_WIDTH + pad
 
+        # Clip centerline to chunk heightmap bounds so out-of-bounds points
+        # don't produce clamped (wrong) elevations that corrupt the stamp.
+        cl = _clip_polyline_to_rect(
+            edge.centerline,
+            hmap.world_x_min, hmap.world_z_min,
+            hmap.world_x_min + hmap.world_width,
+            hmap.world_z_min + hmap.world_height,
+        )
+        if len(cl) < 2:
+            continue
+
         # Build the sampled centerline (Y = terrain elevation at each point).
-        cl = edge.centerline
         sampled_y = [
             hmap.sample_bilinear(x, z) * (hmap.max_elevation_m - hmap.min_elevation_m) + hmap.min_elevation_m
             for x, z in cl
