@@ -160,7 +160,10 @@ namespace SFMap.Dev
                           + Vector3.up * (lift * verticalSpeed * (boost ? boostMultiplier : 1f));
             _car.position += delta * dt;
 
-            SyncTeleportFields();
+            // Deliberately *don't* re-seed the teleport fields here: doing it every
+            // frame would overwrite whatever the user is typing into them. The HUD's
+            // live "Pos" readout already shows the current position; the editable
+            // fields are seeded on Enter() and after a teleport.
         }
 
         void SyncTeleportFields()
