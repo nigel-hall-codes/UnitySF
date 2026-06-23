@@ -1,15 +1,19 @@
 // Menu: Prometeo / Create Car
-// Instantiates the Prometheus prefab and adds a follow camera.
+// Instantiates the Prometheus prefab, wires a follow camera, and sets the car up to
+// drop onto a road that streams in at runtime (via ChunkStreamer + CarRoadSpawner) —
+// no full static map import required.
 // Also registers Xbox trigger axes in the InputManager (Gas / Brake).
 #if UNITY_EDITOR
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using SFMap.Pipeline;
 
 public static class PrometeoCarSetup
 {
     const string PrefabPath = "Assets/PROMETEO - Car Controller/Prefabs/Prometheus.prefab";
+    const string Preset     = "default";
 
     [MenuItem("Prometeo/Create Car")]
     static void Create()
@@ -24,20 +28,66 @@ public static class PrometeoCarSetup
         }
 
         var car = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
-        car.transform.position = new Vector3(0, 5f, 0);
+        car.transform.position = Vector3.zero; // CarRoadSpawner repositions onto a road on Play.
 
         var ctrl = car.GetComponent<PrometeoCarController>();
         if (ctrl != null) ctrl.useGamepad = true;
 
+        SetupRoadStreaming(car);
         AttachCamera(car);
 
         Selection.activeGameObject = car;
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
-        Debug.Log("[Prometeo] Car created. Xbox: right trigger = throttle, left trigger = brake, left stick = steer, A = handbrake.");
+        Debug.Log("[Prometeo] Car created. On Play it streams the map and drops onto a road — no static import needed. " +
+                  "Xbox: right trigger = throttle, left trigger = brake, left stick = steer, A = handbrake.");
+    }
+
+    [MenuItem("Prometeo/Add Road Streaming To Car")]
+    static void AddRoadStreaming()
+    {
+        var car = Selection.activeGameObject != null && Selection.activeGameObject.GetComponent<PrometeoCarController>() != null
+            ? Selection.activeGameObject
+            : Object.FindFirstObjectByType<PrometeoCarController>()?.gameObject;
+
+        if (car == null)
+        {
+            Debug.LogWarning("[Prometeo] No Prometeo car in the scene. Use Prometeo > Create Car first.");
+            return;
+        }
+
+        SetupRoadStreaming(car);
+        Selection.activeGameObject = car;
+        EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+        Debug.Log("[Prometeo] Road streaming set up. On Play the car drops onto a streamed road.");
+    }
+
+    // Adds the runtime spawner to the car and ensures a ChunkStreamer exists that
+    // streams chunks around the car (so the chunk under the spawn anchor loads).
+    static void SetupRoadStreaming(GameObject car)
+    {
+        var spawner = car.GetComponent<CarRoadSpawner>();
+        if (spawner == null) spawner = car.AddComponent<CarRoadSpawner>();
+        spawner.spawnAnchor = Vector3.zero;
+
+        var streamer = Object.FindFirstObjectByType<ChunkStreamer>();
+        if (streamer == null)
+        {
+            var go = new GameObject("ChunkStreamer");
+            streamer = go.AddComponent<ChunkStreamer>();
+            streamer.preset = Preset;
+        }
+        // Chunks are parented to the streamer with worldPositionStays:false, so it must
+        // sit at the origin or every streamed chunk is offset by its transform.
+        streamer.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+        streamer.target = car.transform; // stream around the car so its chunk loads
     }
 
     static void AttachCamera(GameObject car)
     {
+        var existing = Object.FindFirstObjectByType<CameraFollow>();
+        if (existing != null && existing.carTransform == car.transform)
+            return; // already wired to this car
+
         var camGo = new GameObject("PrometeoCamera");
         camGo.AddComponent<Camera>();
         camGo.AddComponent<AudioListener>();
