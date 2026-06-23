@@ -129,6 +129,7 @@ namespace SFMap.Pipeline.Editor
             finally
             {
                 EditorUtility.ClearProgressBar();
+                DestroyImmediate(mapRoot);
             }
         }
 

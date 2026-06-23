@@ -99,87 +99,23 @@ namespace SFMap.Pipeline.Editor
                 if (found != null) DestroyImmediate(found);
             }
 
-            var root = new GameObject("SF Map");
-
             if (m.chunks == null || m.chunks.Length == 0)
-            {
                 Debug.LogWarning($"[PresetBrowser] Manifest for \"{m.preset}\" has no chunks.");
-                EditorSceneManager.SaveOpenScenes();
-                return;
-            }
 
-            var roadMat   = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
-            var swMat     = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.SidewalkMaterial());
-            int roadLayer = LayerMask.NameToLayer("Road");
-
-            foreach (var c in m.chunks)
+            // Persist the preset choice in the ChunkStreamer so reopening Unity streams the right set.
+            var streamer = FindFirstObjectByType<ChunkStreamer>();
+            if (streamer != null)
             {
-                var coord    = new ChunkCoord(c.col, c.row);
-                string chunkDir = GeneratedAssets.ChunkDir(coord);
-
-                var td = AssetDatabase.LoadAssetAtPath<TerrainData>(GeneratedAssets.TerrainAsset(coord));
-                if (td != null)
-                {
-                    var tgo = Terrain.CreateTerrainGameObject(td);
-                    tgo.name = $"Terrain {coord}";
-                    tgo.transform.SetParent(root.transform, false);
-                    tgo.transform.position = new Vector3(c.worldX, m.minElevation, c.worldZ);
-                }
-
-                var roadParent = CreateChild(root, $"Roads {coord}");
-                foreach (var mesh in LoadMeshes(chunkDir + "/Roads"))
-                {
-                    var go = PlaceMesh(mesh, roadParent, roadMat);
-                    go.AddComponent<MeshCollider>().sharedMesh = mesh;
-                    go.layer = roadLayer;
-                }
-
-                var intParent = CreateChild(root, $"Intersections {coord}");
-                foreach (var mesh in LoadMeshes(chunkDir + "/Intersections"))
-                    PlaceMesh(mesh, intParent, roadMat);
-
-                var swParent = CreateChild(root, $"Sidewalks {coord}");
-                foreach (var mesh in LoadMeshes(chunkDir + "/Sidewalks"))
-                    PlaceMesh(mesh, swParent, swMat);
-
-                var bldParent = CreateChild(root, $"Buildings {coord}");
-                foreach (var mesh in LoadMeshes(chunkDir + "/Buildings"))
-                {
-                    var go = new GameObject(mesh.name);
-                    go.transform.SetParent(bldParent.transform, false);
-                    go.AddComponent<MeshFilter>().sharedMesh  = mesh;
-                    go.AddComponent<MeshRenderer>();
-                    go.AddComponent<MeshCollider>().sharedMesh = mesh;
-                }
+                streamer.preset = m.preset;
+                EditorUtility.SetDirty(streamer);
+            }
+            else
+            {
+                Debug.LogWarning($"[PresetBrowser] No ChunkStreamer found in scene — preset field not updated.");
             }
 
             EditorSceneManager.SaveOpenScenes();
-            Debug.Log($"[PresetBrowser] Loaded preset \"{m.preset}\".");
-        }
-
-        static IEnumerable<Mesh> LoadMeshes(string assetFolder)
-        {
-            foreach (var guid in AssetDatabase.FindAssets("t:Mesh", new[] { assetFolder }))
-            {
-                var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(AssetDatabase.GUIDToAssetPath(guid));
-                if (mesh != null) yield return mesh;
-            }
-        }
-
-        static GameObject CreateChild(GameObject parent, string name)
-        {
-            var go = new GameObject(name);
-            go.transform.SetParent(parent.transform, false);
-            return go;
-        }
-
-        static GameObject PlaceMesh(Mesh mesh, GameObject parent, Material mat)
-        {
-            var go = new GameObject(mesh.name);
-            go.transform.SetParent(parent.transform, false);
-            go.AddComponent<MeshFilter>().sharedMesh      = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
-            return go;
+            Debug.Log($"[PresetBrowser] Switched to preset \"{m.preset}\".");
         }
     }
 }
