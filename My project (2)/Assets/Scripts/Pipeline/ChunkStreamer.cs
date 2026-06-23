@@ -52,6 +52,7 @@ namespace SFMap.Pipeline
         // ---- Runtime state ----
         readonly Dictionary<ChunkCoord, GameObject> _loaded = new();
         readonly HashSet<ChunkCoord> _loading = new();
+        readonly HashSet<ChunkCoord> _missing = new(); // prefab absent on disk — don't retry every tick
         readonly List<ChunkCoord> _unloadScratch = new();
         readonly List<ChunkCoord> _loadScratch = new();
         int _activeLoads;
@@ -116,8 +117,22 @@ namespace SFMap.Pipeline
             _originX = anchor.worldX - anchor.col * _chunkSize;
             _originZ = anchor.worldZ - anchor.row * _chunkSize;
 
+            ClearStaticChunks();
+
             _ready = true;
             return true;
+        }
+
+        /// Remove the static "SF Map" hierarchy the importer instantiates into the
+        /// scene, so the streamed chunks don't double up with it.
+        static void ClearStaticChunks()
+        {
+            var stale = GameObject.Find("SF Map");
+            if (stale != null)
+            {
+                Debug.Log("[ChunkStreamer] Removing static 'SF Map' hierarchy; chunks will be streamed instead.");
+                Destroy(stale);
+            }
         }
 
         async Awaitable StreamLoopAsync(CancellationToken token)
@@ -162,7 +177,7 @@ namespace SFMap.Pipeline
             for (int dr = -loadRadius; dr <= loadRadius; dr++)
             {
                 var c = new ChunkCoord(center.Col + dc, center.Row + dr);
-                if (_loaded.ContainsKey(c) || _loading.Contains(c) || !_entries.ContainsKey(c))
+                if (_loaded.ContainsKey(c) || _loading.Contains(c) || _missing.Contains(c) || !_entries.ContainsKey(c))
                     continue;
                 _loadScratch.Add(c);
             }
@@ -186,15 +201,24 @@ namespace SFMap.Pipeline
                 {
                     Debug.LogWarning($"[ChunkStreamer] Missing chunk prefab at " +
                                      $"Resources/{GeneratedAssets.RuntimeChunkPrefab(coord)}.", this);
+                    _missing.Add(coord); // don't re-issue the load (and warning) every tick
                     return;
                 }
 
                 // Chunk geometry is baked in world space, so spawn at the origin.
                 var op = InstantiateAsync(prefab, 1, Vector3.zero, Quaternion.identity);
                 await op;
-                token.ThrowIfCancellationRequested();
 
+                // The instance already exists once the op completes, so if we were
+                // cancelled mid-flight we must destroy it — it isn't parented or tracked
+                // yet, so it would otherwise outlive this streamer.
                 var go = op.Result[0];
+                if (token.IsCancellationRequested)
+                {
+                    Destroy(go);
+                    return;
+                }
+
                 go.transform.SetParent(transform, false);
                 go.name = coord.ToString();
                 _loaded[coord] = go; // a now-stale chunk is reclaimed by the next Tick's unload pass

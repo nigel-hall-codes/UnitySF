@@ -1,13 +1,18 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 
 namespace SFMap.Pipeline
 {
-    public readonly struct ChunkCoord
+    public readonly struct ChunkCoord : IEquatable<ChunkCoord>
     {
         public readonly int Col;
         public readonly int Row;
 
         public ChunkCoord(int col, int row) { Col = col; Row = row; }
+
+        public bool Equals(ChunkCoord other) => Col == other.Col && Row == other.Row;
+        public override bool Equals(object obj) => obj is ChunkCoord o && Equals(o);
+        public override int GetHashCode() => unchecked((Col * 397) ^ Row);
         public override string ToString() => $"chunk_{Col:00}_{Row:00}";
     }
 
