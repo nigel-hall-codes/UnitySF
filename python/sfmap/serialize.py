@@ -6,7 +6,7 @@ import struct
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -50,6 +50,12 @@ class ChunkData:
     chunk_size_m: float
     heightmap: HeightmapData
     meshes: List[MeshEntry]
+    # Named road segments: list of (name, centerline_xz_points). Unnamed roads omitted.
+    road_names: List[Tuple[str, List[Tuple[float, float]]]] = None
+
+    def __post_init__(self):
+        if self.road_names is None:
+            self.road_names = []
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +111,32 @@ def write_chunk(chunk: ChunkData, out_dir: str) -> Path:
         for mesh in chunk.meshes:
             _write_mesh_entry(f, mesh)
 
+    return out_path
+
+
+def write_road_names(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
+    """Write chunk_CC_RR_names.json alongside the .bin for named roads only.
+
+    JSON schema (Unity reads this as a TextAsset):
+      {"roads":[{"n":"Market Street","xz":[x1,z1,x2,z2,...]},...]}
+
+    Centerline coords are Unity world-space XZ (same as the mesh vertices).
+    Returns None and writes nothing if there are no named roads in this chunk.
+    """
+    if not chunk.road_names:
+        return None
+
+    roads = []
+    for name, centerline in chunk.road_names:
+        xz = []
+        for x, z in centerline:
+            xz.append(round(x, 3))
+            xz.append(round(z, 3))
+        roads.append({"n": name, "xz": xz})
+
+    out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_names.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({"roads": roads}, ensure_ascii=False), encoding="utf-8")
     return out_path
 
 

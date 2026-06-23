@@ -120,6 +120,8 @@ namespace SFMap.Pipeline.Editor
                     if (chunkMinElev < globalMinElev)
                         globalMinElev = chunkMinElev;
 
+                    ImportRoadNames(chunkDir, coord);
+
                     PrefabUtility.SaveAsPrefabAsset(mapRoot.transform.Find(coord.ToString()).gameObject,
                         GeneratedAssets.ChunkPrefabPath(coord));
 
@@ -313,6 +315,16 @@ namespace SFMap.Pipeline.Editor
             }
 
             return minElevM;
+        }
+
+        static void ImportRoadNames(string chunkDir, ChunkCoord coord)
+        {
+            string src = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_names.json");
+            if (!File.Exists(src)) return;
+
+            string dst = GeneratedAssets.ChunkRoadNamesAsset(coord);
+            File.Copy(src, dst, overwrite: true);
+            AssetDatabase.ImportAsset(dst);
         }
 
         void SaveChunkManifest(ManifestJson src, List<ChunkManifestEntry> entries, float minElev)
