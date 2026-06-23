@@ -169,6 +169,7 @@ namespace SFMap.Pipeline.Editor
                 heights2D[idx / hmapRes, idx % hmapRes] = heights1D[idx];
 
             EnsureChunkFolder(coord);
+            var baseLayer = EnsureBaseTerrainLayer();
 
             // Bulk-create this chunk's terrain + mesh assets inside one StartAssetEditing
             // block. Without it the AssetDatabase imports each of the (often thousands of)
@@ -190,6 +191,7 @@ namespace SFMap.Pipeline.Editor
                 terrainData.heightmapResolution = hmapRes;
                 terrainData.size = new Vector3(chunkSizeM, Mathf.Max(maxElevM - minElevM, 1f), chunkSizeM);
                 terrainData.SetHeights(0, 0, heights2D);
+                terrainData.terrainLayers = new[] { baseLayer };
                 CreateOrReplaceAsset(terrainData, GeneratedAssets.TerrainAsset(coord));
 
                 // ---- Mesh entries ----
@@ -292,6 +294,29 @@ namespace SFMap.Pipeline.Editor
             EnsureFolder("Assets", "Resources");
             EnsureFolder("Assets/Resources", "Generated");
             EnsureFolder("Assets/Resources/Generated", GeneratedAssets.ActivePreset);
+        }
+
+        static TerrainLayer EnsureBaseTerrainLayer()
+        {
+            string path = GeneratedAssets.TerrainBaseLayer();
+            var existing = AssetDatabase.LoadAssetAtPath<TerrainLayer>(path);
+            if (existing != null)
+                return existing;
+
+            EnsureFolder(GeneratedAssets.Root, "Materials");
+
+            var tex = new Texture2D(1, 1, TextureFormat.RGBA32, mipChain: false);
+            tex.SetPixel(0, 0, new Color(0.42f, 0.47f, 0.38f));
+            tex.Apply();
+            tex.name = "BaseColor";
+
+            var layer = new TerrainLayer { tileSize = new Vector2(10, 10) };
+            AssetDatabase.CreateAsset(layer, path);
+            AssetDatabase.AddObjectToAsset(tex, path);
+            layer.diffuseTexture = tex;
+            EditorUtility.SetDirty(layer);
+            AssetDatabase.SaveAssets();
+            return layer;
         }
 
         static void EnsureChunkFolder(ChunkCoord coord)
