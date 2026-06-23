@@ -204,10 +204,10 @@ namespace RVP
                 crashing = false;
             }
 
-            localVelocity = tr.InverseTransformDirection(rb.velocity - wheelContactsVelocity);
+            localVelocity = tr.InverseTransformDirection(rb.linearVelocity - wheelContactsVelocity);
             localAngularVel = tr.InverseTransformDirection(rb.angularVelocity);
-            velMag = rb.velocity.magnitude;
-            sqrVelMag = rb.velocity.sqrMagnitude;
+            velMag = rb.linearVelocity.magnitude;
+            sqrVelMag = rb.linearVelocity.sqrMagnitude;
             forwardDir = tr.forward;
             rightDir = tr.right;
             upDir = tr.up;

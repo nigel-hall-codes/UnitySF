@@ -264,7 +264,7 @@ namespace RVP
                 Rigidbody groundBody = wheel.contactPoint.col.attachedRigidbody;
                 Vector3 groundVel = Vector3.zero;
                 if (groundBody) {
-                    groundVel = groundBody.velocity;
+                    groundVel = groundBody.linearVelocity;
                 }
 
                 // Get the local vertical velocity

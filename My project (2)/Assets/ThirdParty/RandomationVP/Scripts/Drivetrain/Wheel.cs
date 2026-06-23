@@ -194,8 +194,8 @@ namespace RVP
         Rigidbody detachedBody;
         MeshFilter detachFilter;
         MeshFilter detachTireFilter;
-        public PhysicMaterial detachedTireMaterial;
-        public PhysicMaterial detachedRimMaterial;
+        public PhysicsMaterial detachedTireMaterial;
+        public PhysicsMaterial detachedRimMaterial;
 
         void Start() {
             tr = transform;
@@ -662,7 +662,7 @@ namespace RVP
                 }
 
                 rb.mass -= mass;
-                detachedBody.velocity = rb.GetPointVelocity(rim.position);
+                detachedBody.linearVelocity = rb.GetPointVelocity(rim.position);
                 detachedBody.angularVelocity = rb.angularVelocity;
 
                 rim.gameObject.SetActive(false);

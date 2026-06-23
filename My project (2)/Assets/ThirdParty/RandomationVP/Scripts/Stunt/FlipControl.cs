@@ -44,7 +44,7 @@ namespace RVP
 
         void FixedUpdate() {
             if (vp.groundedWheels == 0 && (!vp.crashing || (vp.crashing && !disableDuringCrash))) {
-                velDir = Quaternion.LookRotation(GlobalControl.worldUpDir, rb.velocity);
+                velDir = Quaternion.LookRotation(GlobalControl.worldUpDir, rb.linearVelocity);
 
                 if (flipPower != Vector3.zero) {
                     ApplyFlip();
@@ -106,7 +106,7 @@ namespace RVP
             if (groundCheckDistance > 0) {
                 RaycastHit groundHit;
 
-                if (Physics.Raycast(tr.position, (-GlobalControl.worldUpDir + rb.velocity).normalized, out groundHit, groundCheckDistance, GlobalControl.groundMaskStatic)) {
+                if (Physics.Raycast(tr.position, (-GlobalControl.worldUpDir + rb.linearVelocity).normalized, out groundHit, groundCheckDistance, GlobalControl.groundMaskStatic)) {
                     if (Vector3.Dot(groundHit.normal, GlobalControl.worldUpDir) >= groundSteepnessLimit) {
                         actualForwardDot = Vector3.Dot(vp.forwardDir, groundHit.normal);
                         actualRightDot = Vector3.Dot(vp.rightDir, groundHit.normal);

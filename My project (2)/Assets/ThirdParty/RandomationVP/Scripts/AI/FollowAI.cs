@@ -81,7 +81,7 @@ namespace RVP
                 targetVisible = !Physics.Linecast(tr.position, target.position, viewBlockMask);
 
                 if (targetVisible || targetIsWaypoint) {
-                    targetPoint = targetBody ? target.position + targetBody.velocity : target.position;
+                    targetPoint = targetBody ? target.position + targetBody.linearVelocity : target.position;
                 }
 
                 if (targetIsWaypoint) {
@@ -190,7 +190,7 @@ namespace RVP
             yield return new WaitForFixedUpdate();
             tr.position = targetPoint;
             tr.rotation = Quaternion.LookRotation(targetIsWaypoint ? (targetWaypoint.nextPoint.transform.position - targetPoint).normalized : Vector3.forward, GlobalControl.worldUpDir);
-            rb.velocity = Vector3.zero;
+            rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
         }
 
@@ -198,7 +198,7 @@ namespace RVP
             yield return new WaitForFixedUpdate();
             tr.eulerAngles = new Vector3(0, transform.eulerAngles.y, 0);
             tr.Translate(Vector3.up, Space.World);
-            rb.velocity = Vector3.zero;
+            rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
         }
 

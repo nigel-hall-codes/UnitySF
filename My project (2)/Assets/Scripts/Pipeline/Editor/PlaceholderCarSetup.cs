@@ -64,7 +64,7 @@ public static class PlaceholderCarSetup
         gc.tireFadeTime      = 10f;
         gc.quickRestart      = false; // avoids requiring a "Restart" input axis
 
-        var frictionless = AssetDatabase.LoadAssetAtPath<PhysicMaterial>(
+        var frictionless = AssetDatabase.LoadAssetAtPath<PhysicsMaterial>(
             "Assets/ThirdParty/RandomationVP/PhysicMaterials/Frictionless.physicMaterial");
         if (frictionless != null)
             gc.frictionlessMat = frictionless;
