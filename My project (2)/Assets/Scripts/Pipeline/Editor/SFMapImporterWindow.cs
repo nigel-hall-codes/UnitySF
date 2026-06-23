@@ -169,15 +169,11 @@ namespace SFMap.Pipeline.Editor
 
             EnsureChunkFolder(coord);
 
-            var terrainData = new TerrainData();
-            terrainData.heightmapResolution = hmapRes;
-            terrainData.size = new Vector3(chunkSizeM, Mathf.Max(maxElevM - minElevM, 1f), chunkSizeM);
-            terrainData.SetHeights(0, 0, heights2D);
-            CreateOrReplaceAsset(terrainData, GeneratedAssets.TerrainAsset(coord));
-
-            // ---- Mesh entries ----
-            int meshCount = reader.ReadInt32();
-
+            // Bulk-create this chunk's terrain + mesh assets inside one StartAssetEditing
+            // block. Without it the AssetDatabase imports each of the (often thousands of)
+            // mesh assets individually, which makes a multi-chunk import take hours;
+            // StopAssetEditing imports them all in a single pass.
+            TerrainData terrainData = null;
             var byType = new Dictionary<MeshType, List<(Mesh mesh, long id)>>
             {
                 [MeshType.Road]         = new(),
@@ -186,40 +182,56 @@ namespace SFMap.Pipeline.Editor
                 [MeshType.Building]     = new(),
             };
 
-            for (int m = 0; m < meshCount; m++)
+            AssetDatabase.StartAssetEditing();
+            try
             {
-                var   meshType = (MeshType)reader.ReadByte();
-                long  osmId    = reader.ReadInt64();
-                int   vertCnt  = reader.ReadInt32();
-                int   idxCnt   = reader.ReadInt32();
+                terrainData = new TerrainData();
+                terrainData.heightmapResolution = hmapRes;
+                terrainData.size = new Vector3(chunkSizeM, Mathf.Max(maxElevM - minElevM, 1f), chunkSizeM);
+                terrainData.SetHeights(0, 0, heights2D);
+                CreateOrReplaceAsset(terrainData, GeneratedAssets.TerrainAsset(coord));
 
-                var verts   = ReadVec3Array(reader, vertCnt);
-                var normals = ReadVec3Array(reader, vertCnt);
-                var uvs     = ReadVec2Array(reader, vertCnt);
-                var indices = ReadIndices(reader, idxCnt);
+                // ---- Mesh entries ----
+                int meshCount = reader.ReadInt32();
+                for (int m = 0; m < meshCount; m++)
+                {
+                    var   meshType = (MeshType)reader.ReadByte();
+                    long  osmId    = reader.ReadInt64();
+                    int   vertCnt  = reader.ReadInt32();
+                    int   idxCnt   = reader.ReadInt32();
 
-                if (vertCnt == 0 || idxCnt == 0) continue;
+                    var verts   = ReadVec3Array(reader, vertCnt);
+                    var normals = ReadVec3Array(reader, vertCnt);
+                    var uvs     = ReadVec2Array(reader, vertCnt);
+                    var indices = ReadIndices(reader, idxCnt);
 
-                var mesh = new Mesh { name = MeshName(meshType, osmId) };
-                mesh.indexFormat = vertCnt > 65535
-                    ? UnityEngine.Rendering.IndexFormat.UInt32
-                    : UnityEngine.Rendering.IndexFormat.UInt16;
-                mesh.SetVertices(verts);
-                mesh.SetTriangles(indices, 0);
-                mesh.SetUVs(0, uvs);
+                    if (vertCnt == 0 || idxCnt == 0) continue;
 
-                if (AllZero(normals))
-                    mesh.RecalculateNormals();
-                else
-                    mesh.SetNormals(normals);
+                    var mesh = new Mesh { name = MeshName(meshType, osmId) };
+                    mesh.indexFormat = vertCnt > 65535
+                        ? UnityEngine.Rendering.IndexFormat.UInt32
+                        : UnityEngine.Rendering.IndexFormat.UInt16;
+                    mesh.SetVertices(verts);
+                    mesh.SetTriangles(indices, 0);
+                    mesh.SetUVs(0, uvs);
 
-                mesh.RecalculateBounds();
+                    if (AllZero(normals))
+                        mesh.RecalculateNormals();
+                    else
+                        mesh.SetNormals(normals);
 
-                string assetPath = MeshAssetPath(coord, meshType, osmId);
-                CreateOrReplaceAsset(mesh, assetPath);
+                    mesh.RecalculateBounds();
 
-                if (byType.ContainsKey(meshType))
-                    byType[meshType].Add((mesh, osmId));
+                    string assetPath = MeshAssetPath(coord, meshType, osmId);
+                    CreateOrReplaceAsset(mesh, assetPath);
+
+                    if (byType.ContainsKey(meshType))
+                        byType[meshType].Add((mesh, osmId));
+                }
+            }
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
             }
 
             // ---- Build GameObject hierarchy ----
