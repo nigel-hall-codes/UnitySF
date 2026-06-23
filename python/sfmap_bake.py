@@ -24,12 +24,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--osm", required=True, metavar="FILE", help="Input .osm file")
     p.add_argument("--elev", required=True, metavar="FILE", help="Input elevation CSV")
     p.add_argument("--preset", default="default", metavar="NAME", help="Preset name (default: default)")
-    p.add_argument("--chunk-size", type=float, default=1964.0, metavar="METERS", help="Chunk size in world metres (default: 1964)")
+    p.add_argument("--chunk-size", type=float, default=300.0, metavar="METERS", help="Chunk size in world metres (default: 300)")
     p.add_argument("--chunks-x", type=int, default=None, metavar="N", help="Number of chunks along X axis (default: auto-fit to data extent)")
     p.add_argument("--chunks-z", type=int, default=None, metavar="N", help="Number of chunks along Z axis (default: auto-fit to data extent)")
     p.add_argument("--out", default="./chunks/", metavar="DIR", help="Output directory (default: ./chunks/)")
     p.add_argument("--only", nargs="+", type=parse_chunk_pair, metavar="col,row", help="Bake only the specified chunks (e.g. --only 0,0 1,0)")
-    p.add_argument("--hmap-res", type=int, default=513, metavar="N", help="Heightmap resolution per chunk (default: 513)")
+    p.add_argument("--hmap-res", type=int, default=129, metavar="N", help="Heightmap resolution per chunk (default: 129)")
     p.add_argument("--no-sidewalks", action="store_true", help="Skip sidewalk geometry")
     return p
 
