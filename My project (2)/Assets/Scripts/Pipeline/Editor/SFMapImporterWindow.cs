@@ -35,6 +35,19 @@ namespace SFMap.Pipeline.Editor
         [SerializeField] string chunkDir   = "";
         [SerializeField] string presetName = "default";
 
+        // 7-color pastel palette for buildings. Each building picks one by hashing
+        // its osm_id, so colors are stable and varied with no pipeline changes.
+        static readonly Color[] BuildingPalette =
+        {
+            new Color(0.847f, 0.655f, 0.694f), // dusty rose
+            new Color(0.710f, 0.776f, 0.631f), // sage green
+            new Color(0.953f, 0.914f, 0.824f), // warm cream
+            new Color(0.682f, 0.776f, 0.910f), // sky blue
+            new Color(0.886f, 0.647f, 0.494f), // terracotta
+            new Color(0.788f, 0.722f, 0.878f), // lavender
+            new Color(0.961f, 0.953f, 0.925f), // off-white
+        };
+
         [MenuItem("Window/SF Map Importer")]
         public static void Open() => GetWindow<SFMapImporterWindow>("SF Map Importer");
 
@@ -249,6 +262,9 @@ namespace SFMap.Pipeline.Editor
 
             var roadMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.RoadMaterial());
             var swMat   = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.SidewalkMaterial());
+            var bldgMats = new Material[BuildingPalette.Length];
+            for (int i = 0; i < bldgMats.Length; i++)
+                bldgMats[i] = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.BuildingMaterial(i));
             int roadLayer = LayerMask.NameToLayer("Road");
 
             var roadParent = CreateChild(chunkRoot, $"Roads {coord}");
@@ -268,8 +284,11 @@ namespace SFMap.Pipeline.Editor
                 PlaceMesh(mesh, swParent, swMat);
 
             var bldgParent = CreateChild(chunkRoot, $"Buildings {coord}");
-            foreach (var (mesh, _) in byType[MeshType.Building])
-                PlaceMesh(mesh, bldgParent, null);
+            foreach (var (mesh, osmId) in byType[MeshType.Building])
+            {
+                int idx = (int)(Math.Abs(osmId) % bldgMats.Length);
+                PlaceMesh(mesh, bldgParent, bldgMats[idx]);
+            }
 
             return minElevM;
         }
@@ -310,6 +329,19 @@ namespace SFMap.Pipeline.Editor
                 mat.SetFloat("_Metallic", 0f);
                 mat.SetFloat("_Glossiness", 0f);
                 AssetDatabase.CreateAsset(mat, swPath);
+            }
+
+            // One flat pastel material per palette entry; building meshes pick one by
+            // hashing their osm_id (see ImportChunk).
+            for (int i = 0; i < BuildingPalette.Length; i++)
+            {
+                string path = GeneratedAssets.BuildingMaterial(i);
+                if (AssetDatabase.LoadAssetAtPath<Material>(path) != null)
+                    continue;
+                var mat = new Material(Shader.Find("Standard")) { color = BuildingPalette[i] };
+                mat.SetFloat("_Metallic", 0f);
+                mat.SetFloat("_Glossiness", 0.05f); // Standard shader "Smoothness"
+                AssetDatabase.CreateAsset(mat, path);
             }
         }
 

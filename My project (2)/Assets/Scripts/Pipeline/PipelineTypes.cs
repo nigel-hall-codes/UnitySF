@@ -32,6 +32,7 @@ namespace SFMap.Pipeline
         public static string BuildingMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Buildings/building_{id}.mesh";
         public static string RoadMaterial()                          => $"{Root}/Materials/RoadSurface.mat";
         public static string SidewalkMaterial()                      => $"{Root}/Materials/SidewalkSurface.mat";
+        public static string BuildingMaterial(int index)             => $"{Root}/Materials/Building_{index}.mat";
         public static string ManifestPath()                          => $"{Root}/manifest.json";
 
         // Runtime Resources paths (prefab per chunk + manifest ScriptableObject)
