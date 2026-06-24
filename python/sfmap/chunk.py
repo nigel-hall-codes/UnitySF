@@ -150,7 +150,12 @@ def bake_chunk(
         meshes.append(MeshEntry(MeshType.ROAD, way_id, verts, [], uvs, indices))
 
     # Intersections — fan-triangulated per node from the shared polygons.
+    # Only emit the polygon for nodes whose centre lies inside this chunk's rect;
+    # seam nodes appear in the cropped graph as road endpoints but their polygon
+    # belongs to the neighbour — emitting it here causes z-fighting duplicates.
     for node in graph.intersection_nodes:
+        if not (x_min <= node.world_x <= x_min + size and z_min <= node.world_z <= z_min + size):
+            continue
         poly = polygons.get(node.osm_id)
         if poly is None:
             continue
