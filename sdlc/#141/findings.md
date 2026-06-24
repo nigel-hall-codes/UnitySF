@@ -1,4 +1,8 @@
-# #141 — Spike findings
+# #141 — Spike findings (SUPERSEDED)
+
+> **Superseded by `finding.md`.** This was the initial static-analysis run (Mode B).
+> A subsequent dynamic run with `spike_141.py` revealed the actual failure is **Mode C
+> (seam duplication)** — see `finding.md` for the final finding.
 
 **Verdict: Mode B (chunk-seam dropout). Mode A (topology) ruled out.**
 

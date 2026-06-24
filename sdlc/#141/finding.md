@@ -5,7 +5,7 @@
 chunk_05_02 contains **14 INTERSECTION meshes** — the polygon geometry is not missing.
 However, 5 of those nodes also generate INTERSECTION meshes in an adjacent chunk:
 `2320368479` and `65293884` appear in both (5,2) and (5,1); `65336780`, `2320396530`,
-and `2320396530`/`1614176501` appear in both (5,2) and (6,2). In each case the node's
+and `1614176501` appear in both (5,2) and (6,2). In each case the node's
 world position is at or just outside the chunk_05_02 boundary (e.g. `2320368479` sits at
 z=-642.5, which is 38m south of 05_02's z_min=-604.3; `65336780` sits at x=237.1, which
 is 39m east of 05_02's x_max=198). The duplication arises because `crop_to_chunk`

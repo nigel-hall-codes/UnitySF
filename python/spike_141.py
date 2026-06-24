@@ -20,7 +20,7 @@ from pathlib import Path
 # ---------------------------------------------------------------------------
 # Paths (relative to repo root — run from there)
 # ---------------------------------------------------------------------------
-REPO_ROOT  = Path(__file__).resolve().parents[3]   # …/UnitySF
+REPO_ROOT  = Path(__file__).resolve().parents[1]   # …/UnitySF
 CHUNKS_DIR = REPO_ROOT / "chunks_out"
 OSM_FILE   = REPO_ROOT / "My project (2)" / "Assets" / "SFMapData" / "map.osm"
 
@@ -203,6 +203,19 @@ elif not target_isects and neighbor_isects_flat:
     print("  The junction node centre is outside 05_02 → crop_to_chunk excludes it,")
     print("  road.py:70-73 rejects the setback anchor → gap at seam.")
 elif target_isects:
-    print(f"  INTERSECTION polygon IS present in 05_02 (osm_ids={target_isects}).")
-    print("  The failure may be visual (z-fighting / incorrect road setback) rather")
-    print("  than a missing polygon.  Investigate road mesh boundary anchors.")
+    target_set = set(target_isects)
+    duped = [(oid, chunk) for oid, chunk in neighbor_isects_flat if oid in target_set]
+    if duped:
+        print(f"  CONFIRMED MODE C — seam duplication.")
+        print(f"  chunk_05_02 has {len(target_isects)} INTERSECTION mesh(es), but")
+        print(f"  {len(duped)} node(s) also generate a mesh in a neighbor chunk:")
+        for oid, chunk in duped:
+            print(f"    osm_id={oid} also in chunk_{chunk[0]:02d}_{chunk[1]:02d}")
+        print("  Root cause: chunk.py places an INTERSECTION mesh for every node in")
+        print("  the cropped graph without checking that the node centre is inside the")
+        print("  chunk's own world rect.  Neighbour chunk emits the same mesh for the")
+        print("  same node → z-fighting polygons + unanchored road ribbons at the seam.")
+        print("  Fix: guard at chunk.py:153 — skip if node outside chunk's own rect.")
+    else:
+        print(f"  INTERSECTION polygon IS present in 05_02 (osm_ids={target_isects}).")
+        print("  No seam duplication detected.  Investigate road mesh boundary anchors.")
