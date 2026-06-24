@@ -30,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="./chunks/", metavar="DIR", help="Output directory (default: ./chunks/)")
     p.add_argument("--only", nargs="+", type=parse_chunk_pair, metavar="col,row", help="Bake only the specified chunks (e.g. --only 0,0 1,0)")
     p.add_argument("--hmap-res", type=int, default=129, metavar="N", help="Heightmap resolution per chunk (default: 129)")
+    p.add_argument("--vertical-exaggeration", type=float, default=1.3, metavar="FACTOR",
+                   help="Scale terrain relief by this factor to read as steep as real life "
+                        "(1.0 = true elevation; default: 1.3)")
     p.add_argument("--no-sidewalks", action="store_true", help="Skip sidewalk geometry")
     return p
 
@@ -91,8 +94,10 @@ def main() -> int:
           f"{len(full_graph.edges)} edges, {len(full_graph.buildings)} buildings")
 
     full_hmap = elevation.parse(args.elev, full_graph.source_bounds, full_graph.origin, args.hmap_res)
+    elevation.apply_vertical_exaggeration(full_hmap, args.vertical_exaggeration)
     print(f"[sfmap_bake] heightmap {full_hmap.resolution}² "
-          f"elev[{full_hmap.min_elevation_m:.1f}, {full_hmap.max_elevation_m:.1f}]m")
+          f"elev[{full_hmap.min_elevation_m:.1f}, {full_hmap.max_elevation_m:.1f}]m "
+          f"(×{args.vertical_exaggeration:g} vertical exaggeration)")
 
     # --- Intersection polygons + road boundaries (once on the full graph) --
     polygons = intersection.compute_polygons(full_graph)
