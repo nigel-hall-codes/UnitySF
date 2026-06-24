@@ -190,21 +190,22 @@ namespace SFMap.Pipeline.Editor
             var baseLayer = EnsureBaseTerrainLayer();
 
             // Bulk-create this chunk's terrain + mesh assets inside one StartAssetEditing
-            // block. Without it the AssetDatabase imports each road/sidewalk mesh asset
-            // individually, which makes a multi-chunk import slow; StopAssetEditing imports
-            // them all in a single pass. (Buildings/intersections are combined, so they
-            // contribute just one asset each per chunk.)
+            // block. Without it the AssetDatabase imports each road/sidewalk/intersection
+            // mesh asset individually, which makes a multi-chunk import slow; StopAssetEditing
+            // imports them all in a single pass. (Buildings are combined, so they contribute
+            // just one asset per chunk.)
             TerrainData terrainData = null;
 
-            // Roads and sidewalks stay one-asset-and-GameObject-per-mesh (roads carry
-            // per-mesh colliders + the Road layer; both are out of scope for combining).
-            var roadMeshes     = new List<Mesh>();
-            var sidewalkMeshes = new List<Mesh>();
-            // Buildings and intersections are non-interactive static geometry: built in
-            // memory (no per-mesh asset), then merged into one combined mesh per chunk.
+            // Roads, sidewalks, and intersections stay one-asset-and-GameObject-per-mesh so
+            // each is individually selectable; roads and intersections also carry per-mesh
+            // colliders + the Road layer.
+            var roadMeshes         = new List<Mesh>();
+            var sidewalkMeshes     = new List<Mesh>();
+            var intersectionMeshes = new List<Mesh>();
+            // Buildings are non-interactive static geometry: built in memory (no per-mesh
+            // asset), then merged into one combined mesh per chunk.
             var buildingParts     = new List<Mesh>();
-            var intersectionParts = new List<Mesh>();
-            Mesh combinedBuildings = null, combinedIntersections = null;
+            Mesh combinedBuildings = null;
 
             AssetDatabase.StartAssetEditing();
             try
@@ -245,7 +246,8 @@ namespace SFMap.Pipeline.Editor
                             sidewalkMeshes.Add(mesh);
                             break;
                         case MeshType.Intersection:
-                            intersectionParts.Add(mesh);
+                            CreateOrReplaceAsset(mesh, GeneratedAssets.IntersectionMesh(coord, osmId));
+                            intersectionMeshes.Add(mesh);
                             break;
                         case MeshType.Building:
                             // Bake the building's palette colour into vertex colors so the
@@ -259,13 +261,11 @@ namespace SFMap.Pipeline.Editor
                     }
                 }
 
-                // Merge the static, non-interactive geometry into one mesh per chunk.
-                // Vertices are already world-space (GameObjects sit at the origin), so
-                // combine without transforms — placement is byte-identical.
-                combinedBuildings     = CombineParts(buildingParts,     $"buildings_{coord}",
-                                                      GeneratedAssets.BuildingsCombinedMesh(coord));
-                combinedIntersections = CombineParts(intersectionParts, $"intersections_{coord}",
-                                                      GeneratedAssets.IntersectionsCombinedMesh(coord));
+                // Merge the static, non-interactive building geometry into one mesh per
+                // chunk. Vertices are already world-space (GameObjects sit at the origin),
+                // so combine without transforms — placement is byte-identical.
+                combinedBuildings = CombineParts(buildingParts, $"buildings_{coord}",
+                                                 GeneratedAssets.BuildingsCombinedMesh(coord));
             }
             finally
             {
@@ -299,14 +299,17 @@ namespace SFMap.Pipeline.Editor
             foreach (var mesh in sidewalkMeshes)
                 PlaceMesh(mesh, swParent, swMat);
 
-            // Intersections/buildings: one combined mesh on a single GameObject per type.
-            var intGo = CreateChild(chunkRoot, $"Intersections {coord}");
-            if (combinedIntersections != null)
+            // Intersections: one GameObject per mesh, like roads (collider + Road layer),
+            // so each junction is individually selectable in the Hierarchy.
+            var intParent = CreateChild(chunkRoot, $"Intersections {coord}");
+            foreach (var mesh in intersectionMeshes)
             {
-                intGo.AddComponent<MeshFilter>().sharedMesh = combinedIntersections;
-                intGo.AddComponent<MeshRenderer>().sharedMaterial = roadMat;
+                var go = PlaceMesh(mesh, intParent, roadMat);
+                go.AddComponent<MeshCollider>().sharedMesh = mesh;
+                go.layer = roadLayer;
             }
 
+            // Buildings: one combined mesh on a single GameObject per chunk.
             var bldgGo = CreateChild(chunkRoot, $"Buildings {coord}");
             if (combinedBuildings != null)
             {
