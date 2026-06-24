@@ -46,5 +46,8 @@ namespace SFMap.Pipeline
         public static string RuntimeChunkPrefab(ChunkCoord c) => $"Generated/{ActivePreset}/{c}";
         public static string RuntimeChunkManifest()           => $"Generated/{ActivePreset}/ChunkManifest";
 
+        // Road name sidecar — TextAsset imported from chunk_CC_RR_names.json
+        public static string ChunkRoadNamesAsset(ChunkCoord c) => $"{ResourcesRoot}/{c}_names.json";
+        public static string RuntimeChunkRoadNames(ChunkCoord c) => $"Generated/{ActivePreset}/{c}_names";
     }
 }
