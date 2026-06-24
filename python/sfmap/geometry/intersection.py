@@ -1,4 +1,4 @@
-"""shapely miter/bevel intersection polygons + boundary setbacks."""
+"""shapely intersection polygons (offset road end-caps) + boundary setbacks."""
 from __future__ import annotations
 
 import math
@@ -36,22 +36,52 @@ def compute_polygons(graph: StreetGraph) -> Dict[int, Polygon]:
     """Phase 1 — build a Shapely Polygon for every intersection node.
 
     Keys are node osm_ids. Polygon vertices are XZ offsets from the node
-    centre, stored in CCW order as seen from above (Unity +Y up).
+    centre, in CCW order as seen from above (Unity +Y up).
+
+    The polygon is assembled from each road's *end-cap corners* at the same
+    per-arm setback distance that ``compute_boundaries`` hands the road
+    generator. For an arm with direction ``d``, half-width ``hw`` and setback
+    ``t`` along the centerline, the two corners are::
+
+        R = d * t - perp * hw     # clockwise (right) edge of the road end
+        L = d * t + perp * hw     # counter-clockwise (left) edge
+
+    where ``perp = (-d_z, d_x)`` is ``d`` rotated +90°. Emitting ``R`` then
+    ``L`` for each arm in CCW order produces a polygon whose straight edges
+    (``R_i → L_i``) coincide exactly with where each road ribbon stops — so
+    the junction is watertight — and whose vertices are angularly ordered, so
+    the polygon is simple by construction (no self-intersecting "stars").
+
+    Genuinely degenerate junctions (two arms within a few degrees, where no
+    non-overlapping planar fill exists) can still produce a self-touching ring;
+    those fall back to the convex hull of the same corner points, which is
+    always valid and visually indistinguishable since the arms nearly merge.
     """
     result: Dict[int, Polygon] = {}
     for node in graph.intersection_nodes:
-        arms = _collect_arms(node, graph)
-        if len(arms) < 2:
+        edge_arms, setbacks = _arms_and_setbacks(node, graph)
+        if len(edge_arms) < 2:
             continue
-        arms.sort(key=lambda a: a.angle)
 
         pts: List[Tuple[float, float]] = []
-        n = len(arms)
-        for i in range(n):
-            _compute_join(arms[i], arms[(i + 1) % n], pts)
+        for ea, t in zip(edge_arms, setbacks):
+            a = ea.arm
+            perp_x, perp_z = -a.dir_z, a.dir_x
+            cx, cz = a.dir_x * t, a.dir_z * t
+            pts.append((cx - perp_x * a.half_width, cz - perp_z * a.half_width))  # R
+            pts.append((cx + perp_x * a.half_width, cz + perp_z * a.half_width))  # L
 
-        if len(pts) >= 3:
-            result[node.osm_id] = Polygon(pts)
+        pts = _dedupe_ring(pts)
+        if len(pts) < 3:
+            continue
+
+        poly = Polygon(pts)
+        if not poly.is_valid or not poly.is_simple:
+            poly = Polygon(pts).convex_hull
+            if not isinstance(poly, Polygon) or poly.is_empty:
+                continue
+
+        result[node.osm_id] = poly
 
     return result
 
@@ -73,19 +103,9 @@ def compute_boundaries(
         if node.osm_id not in polygons:
             continue
 
-        edge_arms = _collect_edge_arms(node, graph)
+        edge_arms, per_arm = _arms_and_setbacks(node, graph)
         if len(edge_arms) < 2:
             continue
-        edge_arms.sort(key=lambda ea: ea.arm.angle)
-
-        n = len(edge_arms)
-        per_arm = [0.0] * n
-
-        for i in range(n):
-            j = (i + 1) % n
-            t_a, t_b = _join_setbacks(edge_arms[i].arm, edge_arms[j].arm)
-            per_arm[i] = max(per_arm[i], t_a)
-            per_arm[j] = max(per_arm[j], t_b)
 
         for i, ea in enumerate(edge_arms):
             t = per_arm[i]
@@ -182,33 +202,46 @@ def _collect_arms(node: StreetNode, graph: StreetGraph) -> List[_Arm]:
     return [ea.arm for ea in _collect_edge_arms(node, graph)]
 
 
-def _compute_join(a: _Arm, b: _Arm, pts: List[Tuple[float, float]]) -> None:
-    """Append 1 miter or 2 bevel vertices for the gap between arms A and B (CCW order)."""
-    # Left perpendicular of A  = (-az, ax)
-    # Right perpendicular of B = ( bz, -bx)
-    pa_x = -a.dir_z * a.half_width
-    pa_z =  a.dir_x * a.half_width
-    pb_x =  b.dir_z * b.half_width
-    pb_z = -b.dir_x * b.half_width
+def _dedupe_ring(pts: List[Tuple[float, float]], eps: float = 1e-4) -> List[Tuple[float, float]]:
+    """Drop consecutive (and wrap-around) coincident points from a polygon ring.
 
-    det = -a.dir_x * b.dir_z + a.dir_z * b.dir_x
-    if abs(det) < 1e-6:
-        miter_x = (pa_x + pb_x) * 0.5
-        miter_z = (pa_z + pb_z) * 0.5
-    else:
-        dx = pb_x - pa_x
-        dz = pb_z - pa_z
-        t = (-dx * b.dir_z + dz * b.dir_x) / det
-        miter_x = pa_x + t * a.dir_x
-        miter_z = pa_z + t * a.dir_z
+    At a clean miter the left corner of one arm and the right corner of the
+    next coincide exactly; without this the fan triangulator would emit a
+    zero-area triangle there.
+    """
+    out: List[Tuple[float, float]] = []
+    for p in pts:
+        if not out or math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > eps:
+            out.append(p)
+    if len(out) >= 2 and math.hypot(out[0][0] - out[-1][0], out[0][1] - out[-1][1]) <= eps:
+        out.pop()
+    return out
 
-    if math.hypot(miter_x, miter_z) <= _BEVEL_THRESHOLD:
-        pts.append((miter_x, miter_z))
-    else:
-        t_a = math.sqrt(max(0.0, _BEVEL_THRESHOLD ** 2 - a.half_width ** 2))
-        t_b = math.sqrt(max(0.0, _BEVEL_THRESHOLD ** 2 - b.half_width ** 2))
-        pts.append((pa_x + a.dir_x * t_a, pa_z + a.dir_z * t_a))
-        pts.append((pb_x + b.dir_x * t_b, pb_z + b.dir_z * t_b))
+
+def _arms_and_setbacks(
+    node: StreetNode, graph: StreetGraph
+) -> Tuple[List[_EdgeArm], List[float]]:
+    """Return this node's CCW-sorted arms and the per-arm centerline setback.
+
+    Each arm's setback is the larger of the two requirements from its
+    neighbouring joins, so adjacent road end-caps don't overlap. This is the
+    single source of truth shared by ``compute_polygons`` (corner placement)
+    and ``compute_boundaries`` (where the road generator stops each ribbon),
+    which is what keeps the two watertight against each other.
+    """
+    edge_arms = _collect_edge_arms(node, graph)
+    if len(edge_arms) < 2:
+        return edge_arms, []
+    edge_arms.sort(key=lambda ea: ea.arm.angle)
+
+    n = len(edge_arms)
+    per_arm = [0.0] * n
+    for i in range(n):
+        j = (i + 1) % n
+        t_a, t_b = _join_setbacks(edge_arms[i].arm, edge_arms[j].arm)
+        per_arm[i] = max(per_arm[i], t_a)
+        per_arm[j] = max(per_arm[j], t_b)
+    return edge_arms, per_arm
 
 
 def _join_setbacks(a: _Arm, b: _Arm) -> Tuple[float, float]:
