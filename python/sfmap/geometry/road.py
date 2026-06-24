@@ -97,10 +97,11 @@ def _build_single_road(
         if length > 1e-6:
             rx, rz = rx / length, rz / length
 
-        y = cy + _RAISE
         v_coord = arc_len[i] / total_len
-        verts.append((cx - rx * half_w, y, cz - rz * half_w))  # left
-        verts.append((cx + rx * half_w, y, cz + rz * half_w))  # right
+        lx, lz = cx - rx * half_w, cz - rz * half_w
+        ex, ez = cx + rx * half_w, cz + rz * half_w
+        verts.append((lx, _sample_elevation(hmap, lx, lz) + _RAISE, lz))  # left
+        verts.append((ex, _sample_elevation(hmap, ex, ez) + _RAISE, ez))  # right
         uvs.append((0.0, v_coord))
         uvs.append((1.0, v_coord))
 
