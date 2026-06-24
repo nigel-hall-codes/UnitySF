@@ -87,20 +87,23 @@ def _build_single_sidewalk(
         if length > 1e-6:
             rx, rz = rx / length, rz / length
 
-        y = cy + _RAISE
         v_coord = arc_len[i] / total_len
+        lo_x, lo_z = cx - rx * outer_offset, cz - rz * outer_offset
+        li_x, li_z = cx - rx * half_w, cz - rz * half_w
+        ri_x, ri_z = cx + rx * half_w, cz + rz * half_w
+        ro_x, ro_z = cx + rx * outer_offset, cz + rz * outer_offset
 
         # left-outer (index i*4)
-        verts.append((cx - rx * outer_offset, y, cz - rz * outer_offset))
+        verts.append((lo_x, _sample_elevation(hmap, lo_x, lo_z) + _RAISE, lo_z))
         uvs.append((1.0, v_coord))
         # left-inner (index i*4 + 1)
-        verts.append((cx - rx * half_w, y, cz - rz * half_w))
+        verts.append((li_x, _sample_elevation(hmap, li_x, li_z) + _RAISE, li_z))
         uvs.append((0.0, v_coord))
         # right-inner (index i*4 + 2)
-        verts.append((cx + rx * half_w, y, cz + rz * half_w))
+        verts.append((ri_x, _sample_elevation(hmap, ri_x, ri_z) + _RAISE, ri_z))
         uvs.append((0.0, v_coord))
         # right-outer (index i*4 + 3)
-        verts.append((cx + rx * outer_offset, y, cz + rz * outer_offset))
+        verts.append((ro_x, _sample_elevation(hmap, ro_x, ro_z) + _RAISE, ro_z))
         uvs.append((1.0, v_coord))
 
     # 2 strips × (n-1) quads × 2 tris × 3 indices = (n-1) * 12
