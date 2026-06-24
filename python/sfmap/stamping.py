@@ -85,7 +85,7 @@ def stamp_roads(
             continue
 
         half_w = edge.width * 0.5
-        stamp_w = half_w + _SIDEWALK_WIDTH + pad
+        stamp_w = half_w + _SIDEWALK_WIDTH + pad * 2
 
         # Clip centerline to chunk heightmap bounds so out-of-bounds points
         # don't produce clamped (wrong) elevations that corrupt the stamp.
