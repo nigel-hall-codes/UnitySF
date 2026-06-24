@@ -121,6 +121,26 @@ def clear_cache(csv_path: str, resolution: int) -> None:
         p.unlink()
 
 
+def apply_vertical_exaggeration(hmap: HeightmapData, factor: float) -> None:
+    """Exaggerate terrain relief by ``factor``, anchored at the lowest elevation.
+
+    Stretches the elevation *range* (max - min) while keeping min fixed, so the
+    lowest contour stays put and every slope gets ``factor``× steeper. The
+    normalised [0,1] heightmap is untouched; only the min/max metres that map
+    [0,1] → world Y are scaled. Both the terrain header and feature elevation
+    sampling (``road._sample_elevation``) derive metres from these two values,
+    so terrain and roads/sidewalks/buildings stay aligned. Building heights are
+    added on top of the sampled ground, so they are unaffected.
+
+    Mutates ``hmap`` in place. ``factor == 1.0`` is a no-op.
+    """
+    if factor == 1.0:
+        return
+    hmap.max_elevation_m = hmap.min_elevation_m + factor * (
+        hmap.max_elevation_m - hmap.min_elevation_m
+    )
+
+
 def parse(
     csv_path: str,
     bounds: OsmBounds,
