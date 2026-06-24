@@ -190,9 +190,12 @@ def stamp_roads(
 
     # Pass 2B: non-owners MIN — can only lower, never raise.
     # Two protections:
-    #   (a) Same-way skip: different StreetEdge objects from the same OSM way
-    #       should not fight each other (grade changes at segment boundaries can
-    #       cause a non-owner same-way segment to MIN a cell below the owner grade).
+    #   (a) Same-way skip: in the bilinear margin (lateral > half_w) different
+    #       StreetEdge objects from the same OSM way should not fight each other
+    #       at segment boundaries.  Inside the road surface (lateral <= half_w)
+    #       a descending segment must be able to lower cells stamped by the
+    #       end-cap of the adjacent same-way segment — otherwise terrain can
+    #       sit above the road plane at steep intersection entries.
     #   (b) Edge bilinear protection: cells within owner_half_w + pad of the owner
     #       centerline are protected from being lowered by non-owner roads that do
     #       NOT geometrically cover the cell (lateral > half_w).  Roads that DO
@@ -205,8 +208,8 @@ def stamp_roads(
             is_owner = lateral <= stamp_w and lateral <= min_lateral[row, col] + 1e-5
             if is_owner:
                 continue
-            if way_id == owner_way_arr[row, col]:
-                continue  # (a) same OSM way: skip
+            if way_id == owner_way_arr[row, col] and lateral > half_w:
+                continue  # (a) same OSM way, outside road surface: skip bilinear-margin grade fights
             if lateral > half_w and min_lateral[row, col] <= owner_half_w_arr[row, col] + pad:
                 continue  # (b) outside this road's surface and in owner's bilinear zone
             if hmap.values[row, col] > normalized_elev:

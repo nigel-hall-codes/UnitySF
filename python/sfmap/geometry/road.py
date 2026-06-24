@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
 
-_RAISE = 0.05   # metres above terrain — prevents z-fighting with terrain mesh
+_RAISE = 0.20   # metres above terrain — clears bilinear interpolation bleed
 
 MeshArrays = Tuple[
     List[Tuple[float, float, float]],  # vertices (x, y, z)
