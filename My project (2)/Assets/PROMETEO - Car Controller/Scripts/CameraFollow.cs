@@ -19,7 +19,12 @@ public class CameraFollow : MonoBehaviour {
 	float _orbitYaw = 0f;
 	float _freePitch = 0f;
 
-	void Start(){
+	// Capture the camera->car offset in Awake, before any Start() runs. CarRoadSpawner
+	// teleports the car to its spawn point in Start(); if we captured here in Start() the
+	// two would race, and reading carTransform.position after the teleport would bake a
+	// huge offset into absoluteInitCameraPosition (camera ends up far from the car instead
+	// of behind it). Awake always precedes every Start, so the authored offset is used.
+	void Awake(){
 		initialCameraPosition = gameObject.transform.position;
 		initialCarPosition = carTransform.position;
 		absoluteInitCameraPosition = initialCameraPosition - initialCarPosition;

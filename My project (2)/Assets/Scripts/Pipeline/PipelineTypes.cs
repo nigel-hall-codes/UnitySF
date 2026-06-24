@@ -18,7 +18,7 @@ namespace SFMap.Pipeline
 
     public static class GeneratedAssets
     {
-        public static string ActivePreset = "default";
+        public static string ActivePreset = "test";
 
         public static string Root          => $"Assets/Generated/{ActivePreset}";
         public static string ResourcesRoot => $"Assets/Resources/Generated/{ActivePreset}";

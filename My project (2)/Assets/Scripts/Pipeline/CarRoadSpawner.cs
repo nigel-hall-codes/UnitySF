@@ -25,7 +25,8 @@ namespace SFMap.Pipeline
     public class CarRoadSpawner : MonoBehaviour
     {
         [Tooltip("World XZ to search for a road around. The car waits here (frozen) while chunks stream in. " +
-                 "Point the ChunkStreamer's target at this car so the chunk here actually loads.")]
+                 "Point the ChunkStreamer's target at this car so the chunk here actually loads. " +
+                 "Leave at (0,0,0) to auto-centre on the active preset's baked chunk region.")]
         public Vector3 spawnAnchor = Vector3.zero;
 
         [Tooltip("How far out (metres) from the anchor to search for a road.")]
@@ -59,6 +60,11 @@ namespace SFMap.Pipeline
                 Debug.LogWarning("[CarRoadSpawner] No ChunkStreamer in the scene — cannot tell streamed roads from the " +
                                  "static map. Add one (Prometeo > Add Road Streaming To Car).", this);
 
+            // With no explicit anchor, drop the car into the middle of whatever the
+            // active preset actually baked (read from the manifest), so it lands inside
+            // the streamed chunks rather than at world origin — which may be off-map.
+            Vector3 anchor = ResolveAnchor();
+
             var rb = GetComponent<Rigidbody>();
             bool wasKinematic = rb.isKinematic;
 
@@ -66,10 +72,10 @@ namespace SFMap.Pipeline
             // the world nor drifts (which would move the streamer's target) before the
             // ground chunk has streamed in.
             rb.isKinematic = true;
-            transform.position = spawnAnchor + Vector3.up * dropClearance;
+            transform.position = anchor + Vector3.up * dropClearance;
 
             var token = destroyCancellationToken;
-            var placement = spawnAnchor + Vector3.up * dropClearance;
+            var placement = anchor + Vector3.up * dropClearance;
             bool found = false;
             float waited = 0f;
 
@@ -77,7 +83,7 @@ namespace SFMap.Pipeline
             {
                 while (waited < timeoutSeconds)
                 {
-                    if (TryFindStreamedRoad(spawnAnchor, searchRadius, mask, dropClearance, streamRoot, out placement))
+                    if (TryFindStreamedRoad(anchor, searchRadius, mask, dropClearance, streamRoot, out placement))
                     {
                         found = true;
                         break;
@@ -92,7 +98,7 @@ namespace SFMap.Pipeline
             }
 
             if (!found)
-                Debug.LogWarning($"[CarRoadSpawner] No streamed road appeared within {timeoutSeconds}s near {spawnAnchor}. " +
+                Debug.LogWarning($"[CarRoadSpawner] No streamed road appeared within {timeoutSeconds}s near {anchor}. " +
                                  "Dropping the car at the anchor — check the ChunkStreamer's preset and that its " +
                                  "target points at this car.", this);
 
@@ -102,6 +108,30 @@ namespace SFMap.Pipeline
             rb.isKinematic = wasKinematic;
             rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
+        }
+
+        /// Returns the explicit <see cref="spawnAnchor"/> if one was set; otherwise the
+        /// centre of the active preset's baked chunk region (from the manifest), so the
+        /// car spawns inside the streamed map even when the anchor is left at origin.
+        Vector3 ResolveAnchor()
+        {
+            if (spawnAnchor != Vector3.zero) return spawnAnchor;
+
+            var manifest = Resources.Load<ChunkManifest>(GeneratedAssets.RuntimeChunkManifest());
+            if (manifest == null || manifest.chunks == null || manifest.chunks.Length == 0)
+                return spawnAnchor;
+
+            float size = manifest.chunkSizeMeters;
+            float minX = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxZ = float.MinValue;
+            foreach (var c in manifest.chunks)
+            {
+                minX = Mathf.Min(minX, c.worldX);
+                minZ = Mathf.Min(minZ, c.worldZ);
+                maxX = Mathf.Max(maxX, c.worldX + size);
+                maxZ = Mathf.Max(maxZ, c.worldZ + size);
+            }
+            return new Vector3((minX + maxX) * 0.5f, 0f, (minZ + maxZ) * 0.5f);
         }
 
         /// Scans outward from <paramref name="near"/> on the XZ plane and raycasts

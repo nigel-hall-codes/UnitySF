@@ -30,9 +30,27 @@ namespace SFMap.UI
         Transform ResolveTarget()
         {
             if (_resolved) return _resolved;
+
+            // Prefer the car itself so distance is measured from the road, not the
+            // elevated/trailing camera (which can exceed FindNearest's range).
             var follow = FindObjectOfType<PrometeoFollowCamera>();
             if (follow && follow.target) return _resolved = follow.target;
-            return _resolved = (Camera.main ? Camera.main.transform : null);
+
+            // CameraFollow lives in Assembly-CSharp (no asmdef), so reference it by name
+            // to avoid a cross-assembly compile error from this asmdef assembly.
+            var camFollowType = System.Type.GetType("CameraFollow, Assembly-CSharp");
+            if (camFollowType != null)
+            {
+                var comp = FindObjectOfType(camFollowType) as Component;
+                if (comp != null)
+                {
+                    var field = camFollowType.GetField("carTransform");
+                    if (field?.GetValue(comp) is Transform t) return _resolved = t;
+                }
+            }
+
+            var cam = Camera.main != null ? Camera.main : FindObjectOfType<Camera>();
+            return _resolved = (cam ? cam.transform : null);
         }
 
         void Update()
