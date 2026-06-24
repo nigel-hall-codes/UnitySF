@@ -9,7 +9,7 @@ from ..osm import StreetEdge, StreetGraph
 from .road import MeshArrays, _anchor_centerline, _clip_polyline_to_rect, _cross_up, _forward, _sample_elevation
 
 _WIDTH = 1.5    # metres per sidewalk strip (left and right)
-_RAISE = 0.10   # metres above terrain — slightly higher than road surface
+_RAISE = 0.20   # metres above terrain — clears bilinear interpolation bleed
 
 
 def build_sidewalk_meshes(

@@ -10,7 +10,7 @@ from shapely.geometry import Polygon
 from ..osm import StreetEdge, StreetGraph, StreetNode
 
 _BEVEL_THRESHOLD = 5.0   # metres; miter points beyond this become two-vertex bevels
-_RAISE = 0.05            # metres; matches road generator to prevent z-fighting
+_RAISE = 0.20            # metres; clears bilinear bleed, matches road.py
 
 
 @dataclass
