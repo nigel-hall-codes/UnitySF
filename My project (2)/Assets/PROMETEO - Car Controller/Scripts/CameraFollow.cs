@@ -17,6 +17,7 @@ public class CameraFollow : MonoBehaviour {
 	Vector3 initialCarPosition;
 	Vector3 absoluteInitCameraPosition;
 	float _orbitYaw = 0f;
+	float _freePitch = 0f;
 
 	void Start(){
 		initialCameraPosition = gameObject.transform.position;
@@ -26,23 +27,29 @@ public class CameraFollow : MonoBehaviour {
 
 	void FixedUpdate()
 	{
-		// Accumulate orbit yaw from right analog stick
-		float lookX = 0f;
-		if (HasAxis("CameraLookX"))
-			lookX = Input.GetAxis("CameraLookX");
+		float lookX = HasAxis("CameraLookX") ? Input.GetAxis("CameraLookX") : 0f;
+		float lookY = HasAxis("CameraLookY") ? Input.GetAxis("CameraLookY") : 0f;
+
 		_orbitYaw += lookX * orbitSpeed * Time.fixedDeltaTime;
 
-		// Compute orbit position around car
-		Vector3 orbitOffset = Quaternion.AngleAxis(_orbitYaw, Vector3.up) * absoluteInitCameraPosition;
-		Vector3 _targetPos = carTransform.position + orbitOffset;
-		transform.position = Vector3.Lerp(transform.position, _targetPos, followSpeed * Time.deltaTime);
+		if (autoRotate)
+		{
+			Vector3 orbitOffset = Quaternion.AngleAxis(_orbitYaw, Vector3.up) * absoluteInitCameraPosition;
+			transform.position = Vector3.Lerp(transform.position, carTransform.position + orbitOffset, followSpeed * Time.deltaTime);
 
-		if (!autoRotate) return;
+			Vector3 _lookDirection = carTransform.position - transform.position;
+			transform.rotation = Quaternion.Lerp(transform.rotation,
+				Quaternion.LookRotation(_lookDirection, Vector3.up), lookSpeed * Time.deltaTime);
+		}
+		else
+		{
+			_freePitch = Mathf.Clamp(_freePitch - lookY * orbitSpeed * Time.fixedDeltaTime, -80f, 80f);
 
-		// Look at car
-		Vector3 _lookDirection = carTransform.position - transform.position;
-		Quaternion _rot = Quaternion.LookRotation(_lookDirection, Vector3.up);
-		transform.rotation = Quaternion.Lerp(transform.rotation, _rot, lookSpeed * Time.deltaTime);
+			Vector3 orbitOffset = Quaternion.Euler(-_freePitch, _orbitYaw, 0f) * absoluteInitCameraPosition;
+			transform.position = Vector3.Lerp(transform.position, carTransform.position + orbitOffset, followSpeed * Time.deltaTime);
+
+			transform.rotation = Quaternion.LookRotation(carTransform.position - transform.position, Vector3.up);
+		}
 	}
 
 	static bool HasAxis(string axisName)
