@@ -169,6 +169,15 @@ def bake_chunk(
         if verts and indices:
             meshes.append(MeshEntry(MeshType.BUILDING, osm_id, verts, [], uvs, indices))
 
+    # Collect named road segments from the cropped graph for the street HUD.
+    # Multiple StreetEdge objects can share the same way_id (split at intersections);
+    # emit one entry per edge so the spatial query covers the full road geometry.
+    road_names = [
+        (e.name, e.centerline)
+        for e in graph.edges
+        if e.name
+    ]
+
     return ChunkData(
         col=col,
         row=row,
@@ -177,4 +186,5 @@ def bake_chunk(
         chunk_size_m=chunk_size,
         heightmap=hmap,
         meshes=meshes,
+        road_names=road_names,
     )

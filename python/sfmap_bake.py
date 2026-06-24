@@ -124,6 +124,7 @@ def main() -> int:
             base_x=base_x, base_z=base_z,
         )
         serialize.write_chunk(chunk, args.out)
+        serialize.write_road_names(chunk, args.out)
         chunk_origins.append((col, row, chunk.world_x, chunk.world_z))
         print(f"[sfmap_bake] chunk {i + 1}/{len(chunks)} ({col},{row}): "
               f"{len(chunk.meshes)} meshes — {time.perf_counter() - t_chunk:.2f}s")

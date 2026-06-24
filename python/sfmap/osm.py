@@ -84,6 +84,7 @@ class StreetEdge:
     highway_type: HighwayType
     is_one_way: bool
     centerline: List[Tuple[float, float]]
+    name: Optional[str] = None
 
     @property
     def width(self) -> float:
@@ -344,6 +345,7 @@ def _build_graph(
         hw_type = _HIGHWAY_TYPE_MAP.get(hw_str, HighwayType.UNCLASSIFIED)
         is_one_way = w.tags.get("oneway") in ("yes", "1", "true")
 
+        way_name = w.tags.get("name") or None
         for segment in _split_at_intersections(w.node_refs, street_nodes):
             if len(segment) < 2:
                 continue
@@ -365,6 +367,7 @@ def _build_graph(
                 highway_type=hw_type,
                 is_one_way=is_one_way,
                 centerline=centerline,
+                name=way_name,
             ))
 
     # Build adjacency.
