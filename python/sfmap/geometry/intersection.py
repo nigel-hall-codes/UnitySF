@@ -135,19 +135,47 @@ def triangulate_fan(
 ) -> Tuple[List[Tuple[float, float, float]], List[Tuple[float, float]], List[int]]:
     """Fan-triangulate an intersection polygon into mesh arrays.
 
-    Returns (vertices_xyz, uvs_uv, indices) in Unity CW winding.
-    Polygon coords are XZ offsets from the node centre.
+    Returns (vertices_xyz, uvs_uv, indices). Polygon coords are XZ offsets
+    from the node centre.
+
+    Two things keep every fan visible (front-facing) and flat:
+
+    * **Consistent winding, matching the roads.** With the fan emission below,
+      a perimeter of *positive* XZ signed area faces up the same way the road
+      ribbons do (verified against the road mesh winding); the other handedness
+      fans downward and is back-face culled — Unity is left-handed, so this is
+      the opposite of the textbook right-handed sign. We reverse the ring when
+      needed so the sign is always positive.
+    * **Apex inside the polygon.** The fan apex is the polygon *centroid*, not
+      the node centre — for a node whose roads all leave to one side the node
+      centre can fall outside the polygon, which flips some triangles and
+      leaves the junction half-rendered. All intersection polygons here are
+      convex, so the centroid is always interior.
+
+    The apex and rim share ``center_y + _RAISE`` so the fan is flat and
+    coplanar with the road ribbons (which also sit at elevation + _RAISE);
+    otherwise it dishes into a shallow bowl and shades darker than the roads.
     """
     pts = list(polygon.exterior.coords[:-1])  # drop repeated closing vertex
     n = len(pts)
     if n < 3:
         return [], [], []
 
+    # Orient so the fan faces up (+Y), the same handedness as the road ribbons.
+    # Signed area = Σ(x_i·z_{i+1} − x_{i+1}·z_i); positive is front-facing here.
+    area = sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1]
+               for i in range(n))
+    if area < 0.0:
+        pts = pts[::-1]
+
     max_r = max(math.hypot(p[0], p[1]) for p in pts)
     if max_r < 0.001:
         max_r = 1.0
 
-    verts: List[Tuple[float, float, float]] = [(center_x, center_y, center_z)]
+    apex_x = sum(p[0] for p in pts) / n
+    apex_z = sum(p[1] for p in pts) / n
+
+    verts: List[Tuple[float, float, float]] = [(center_x + apex_x, center_y + _RAISE, center_z + apex_z)]
     uvs: List[Tuple[float, float]] = [(0.5, 0.5)]
     indices: List[int] = []
 
@@ -157,7 +185,6 @@ def triangulate_fan(
 
     for i in range(n):
         j = (i + 1) % n
-        # CW winding: centre → next → current
         indices += [0, j + 1, i + 1]
 
     return verts, uvs, indices
