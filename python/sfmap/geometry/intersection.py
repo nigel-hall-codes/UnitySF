@@ -13,6 +13,8 @@ from .road import _sample_elevation
 
 _BEVEL_THRESHOLD = 5.0   # metres; miter points beyond this become two-vertex bevels
 _RAISE = 0.20            # metres; clears bilinear bleed, matches road.py
+_SW_WIDTH = 1.5          # metres; sidewalk strip width, matches sidewalk.py
+_MIN_CORNER_GAP_DEG = 30.0  # skip corner fills for near-parallel arm pairs
 
 
 @dataclass
@@ -197,6 +199,122 @@ def triangulate_fan(
 
     normals = [(0.0, 1.0, 0.0)] * len(verts)
     return verts, normals, uvs, indices
+
+
+def build_sidewalk_corner_meshes(
+    graph: StreetGraph,
+    polygons: Dict[int, Polygon],
+    hmap: "HeightmapData",
+) -> Dict[int, Tuple[List[Tuple[float, float, float]], List[Tuple[float, float]], List[int]]]:
+    """Generate sidewalk corner-fill quads at each intersection.
+
+    For each pair of adjacent arms at a node, fills the gap between the two
+    sidewalk strip ends with a flat quad.  Without this, sidewalk strips
+    terminate with squared-off ends, leaving a bare triangle of terrain at
+    every intersection corner.
+
+    Each quad covers the area between:
+      - the left outer sidewalk edge of arm A (the CCW arm of the pair)
+      - the right outer sidewalk edge of arm B (the CW arm of the pair)
+      - the two road-edge inner corners (which coincide with the polygon boundary)
+
+    Near-parallel arm pairs (gap < _MIN_CORNER_GAP_DEG) are skipped: the two
+    inner corners are nearly coincident in that case and the outer corners end
+    up on opposite sides of the polygon, producing a huge degenerate strip
+    rather than a small corner fill.
+
+    Returns a dict keyed by node osm_id -> (vertices, uvs, indices).
+    Emitted with MeshType.SIDEWALK so the C# importer applies sidewalk material.
+    """
+    result: Dict[int, Tuple[list, list, list]] = {}
+
+    for node in graph.intersection_nodes:
+        if node.osm_id not in polygons:
+            continue
+        edge_arms, setbacks = _arms_and_setbacks(node, graph)
+        if len(edge_arms) < 2:
+            continue
+
+        verts: List[Tuple[float, float, float]] = []
+        uvs: List[Tuple[float, float]] = []
+        indices: List[int] = []
+        n = len(edge_arms)
+
+        for i in range(n):
+            j = (i + 1) % n
+            a = edge_arms[i].arm
+            b = edge_arms[j].arm
+            ta = setbacks[i]
+            tb = setbacks[j]
+
+            # Skip near-parallel pairs: outer corners land far apart, wrapping
+            # around the wrong side of the intersection.
+            gap_deg = (math.degrees(b.angle - a.angle)) % 360.0
+            if gap_deg < _MIN_CORNER_GAP_DEG:
+                continue
+
+            # Left perpendicular of arm A (CCW side, faces toward the gap).
+            pa_x = -a.dir_z
+            pa_z =  a.dir_x
+            # Right perpendicular of arm B (CW side, faces toward the gap).
+            pb_x =  b.dir_z
+            pb_z = -b.dir_x
+
+            hw_a = a.half_width
+            hw_b = b.half_width
+            outer_a = hw_a + _SW_WIDTH
+            outer_b = hw_b + _SW_WIDTH
+
+            # Inner corners = polygon boundary corners (road edge at setback).
+            li_ax = node.world_x + a.dir_x * ta + pa_x * hw_a
+            li_az = node.world_z + a.dir_z * ta + pa_z * hw_a
+            ri_bx = node.world_x + b.dir_x * tb + pb_x * hw_b
+            ri_bz = node.world_z + b.dir_z * tb + pb_z * hw_b
+
+            # Outer corners = sidewalk outer edges at same setback depth.
+            lo_ax = node.world_x + a.dir_x * ta + pa_x * outer_a
+            lo_az = node.world_z + a.dir_z * ta + pa_z * outer_a
+            ro_bx = node.world_x + b.dir_x * tb + pb_x * outer_b
+            ro_bz = node.world_z + b.dir_z * tb + pb_z * outer_b
+
+            li_ay = _sample_elevation(hmap, li_ax, li_az) + _RAISE
+            lo_ay = _sample_elevation(hmap, lo_ax, lo_az) + _RAISE
+            ri_by = _sample_elevation(hmap, ri_bx, ri_bz) + _RAISE
+            ro_by = _sample_elevation(hmap, ro_bx, ro_bz) + _RAISE
+
+            # Sort the four corners into CW order (front-facing from above in Unity
+            # left-handed coords) by angle from their centroid.  A fixed vertex
+            # ordering (li,lo,ro,ri) forms a self-intersecting butterfly when the
+            # inner corners are close and the outer corners diverge, so we always
+            # sort dynamically.
+            corners3d = [
+                (li_ax, li_ay, li_az),
+                (lo_ax, lo_ay, lo_az),
+                (ri_bx, ri_by, ri_bz),
+                (ro_bx, ro_by, ro_bz),
+            ]
+            cx4 = (li_ax + lo_ax + ri_bx + ro_bx) * 0.25
+            cz4 = (li_az + lo_az + ri_bz + ro_bz) * 0.25
+            corners3d.sort(key=lambda p: -math.atan2(p[2] - cz4, p[0] - cx4))
+
+            # Verify the quad is non-degenerate (area >= 0.1 m²) before emitting.
+            (ax, _, az), (bx, _, bz), (cx, _, cz), (dx, _, dz) = corners3d
+            area2 = abs(
+                (ax * (bz - dz) + bx * (cz - az) + cx * (dz - bz) + dx * (az - cz))
+            )
+            if area2 < 0.2:  # area2 = 2*area; threshold at 0.1 m²
+                continue
+
+            offset = len(verts)
+            verts.extend(corners3d)
+            uvs.extend([(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)])
+            indices.extend([offset, offset + 1, offset + 2,
+                            offset, offset + 2, offset + 3])
+
+        if verts and indices:
+            result[node.osm_id] = (verts, uvs, indices)
+
+    return result
 
 
 # ---------------------------------------------------------------------------

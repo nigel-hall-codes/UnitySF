@@ -13,7 +13,7 @@ import numpy as np
 
 from .elevation import HeightmapData
 from .geometry.building import build_building_meshes
-from .geometry.intersection import triangulate_fan
+from .geometry.intersection import build_sidewalk_corner_meshes, triangulate_fan
 from .geometry.road import build_road_meshes
 from .geometry.sidewalk import build_sidewalk_meshes
 from .osm import StreetGraph
@@ -190,6 +190,18 @@ def bake_chunk(
     if include_sidewalks:
         for way_id, (verts, uvs, indices) in _merge_by_id(build_sidewalk_meshes(graph, hmap, boundaries)).items():
             meshes.append(MeshEntry(MeshType.SIDEWALK, way_id, verts, [], uvs, indices))
+
+        # Sidewalk corner fills — one quad per adjacent arm pair at each intersection.
+        # Only emit for nodes whose centre lies inside this chunk (same guard as fan).
+        for node_id, (verts, uvs, indices) in build_sidewalk_corner_meshes(
+            graph, polygons, hmap
+        ).items():
+            node = graph.nodes.get(node_id)
+            if node is None:
+                continue
+            if not (x_min <= node.world_x <= x_min + size and z_min <= node.world_z <= z_min + size):
+                continue
+            meshes.append(MeshEntry(MeshType.SIDEWALK, node_id, verts, [], uvs, indices))
 
     # Buildings (keyed by building osm_id → arrays).
     for osm_id, (verts, uvs, indices) in build_building_meshes(graph, hmap).items():
