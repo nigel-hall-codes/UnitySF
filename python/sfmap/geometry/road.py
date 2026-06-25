@@ -15,20 +15,30 @@ MeshArrays = Tuple[
     List[int],                          # triangle indices (CW winding)
 ]
 
+# Roads additionally carry explicit per-vertex normals so their welded end-caps
+# shade continuously with the intersection fans (the importer recomputes normals
+# per mesh otherwise, which seams the junction).
+RoadMeshArrays = Tuple[
+    List[Tuple[float, float, float]],  # vertices (x, y, z)
+    List[Tuple[float, float, float]],  # normals (x, y, z)
+    List[Tuple[float, float]],          # UVs (u, v)
+    List[int],                          # triangle indices (CW winding)
+]
+
 
 def build_road_meshes(
     graph: StreetGraph,
     hmap: HeightmapData,
     boundaries: Optional[Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]] = None,
     width_multiplier: float = 1.0,
-) -> Dict[Tuple[int, int, int], MeshArrays]:
+) -> Dict[Tuple[int, int, int], RoadMeshArrays]:
     """Build road quad-strip meshes for every driveable edge in the graph.
 
-    Returns a dict keyed by (osm_way_id, from_node_id, to_node_id) → (vertices, uvs, indices).
+    Returns a dict keyed by (osm_way_id, from_node_id, to_node_id) → (vertices, normals, uvs, indices).
     Vertices are in Unity left-handed coords (+X east, +Y up, +Z north).
     Triangles use CW winding when viewed from above (+Y).
     """
-    result: Dict[Tuple[int, int, int], MeshArrays] = {}
+    result: Dict[Tuple[int, int, int], RoadMeshArrays] = {}
     for edge in graph.edges:
         if edge.width <= 0.0:
             continue
@@ -46,7 +56,7 @@ def _build_single_road(
     bd_from: Optional[Tuple[float, float]],
     bd_to: Optional[Tuple[float, float]],
     width_multiplier: float,
-) -> Optional[MeshArrays]:
+) -> Optional[RoadMeshArrays]:
     bx0 = hmap.world_x_min
     bz0 = hmap.world_z_min
     bx1 = hmap.world_x_min + hmap.world_width
@@ -77,6 +87,15 @@ def _build_single_road(
     if n < 2:
         return None
 
+    # Whether each end is anchored to an intersection polygon. Anchored ends weld
+    # to the intersection fan: the fan sticks its rim corners onto the exact same
+    # XZ and samples the same terrain, so the two meshes share those vertices in
+    # position. Here we additionally force the end-cap normals straight up to match
+    # the fan's, so the shared edge shades as one continuous surface rather than a
+    # seam between independently-recalculated meshes.
+    anchored_start = from_pt is not None
+    anchored_end = to_pt is not None
+
     half_w = edge.width * width_multiplier * 0.5
 
     arc_len = [0.0] * n
@@ -100,6 +119,9 @@ def _build_single_road(
         v_coord = arc_len[i] / total_len
         lx, lz = cx - rx * half_w, cz - rz * half_w
         ex, ez = cx + rx * half_w, cz + rz * half_w
+        # Sample terrain per-vertex — including the welded end-caps. The fan rim
+        # samples the same XZ and so lands at the same elevation, welding without
+        # floating above or sinking below the stamped terrain.
         verts.append((lx, _sample_elevation(hmap, lx, lz) + _RAISE, lz))  # left
         verts.append((ex, _sample_elevation(hmap, ex, ez) + _RAISE, ez))  # right
         uvs.append((0.0, v_coord))
@@ -114,12 +136,62 @@ def _build_single_road(
         tr = br + 2
         indices += [bl, tl, br, tl, tr, br]
 
-    return verts, uvs, indices
+    normals = _vertex_normals(verts, indices)
+    # Force welded end-caps straight up to match the flat fan exactly.
+    if anchored_start:
+        normals[0] = (0.0, 1.0, 0.0)
+        normals[1] = (0.0, 1.0, 0.0)
+    if anchored_end:
+        normals[2 * (n - 1)] = (0.0, 1.0, 0.0)
+        normals[2 * (n - 1) + 1] = (0.0, 1.0, 0.0)
+
+    return verts, normals, uvs, indices
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers (also imported by sidewalk.py)
 # ---------------------------------------------------------------------------
+
+def _vertex_normals(
+    verts: List[Tuple[float, float, float]],
+    indices: List[int],
+) -> List[Tuple[float, float, float]]:
+    """Area-weighted per-vertex normals, all oriented +Y (ground faces up).
+
+    Emitting explicit normals (instead of leaving the importer to call
+    RecalculateNormals per mesh) lets a road's welded end-cap carry the same
+    straight-up normal as the intersection fan it meets, so the shared edge
+    shades continuously instead of showing a hard seam. Raw cross products are
+    summed (so larger triangles weight more) and each accumulated normal is
+    flipped to +Y, since every road/fan surface faces up.
+    """
+    acc = [[0.0, 0.0, 0.0] for _ in verts]
+    for t in range(0, len(indices), 3):
+        a, b, c = indices[t], indices[t + 1], indices[t + 2]
+        ax, ay, az = verts[a]
+        bx, by, bz = verts[b]
+        cx, cy, cz = verts[c]
+        ux, uy, uz = bx - ax, by - ay, bz - az
+        vx, vy, vz = cx - ax, cy - ay, cz - az
+        nx = uy * vz - uz * vy
+        ny = uz * vx - ux * vz
+        nz = ux * vy - uy * vx
+        if ny < 0.0:  # ground faces up; ignore triangle winding handedness
+            nx, ny, nz = -nx, -ny, -nz
+        for vi in (a, b, c):
+            acc[vi][0] += nx
+            acc[vi][1] += ny
+            acc[vi][2] += nz
+
+    out: List[Tuple[float, float, float]] = []
+    for nx, ny, nz in acc:
+        length = math.sqrt(nx * nx + ny * ny + nz * nz)
+        if length < 1e-9:
+            out.append((0.0, 1.0, 0.0))
+        else:
+            out.append((nx / length, ny / length, nz / length))
+    return out
+
 
 def _sample_elevation(hmap: HeightmapData, x: float, z: float) -> float:
     norm = hmap.sample_bilinear(x, z)

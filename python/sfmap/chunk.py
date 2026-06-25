@@ -14,7 +14,7 @@ import numpy as np
 from .elevation import HeightmapData
 from .geometry.building import build_building_meshes
 from .geometry.intersection import triangulate_fan
-from .geometry.road import _sample_elevation, build_road_meshes
+from .geometry.road import build_road_meshes
 from .geometry.sidewalk import build_sidewalk_meshes
 from .osm import StreetGraph
 from .serialize import ChunkData, MeshEntry, MeshType
@@ -43,6 +43,29 @@ def _merge_by_id(
         m_verts, m_uvs, m_indices = merged[way_id]
         offset = len(m_verts)
         m_verts.extend(verts)
+        m_uvs.extend(uvs)
+        m_indices.extend(i + offset for i in indices)
+    return merged
+
+
+def _merge_by_id_n(
+    arrays_by_key: Dict[Tuple[int, int, int], Tuple[list, list, list, list]],
+) -> Dict[int, Tuple[list, list, list, list]]:
+    """Per-way merge for meshes that carry explicit normals (verts, normals, uvs, indices).
+
+    Same id-collision handling as ``_merge_by_id``; roads supply normals so their
+    welded end-caps shade continuously with the intersection fans.
+    """
+    merged: Dict[int, Tuple[list, list, list, list]] = {}
+    for (way_id, _f, _t), (verts, normals, uvs, indices) in arrays_by_key.items():
+        if not verts or not indices:
+            continue
+        if way_id not in merged:
+            merged[way_id] = ([], [], [], [])
+        m_verts, m_normals, m_uvs, m_indices = merged[way_id]
+        offset = len(m_verts)
+        m_verts.extend(verts)
+        m_normals.extend(normals)
         m_uvs.extend(uvs)
         m_indices.extend(i + offset for i in indices)
     return merged
@@ -146,8 +169,8 @@ def bake_chunk(
 
     # Roads — merge the split segments of each way into one mesh so osm_id (= way id)
     # is unique within the chunk (the importer keys assets by <type>_<osm_id>).
-    for way_id, (verts, uvs, indices) in _merge_by_id(build_road_meshes(graph, hmap, boundaries)).items():
-        meshes.append(MeshEntry(MeshType.ROAD, way_id, verts, [], uvs, indices))
+    for way_id, (verts, normals, uvs, indices) in _merge_by_id_n(build_road_meshes(graph, hmap, boundaries)).items():
+        meshes.append(MeshEntry(MeshType.ROAD, way_id, verts, normals, uvs, indices))
 
     # Intersections — fan-triangulated per node from the shared polygons.
     # Only emit the polygon for nodes whose centre lies inside this chunk's rect;
@@ -159,10 +182,9 @@ def bake_chunk(
         poly = polygons.get(node.osm_id)
         if poly is None:
             continue
-        center_y = _sample_elevation(hmap, node.world_x, node.world_z)
-        verts, uvs, indices = triangulate_fan(node.world_x, node.world_z, center_y, poly)
+        verts, normals, uvs, indices = triangulate_fan(node.world_x, node.world_z, hmap, poly)
         if verts and indices:
-            meshes.append(MeshEntry(MeshType.INTERSECTION, node.osm_id, verts, [], uvs, indices))
+            meshes.append(MeshEntry(MeshType.INTERSECTION, node.osm_id, verts, normals, uvs, indices))
 
     # Sidewalks (optional) — same per-way merge as roads.
     if include_sidewalks:
