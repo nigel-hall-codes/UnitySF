@@ -7,7 +7,9 @@ from typing import Dict, List, Optional, Tuple
 
 from shapely.geometry import Polygon
 
+from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph, StreetNode
+from .road import _sample_elevation
 
 _BEVEL_THRESHOLD = 5.0   # metres; miter points beyond this become two-vertex bevels
 _RAISE = 0.20            # metres; clears bilinear bleed, matches road.py
@@ -130,36 +132,39 @@ def compute_boundaries(
 def triangulate_fan(
     center_x: float,
     center_z: float,
-    center_y: float,
+    hmap: "HeightmapData",
     polygon: Polygon,
-) -> Tuple[List[Tuple[float, float, float]], List[Tuple[float, float]], List[int]]:
+) -> Tuple[List[Tuple[float, float, float]], List[Tuple[float, float, float]], List[Tuple[float, float]], List[int]]:
     """Fan-triangulate an intersection polygon into mesh arrays.
 
-    Returns (vertices_xyz, uvs_uv, indices). Polygon coords are XZ offsets
-    from the node centre.
+    Returns (vertices_xyz, normals_xyz, uvs_uv, indices). Polygon coords are XZ
+    offsets from the node centre.
 
-    Two things keep every fan visible (front-facing) and flat:
+    **Welding.** Each rim corner sits at the exact XZ of the road end-cap it
+    meets (same setback + half-width formula) and samples the *same* terrain, so
+    the fan and the roads share those vertices in position — no Z-gap, and the
+    fan tracks the stamped terrain across a sloped junction instead of floating
+    flat at the single node elevation (which left a step/seam against the
+    terrain-following roads). Every normal is forced straight up (0, 1, 0) to
+    match the roads' welded end-caps, so the shared edge shades continuously
+    rather than seaming between independently-recalculated meshes; a junction is
+    near-flat enough that flat-up shading is imperceptible.
 
-    * **Consistent winding, matching the roads.** With the fan emission below,
-      a perimeter of *positive* XZ signed area faces up the same way the road
-      ribbons do (verified against the road mesh winding); the other handedness
-      fans downward and is back-face culled — Unity is left-handed, so this is
-      the opposite of the textbook right-handed sign. We reverse the ring when
-      needed so the sign is always positive.
+    Winding and apex keep every triangle visible (front-facing):
+
+    * **Consistent winding, matching the roads.** A perimeter of *positive* XZ
+      signed area faces up the same way the road ribbons do (Unity is
+      left-handed, so this is the opposite of the textbook right-handed sign).
+      We reverse the ring when needed so the sign is always positive.
     * **Apex inside the polygon.** The fan apex is the polygon *centroid*, not
       the node centre — for a node whose roads all leave to one side the node
-      centre can fall outside the polygon, which flips some triangles and
-      leaves the junction half-rendered. All intersection polygons here are
-      convex, so the centroid is always interior.
-
-    The apex and rim share ``center_y + _RAISE`` so the fan is flat and
-    coplanar with the road ribbons (which also sit at elevation + _RAISE);
-    otherwise it dishes into a shallow bowl and shades darker than the roads.
+      centre can fall outside the polygon, which flips some triangles. All
+      intersection polygons here are convex, so the centroid is always interior.
     """
     pts = list(polygon.exterior.coords[:-1])  # drop repeated closing vertex
     n = len(pts)
     if n < 3:
-        return [], [], []
+        return [], [], [], []
 
     # Orient so the fan faces up (+Y), the same handedness as the road ribbons.
     # Signed area = Σ(x_i·z_{i+1} − x_{i+1}·z_i); positive is front-facing here.
@@ -175,19 +180,23 @@ def triangulate_fan(
     apex_x = sum(p[0] for p in pts) / n
     apex_z = sum(p[1] for p in pts) / n
 
-    verts: List[Tuple[float, float, float]] = [(center_x + apex_x, center_y + _RAISE, center_z + apex_z)]
+    apex_y = _sample_elevation(hmap, center_x + apex_x, center_z + apex_z) + _RAISE
+    verts: List[Tuple[float, float, float]] = [(center_x + apex_x, apex_y, center_z + apex_z)]
     uvs: List[Tuple[float, float]] = [(0.5, 0.5)]
     indices: List[int] = []
 
     for ox, oz in pts:
-        verts.append((center_x + ox, center_y + _RAISE, center_z + oz))
+        wx, wz = center_x + ox, center_z + oz
+        wy = _sample_elevation(hmap, wx, wz) + _RAISE
+        verts.append((wx, wy, wz))
         uvs.append((ox / (2.0 * max_r) + 0.5, oz / (2.0 * max_r) + 0.5))
 
     for i in range(n):
         j = (i + 1) % n
         indices += [0, j + 1, i + 1]
 
-    return verts, uvs, indices
+    normals = [(0.0, 1.0, 0.0)] * len(verts)
+    return verts, normals, uvs, indices
 
 
 # ---------------------------------------------------------------------------
