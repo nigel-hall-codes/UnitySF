@@ -114,7 +114,18 @@ class StreetGraph:
     def crop_to_chunk(
         self, x_min: float, z_min: float, x_max: float, z_max: float
     ) -> "StreetGraph":
-        """Return a new StreetGraph filtered to elements whose centroid is within the rect."""
+        """Return a new StreetGraph filtered to elements overlapping the rect.
+
+        Edges are kept if any part of their centerline passes through the rect —
+        not merely if their centroid lands inside it. A long road spanning several
+        chunks must appear in *every* chunk it crosses; the road/sidewalk
+        generators then clip its centerline to the chunk's exact bounds
+        (``_clip_polyline_to_rect``), so each chunk renders its own portion with
+        no overlap and no gap. Keying on the centroid alone assigned the whole
+        edge to a single chunk and dropped the rest, leaving roads that stopped
+        short of intersections in neighbouring chunks (#164). Buildings render
+        whole (no clipping), so they stay keyed on their footprint centroid.
+        """
 
         def in_rect(x: float, z: float) -> bool:
             return x_min <= x <= x_max and z_min <= z <= z_max
@@ -123,7 +134,10 @@ class StreetGraph:
             n = len(pts)
             return sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n
 
-        kept_edges = [e for e in self.edges if in_rect(*centroid(e.centerline))]
+        kept_edges = [
+            e for e in self.edges
+            if _polyline_intersects_rect(e.centerline, x_min, z_min, x_max, z_max)
+        ]
 
         kept_ids: set = set()
         for e in kept_edges:
@@ -438,3 +452,37 @@ def _split_at_intersections(
 
 def _is_road(tags: Dict[str, str]) -> bool:
     return tags.get("highway") in _ROAD_HIGHWAY_VALUES
+
+
+def _polyline_intersects_rect(
+    cl: List[Tuple[float, float]],
+    x_min: float, z_min: float, x_max: float, z_max: float,
+) -> bool:
+    """True if any part of the XZ polyline lies within [x_min,x_max]×[z_min,z_max].
+
+    Liang-Barsky parametric clip per segment — matches the segment test in
+    ``road._clip_polyline_to_rect``, so the chunks an edge is *kept* in agree
+    exactly with the chunks its centerline clips to a non-empty portion.
+    """
+    for i in range(1, len(cl)):
+        p0x, p0z = cl[i - 1]
+        p1x, p1z = cl[i]
+        dx, dz = p1x - p0x, p1z - p0z
+        t0, t1 = 0.0, 1.0
+        inside = True
+        for p, d, lo, hi in ((p0x, dx, x_min, x_max), (p0z, dz, z_min, z_max)):
+            if abs(d) < 1e-10:
+                if p < lo or p > hi:
+                    inside = False
+                    break
+            else:
+                ta, tb = (lo - p) / d, (hi - p) / d
+                if ta > tb:
+                    ta, tb = tb, ta
+                t0, t1 = max(t0, ta), min(t1, tb)
+                if t0 > t1:
+                    inside = False
+                    break
+        if inside:
+            return True
+    return False
