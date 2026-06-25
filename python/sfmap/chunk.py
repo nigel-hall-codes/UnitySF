@@ -7,6 +7,7 @@ resampling the heightmap into the chunk's world rect, stamping, and building mes
 """
 from __future__ import annotations
 
+import math
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -22,6 +23,13 @@ from .stamping import stamp_all
 
 # Boundaries dict type: (way_id, from_node, to_node) -> (from_xz, to_xz)
 _Boundaries = Dict[Tuple[int, int, int], Tuple[Optional[Tuple[float, float]], Optional[Tuple[float, float]]]]
+
+# Metres of valid heightmap kept beyond each chunk edge while baking, so road
+# end-caps and intersection fans whose setback anchors fall just across a seam
+# sample true neighbour elevation instead of a clamped chunk-edge value (#168).
+# Must exceed the largest reach of a junction corner past the node centre,
+# = max setback (<= BEVEL_THRESHOLD = 5 m) + max half-width (5 m) ≈ 7 m.
+_SAMPLE_MARGIN_M = 10.0
 
 
 def _merge_by_id(
@@ -159,7 +167,19 @@ def bake_chunk(
     x_min, z_min, size, _ = chunk_world_rect(col, row, chunk_size, base_x, base_z)
 
     graph = full_graph.crop_to_chunk(x_min, z_min, x_min + size, z_min + size)
-    hmap = resample_heightmap(full_hmap, x_min, z_min, size, hmap_res)
+
+    # Resample over a rect expanded by a margin of valid terrain on all sides,
+    # keeping the same cell pitch. Mesh sampling and stamping then see real
+    # neighbour elevation a little past every seam, so a seam-adjacent fan corner
+    # or road end-cap anchored just across the boundary lands on true terrain and
+    # welds to the arm in the neighbour chunk instead of floating at a clamped
+    # edge value (#168). The exported terrain is sliced back to the chunk rect
+    # below, so this widening is invisible to the importer.
+    cell = size / (hmap_res - 1)
+    margin = math.ceil(_SAMPLE_MARGIN_M / cell)
+    m_res = hmap_res + 2 * margin
+    m_size = (m_res - 1) * cell
+    hmap = resample_heightmap(full_hmap, x_min - margin * cell, z_min - margin * cell, m_size, m_res)
 
     # Flatten the heightmap under intersections then roads (in place) before
     # sampling mesh elevations, so terrain and geometry agree.
@@ -205,13 +225,29 @@ def bake_chunk(
         if e.name
     ]
 
+    # Slice the sampling margin back off: the serialized terrain covers exactly
+    # [x_min, x_min+size] at hmap_res. Because the margin is a whole number of
+    # cells at the chunk's own cell pitch, the inner block aligns cell-for-cell
+    # with an un-margined resample — only seam-adjacent stamping differs (now
+    # informed by real cross-seam road continuations rather than clipped stubs).
+    export_hmap = HeightmapData(
+        values=hmap.values[margin:margin + hmap_res, margin:margin + hmap_res].copy(),
+        resolution=hmap_res,
+        min_elevation_m=hmap.min_elevation_m,
+        max_elevation_m=hmap.max_elevation_m,
+        world_x_min=x_min,
+        world_z_min=z_min,
+        world_width=size,
+        world_height=size,
+    )
+
     return ChunkData(
         col=col,
         row=row,
         world_x=x_min,
         world_z=z_min,
         chunk_size_m=chunk_size,
-        heightmap=hmap,
+        heightmap=export_hmap,
         meshes=meshes,
         road_names=road_names,
     )
