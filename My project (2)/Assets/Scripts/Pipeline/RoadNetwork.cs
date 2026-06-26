@@ -14,10 +14,12 @@ namespace SFMap.Pipeline
     /// together (within <see cref="SnapTolerance"/>) reconstructs a connected graph of
     /// nodes and directed edges that <see cref="TrafficCar"/> drives along.
     ///
-    /// One-way / lane / width data isn't serialised, so every road becomes a forward
-    /// and a reverse directed edge and cars drive the centerline. That's deliberately
-    /// rudimentary — good enough for ambient traffic. Only <b>named</b> roads are
-    /// serialised, so unnamed alleys/service roads are absent from the graph.
+    /// Two-way roads become a forward and a reverse directed edge; one-way roads
+    /// (the JSON "o" flag) get only the forward edge, so cars can't drive against
+    /// the flow or U-turn back down them (#187). Lane/width detail beyond road width
+    /// isn't serialised and cars drive the centerline — deliberately rudimentary,
+    /// good enough for ambient traffic. Only <b>named</b> roads are serialised, so
+    /// unnamed alleys/service roads are absent from the graph.
     ///
     /// Self-bootstraps after the scene loads, mirroring <see cref="RoadNameIndex"/>;
     /// by then an in-scene <see cref="ChunkStreamer"/> has set
@@ -40,7 +42,7 @@ namespace SFMap.Pipeline
             public readonly Vector2[] Points; // XZ centerline, FromNode → ToNode
             public readonly float Length;     // total XZ length, metres
             public readonly float Width;      // road width, metres (0 if not serialised)
-            public readonly int Reverse;      // index of the opposite-direction edge
+            public readonly int Reverse;      // index of the opposite-direction edge, or -1 if one-way
 
             public Edge(int from, int to, Vector2[] pts, float length, float width, int reverse)
             {
@@ -102,17 +104,17 @@ namespace SFMap.Pipeline
                 foreach (var r in parsed.roads)
                 {
                     if (r.xz == null || r.xz.Length < 4) continue;
-                    AddPolyline(r.xz, r.w);
+                    AddPolyline(r.xz, r.w, r.o != 0);
                     polylines++;
                 }
             }
 
             _nodeHash.Clear(); // welding scratch no longer needed
-            Debug.Log($"[RoadNetwork] {_edges.Count / 2} roads → {_edges.Count} directed edges, " +
-                      $"{_nodes.Count} nodes (from {polylines} centerlines).");
+            Debug.Log($"[RoadNetwork] {polylines} centerlines → {_edges.Count} directed edges, " +
+                      $"{_nodes.Count} nodes (one-way roads contribute a single edge).");
         }
 
-        void AddPolyline(float[] xz, float width)
+        void AddPolyline(float[] xz, float width, bool oneWay)
         {
             int count = xz.Length / 2;
             var pts = new Vector2[count];
@@ -128,10 +130,20 @@ namespace SFMap.Pipeline
                 length += Vector2.Distance(pts[i], pts[i + 1]);
             if (length < 1f) return; // too short to bother driving
 
+            int fwd = _edges.Count;
+            if (oneWay)
+            {
+                // One-way: only the forward edge exists (Reverse = -1). Cars can
+                // neither enter from the far end nor U-turn back down it — the
+                // point order is already the legal travel direction (#187).
+                _edges.Add(new Edge(from, to, pts, length, width, -1));
+                _outgoing[from].Add(fwd);
+                return;
+            }
+
             var rev = new Vector2[count];
             for (int i = 0; i < count; i++) rev[i] = pts[count - 1 - i];
 
-            int fwd = _edges.Count;
             int back = fwd + 1;
             _edges.Add(new Edge(from, to, pts, length, width, back));
             _edges.Add(new Edge(to, from, rev, length, width, fwd));
@@ -217,6 +229,6 @@ namespace SFMap.Pipeline
 
         // Matches the JSON written by python/sfmap/serialize.py write_road_names().
         [Serializable] class RoadNamesJson { public RoadEntry[] roads; }
-        [Serializable] class RoadEntry { public string n; public float[] xz; public float w; }
+        [Serializable] class RoadEntry { public string n; public float[] xz; public float w; public int o; }
     }
 }

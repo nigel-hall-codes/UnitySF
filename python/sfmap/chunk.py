@@ -246,9 +246,10 @@ def bake_chunk(
     # runtime traffic system. Multiple StreetEdge objects can share the same way_id
     # (split at intersections); emit one entry per edge so the spatial query covers
     # the full road geometry. Width travels with each edge so traffic can offset into
-    # the right-hand lane on multi-lane roads.
+    # the right-hand lane on multi-lane roads. is_one_way travels too so the
+    # runtime traffic graph omits the reverse edge on one-way streets (#187).
     road_names = [
-        (e.name, e.centerline, e.width)
+        (e.name, e.centerline, e.width, e.is_one_way)
         for e in graph.edges
         if e.name
     ]

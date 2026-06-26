@@ -64,6 +64,37 @@ def _parse_lanes(raw: Optional[str]) -> Optional[int]:
         return None
     return lanes if lanes > 0 else None
 
+
+def _parse_oneway(
+    tags: Dict[str, str], highway: str, node_refs: List[int]
+) -> Tuple[bool, List[int]]:
+    """Resolve a way's one-way status and node order in the legal travel direction.
+
+    Returns ``(is_one_way, node_refs)`` where ``node_refs`` is reordered so that,
+    for a one-way road, index order runs in the direction traffic is allowed to
+    flow — downstream code takes from_node = node_refs[0] → to_node = node_refs[-1].
+
+    Handles the explicit ``oneway`` tag (``yes``/``true``/``1`` forward, ``-1``
+    reversed relative to node order, ``no``/``false``/``0`` two-way) and the
+    implicit one-ways OSM defines through other tags: roundabouts and motorways
+    are one-way even when the ``oneway`` tag is absent.
+    """
+    val = (tags.get("oneway") or "").strip().lower()
+    if val == "-1":
+        # Travel runs against node order; flip so node order == travel direction.
+        return True, list(reversed(node_refs))
+    if val in ("yes", "true", "1"):
+        return True, node_refs
+    if val in ("no", "false", "0"):
+        return False, node_refs
+    # Implicit one-ways: OSM treats these as oneway=yes when the tag is omitted.
+    if tags.get("junction") == "roundabout":
+        return True, node_refs
+    if highway in ("motorway", "motorway_link"):
+        return True, node_refs
+    return False, node_refs
+
+
 _HIGHWAY_TYPE_MAP: Dict[str, HighwayType] = {
     "primary": HighwayType.PRIMARY,
     "primary_link": HighwayType.PRIMARY,
@@ -382,11 +413,11 @@ def _build_graph(
     for w in highway_ways:
         hw_str = w.tags.get("highway", "unclassified")
         hw_type = _HIGHWAY_TYPE_MAP.get(hw_str, HighwayType.UNCLASSIFIED)
-        is_one_way = w.tags.get("oneway") in ("yes", "1", "true")
+        is_one_way, node_refs = _parse_oneway(w.tags, hw_str, w.node_refs)
         way_lanes = _parse_lanes(w.tags.get("lanes"))
 
         way_name = w.tags.get("name") or None
-        for segment in _split_at_intersections(w.node_refs, street_nodes):
+        for segment in _split_at_intersections(node_refs, street_nodes):
             if len(segment) < 2:
                 continue
             centerline = []
