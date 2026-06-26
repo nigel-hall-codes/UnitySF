@@ -53,10 +53,15 @@ class ChunkData:
     # Named road segments: list of (name, centerline_xz_points, width_m, is_one_way).
     # Unnamed roads omitted.
     road_names: List[Tuple[str, List[Tuple[float, float]], float, bool]] = None
+    # Parked-car placements (sfmap.geometry.parking.ParkedCar), or [] when no
+    # parking source was supplied. Serialised to a JSON sidecar, not the .bin.
+    parked_cars: List = None
 
     def __post_init__(self):
         if self.road_names is None:
             self.road_names = []
+        if self.parked_cars is None:
+            self.parked_cars = []
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +149,39 @@ def write_road_names(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_names.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps({"roads": roads}, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+
+def write_parked_cars(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
+    """Write chunk_CC_RR_parked.json alongside the .bin for placed parked cars.
+
+    JSON schema (Unity reads this as a TextAsset at import time):
+      {"cars":[{"p":[x,y,z],"r":heading_deg,"m":0.42,"s":"Geary Boulevard","id":4918},...]}
+
+    "p" is the Unity world-space position, "r" the Y heading in degrees, "m" a
+    model selector in [0,1) the importer maps onto its vehicle-prefab list, "s"
+    the nearest street name (omitted when unknown) — kept so a future tool can add
+    or remove cars by street — and "id" the originating regulation feature id.
+    Returns None and writes nothing when the chunk has no parked cars.
+    """
+    if not chunk.parked_cars:
+        return None
+
+    cars = []
+    for c in chunk.parked_cars:
+        entry = {
+            "p": [round(c.x, 3), round(c.y, 3), round(c.z, 3)],
+            "r": round(c.rot_y, 2),
+            "m": round(c.model, 4),
+            "id": c.source_id,
+        }
+        if c.street:
+            entry["s"] = c.street
+        cars.append(entry)
+
+    out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_parked.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps({"cars": cars}, ensure_ascii=False), encoding="utf-8")
     return out_path
 
 

@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Scale terrain relief by this factor to read as steep as real life "
                         "(1.0 = true elevation; default: 1.3)")
     p.add_argument("--no-sidewalks", action="store_true", help="Skip sidewalk geometry")
+    p.add_argument("--parking", default=None, metavar="FILE",
+                   help="SF parking-regulations CSV; places parked cars along regulated kerbs")
     return p
 
 
@@ -83,7 +85,7 @@ def main() -> int:
     # Imported here so --help works without the heavy scientific deps installed.
     from sfmap import osm, elevation, serialize
     from sfmap.chunk import bake_chunk
-    from sfmap.geometry import intersection
+    from sfmap.geometry import intersection, parking
 
     t_start = time.perf_counter()
     print(f"[sfmap_bake] preset='{args.preset}'  osm={args.osm}  elev={args.elev}")
@@ -102,6 +104,13 @@ def main() -> int:
     # --- Intersection polygons + road boundaries (once on the full graph) --
     polygons = intersection.compute_polygons(full_graph)
     boundaries = intersection.compute_boundaries(full_graph, polygons)
+
+    # --- Parking regulations (optional) — project kerb features once -------
+    parking_segments = None
+    if args.parking:
+        parking_segments = parking.parse_parking_csv(args.parking, full_graph.origin)
+        print(f"[sfmap_bake] parsed parking: {len(parking_segments)} kerb segment(s) "
+              f"from {args.parking}")
 
     # --- Anchor the chunk grid at the data's SW corner ---------------------
     # The projection centres world coords on the OSM bounds, so geometry straddles
@@ -127,9 +136,11 @@ def main() -> int:
             col, row, full_graph, full_hmap, polygons, boundaries,
             args.chunk_size, args.hmap_res, include_sidewalks,
             base_x=base_x, base_z=base_z,
+            parking_segments=parking_segments,
         )
         serialize.write_chunk(chunk, args.out)
         serialize.write_road_names(chunk, args.out)
+        serialize.write_parked_cars(chunk, args.out)
         chunk_origins.append((col, row, chunk.world_x, chunk.world_z))
         print(f"[sfmap_bake] chunk {i + 1}/{len(chunks)} ({col},{row}): "
               f"{len(chunk.meshes)} meshes — {time.perf_counter() - t_chunk:.2f}s")

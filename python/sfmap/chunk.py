@@ -15,6 +15,7 @@ import numpy as np
 from .elevation import HeightmapData
 from .geometry.building import build_building_meshes
 from .geometry.intersection import build_sidewalk_corner_meshes, triangulate_fan
+from .geometry.parking import place_parked_cars
 from .geometry.road import build_road_meshes
 from .geometry.sidewalk import build_sidewalk_meshes
 from .osm import StreetGraph
@@ -157,12 +158,15 @@ def bake_chunk(
     include_sidewalks: bool = True,
     base_x: float = 0.0,
     base_z: float = 0.0,
+    parking_segments: Optional[list] = None,
 ) -> ChunkData:
     """Produce the ChunkData for one chunk (col, row).
 
     polygons/boundaries are computed once on the full graph and shared across chunks;
     they are keyed by osm id / edge key so they apply correctly to the cropped graph.
     base_x/base_z anchor the chunk grid at the data's SW corner (see chunk_world_rect).
+    parking_segments (projected once by the caller) place parked cars along the
+    regulated kerbs that fall in this chunk; None/empty skips parked cars.
     """
     x_min, z_min, size, _ = chunk_world_rect(col, row, chunk_size, base_x, base_z)
 
@@ -254,6 +258,17 @@ def bake_chunk(
         if e.name
     ]
 
+    # Parked cars along regulated kerbs that fall in this chunk. Use the margin-
+    # expanded stamp_graph for the nearest-road lookup (so cars near a seam still
+    # find their street) and the margin-expanded hmap for ground elevation, but
+    # clip placement to the exact chunk rect so a kerb crossing a seam isn't
+    # double-populated. Empty when no parking source was supplied.
+    parked_cars = []
+    if parking_segments:
+        parked_cars = place_parked_cars(
+            parking_segments, stamp_graph, hmap, x_min, z_min, size,
+        )
+
     # Slice the sampling margin back off: the serialized terrain covers exactly
     # [x_min, x_min+size] at hmap_res. Because the margin is a whole number of
     # cells at the chunk's own cell pitch, the inner block aligns cell-for-cell
@@ -279,4 +294,5 @@ def bake_chunk(
         heightmap=export_hmap,
         meshes=meshes,
         road_names=road_names,
+        parked_cars=parked_cars,
     )

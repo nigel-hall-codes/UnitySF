@@ -25,6 +25,23 @@ namespace SFMap.Pipeline.Editor
         public float worldZ;
     }
 
+    // JSON layout produced by python/sfmap/serialize.py write_parked_cars()
+    [Serializable]
+    class ParkedCarsJson
+    {
+        public ParkedCarJson[] cars;
+    }
+
+    [Serializable]
+    class ParkedCarJson
+    {
+        public float[] p;   // world position [x, y, z]
+        public float   r;   // heading in degrees about +Y
+        public float   m;   // [0,1) model selector → index into CarPrefabPaths
+        public string  s;   // nearest street name (may be empty)
+        public long    id;  // source regulation feature id
+    }
+
     public class SFMapImporterWindow : EditorWindow
     {
         const uint ChunkMagic   = 0x4B4E4843u; // "CHNK"
@@ -48,6 +65,21 @@ namespace SFMap.Pipeline.Editor
             new Color(0.886f, 0.647f, 0.494f), // terracotta
             new Color(0.788f, 0.722f, 0.878f), // lavender
             new Color(0.961f, 0.953f, 0.925f), // off-white
+        };
+
+        // Vehicle prefabs used for parked cars, indexed by the python model selector
+        // (m in [0,1) → floor(m * length)). Curated to street vehicles; the plane and
+        // monster truck from the asset pack are intentionally excluded. The python
+        // bake stays decoupled from this list — it only emits a float, so reordering
+        // or adding prefabs here needs no re-bake.
+        static readonly string[] CarPrefabPaths =
+        {
+            "Assets/Awb-Free Low Poly Vehicles/Prefabs/Classic Car_9.prefab",
+            "Assets/Awb-Free Low Poly Vehicles/Prefabs/Hatchback Car_15.prefab",
+            "Assets/Awb-Free Low Poly Vehicles/Prefabs/N_Muscle Car_10.prefab",
+            "Assets/Awb-Free Low Poly Vehicles/Prefabs/Sport Car_39.prefab",
+            "Assets/Awb-Free Low Poly Vehicles/Prefabs/N Van_10.prefab",
+            "Assets/Awb-Free Low Poly Vehicles/Prefabs/Pick Up_11.prefab",
         };
 
         [MenuItem("Window/SF Map Importer")]
@@ -122,7 +154,10 @@ namespace SFMap.Pipeline.Editor
 
                     ImportRoadNames(chunkDir, coord);
 
-                    PrefabUtility.SaveAsPrefabAsset(mapRoot.transform.Find(coord.ToString()).gameObject,
+                    var chunkRootGo = mapRoot.transform.Find(coord.ToString()).gameObject;
+                    ImportParkedCars(chunkDir, coord, chunkRootGo);
+
+                    PrefabUtility.SaveAsPrefabAsset(chunkRootGo,
                         GeneratedAssets.ChunkPrefabPath(coord));
 
                     coordList.Add(new ChunkManifestEntry
@@ -334,6 +369,75 @@ namespace SFMap.Pipeline.Editor
             Directory.CreateDirectory(Path.GetDirectoryName(dst));
             File.Copy(src, dst, overwrite: true);
             AssetDatabase.ImportAsset(dst);
+        }
+
+        // Instantiate parked-car prefabs from chunk_CC_RR_parked.json under a
+        // "ParkedCars {coord}" parent on the chunk root, so they bake into the chunk
+        // prefab (as nested prefab instances) and stream in with the rest of the chunk.
+        // Cars are grouped under a child per street name so a future tool can add or
+        // remove a street's cars by toggling one GameObject. No-op when the sidecar is
+        // absent (no --parking source) or empty.
+        void ImportParkedCars(string chunkDir, ChunkCoord coord, GameObject chunkRoot)
+        {
+            string src = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_parked.json");
+            if (!File.Exists(src)) return;
+
+            var data = JsonUtility.FromJson<ParkedCarsJson>(File.ReadAllText(src));
+            if (data?.cars == null || data.cars.Length == 0) return;
+
+            var prefabs = LoadCarPrefabs();
+            if (prefabs.Length == 0)
+            {
+                Debug.LogWarning("[SFMapImporter] No parked-car prefabs found — skipping parked cars. " +
+                                 "Expected the 'Awb-Free Low Poly Vehicles' asset under Assets/.");
+                return;
+            }
+
+            var carsParent = CreateChild(chunkRoot, $"ParkedCars {coord}");
+            var streetGroups = new Dictionary<string, Transform>();
+            int placed = 0;
+
+            foreach (var car in data.cars)
+            {
+                if (car.p == null || car.p.Length < 3) continue;
+
+                int idx = Mathf.Clamp(Mathf.FloorToInt(car.m * prefabs.Length), 0, prefabs.Length - 1);
+                var prefab = prefabs[idx];
+                if (prefab == null) continue;
+
+                string street = string.IsNullOrEmpty(car.s) ? "(unknown)" : car.s;
+                if (!streetGroups.TryGetValue(street, out var group))
+                {
+                    group = CreateChild(carsParent, street).transform;
+                    streetGroups[street] = group;
+                }
+
+                var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
+                go.transform.SetParent(group, false);
+                go.transform.localPosition = new Vector3(car.p[0], car.p[1], car.p[2]);
+                go.transform.localRotation = Quaternion.Euler(0f, car.r, 0f);
+                placed++;
+            }
+
+            if (placed > 0)
+                Debug.Log($"[SFMapImporter] {coord}: placed {placed} parked car(s) across {streetGroups.Count} street(s).");
+        }
+
+        // Load (and cache for this import run) the curated vehicle prefabs. Missing
+        // entries are dropped so a partial asset install still places what it can.
+        GameObject[] _carPrefabCache;
+        GameObject[] LoadCarPrefabs()
+        {
+            if (_carPrefabCache != null) return _carPrefabCache;
+            var list = new List<GameObject>(CarPrefabPaths.Length);
+            foreach (var path in CarPrefabPaths)
+            {
+                var go = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                if (go != null) list.Add(go);
+                else Debug.LogWarning($"[SFMapImporter] Parked-car prefab not found: {path}");
+            }
+            _carPrefabCache = list.ToArray();
+            return _carPrefabCache;
         }
 
         void SaveChunkManifest(ManifestJson src, List<ChunkManifestEntry> entries, float minElev)
