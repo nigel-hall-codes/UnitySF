@@ -183,27 +183,38 @@ namespace SFMap.Pipeline
 
         static long Key(long cx, long cz) => (cx << 32) ^ (cz & 0xffffffffL);
 
-        /// Picks a random outgoing edge from <paramref name="node"/>, avoiding an
-        /// immediate U-turn back down <paramref name="arrivedEdge"/> unless that's the
-        /// only way out (a dead-end). Returns -1 if the node has no outgoing edges.
+        /// Picks a random outgoing edge from <paramref name="node"/>, avoiding any
+        /// U-turn (an exit leading back to the node we just came from) unless that is
+        /// the only way out (a dead-end). Returns -1 if the node has no outgoing edges.
         public int NextEdge(int node, int arrivedEdge)
         {
             var outs = _outgoing[node];
             if (outs.Count == 0) return -1;
 
-            int banned = arrivedEdge >= 0 ? _edges[arrivedEdge].Reverse : -1;
+            // Ban the reverse of the arrived edge (same road, opposite direction) AND
+            // any other edge whose destination is the node we just came from — both are
+            // U-turns. cameFrom == -1 when there is no arrived edge (fresh spawn).
+            int banned   = arrivedEdge >= 0 ? _edges[arrivedEdge].Reverse  : -1;
+            int cameFrom = arrivedEdge >= 0 ? _edges[arrivedEdge].FromNode : -1;
 
             int choices = 0;
             for (int i = 0; i < outs.Count; i++)
-                if (outs[i] != banned) choices++;
+            {
+                int e = outs[i];
+                if (e == banned) continue;
+                if (cameFrom >= 0 && _edges[e].ToNode == cameFrom) continue;
+                choices++;
+            }
 
             if (choices == 0) return banned >= 0 ? banned : outs[0]; // dead-end: U-turn
 
             int pick = UnityEngine.Random.Range(0, choices);
             for (int i = 0; i < outs.Count; i++)
             {
-                if (outs[i] == banned) continue;
-                if (pick-- == 0) return outs[i];
+                int e = outs[i];
+                if (e == banned) continue;
+                if (cameFrom >= 0 && _edges[e].ToNode == cameFrom) continue;
+                if (pick-- == 0) return e;
             }
             return outs[0]; // unreachable
         }
