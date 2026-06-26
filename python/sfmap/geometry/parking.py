@@ -26,7 +26,7 @@ from typing import List, Optional, Sequence, Tuple
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
 from ..projection import GeoOrigin, to_world_xz
-from .road import _clip_polyline_to_rect, _sample_elevation
+from .road import _clip_polyline_to_rect, _cross_up, _sample_elevation
 
 # The Awb low-poly vehicles are ~4.4 m long, ~2.0 m wide, but they're imported at
 # half scale (see SFMapImporterWindow.ParkedCarScale), so the placement footprint
@@ -42,6 +42,10 @@ _RAISE      = 0.20    # sit on the road surface (roads/sidewalks are raised the 
 _ROAD_SEARCH_M = 30.0
 # Skip segments shorter than one car — nothing useful fits.
 _MIN_SEG_LEN = _CAR_LENGTH
+# Two cars closer than this (XZ, metres) are treated as a stack and one is dropped.
+# Below the ~2.25 m min spacing in a row and the road-width gap between opposite
+# kerbs, so only genuine overlaps (CSV vs fallback, or roads meeting) are removed.
+_DEDUPE_DIST_M = 1.3
 
 
 @dataclass
@@ -217,6 +221,39 @@ def _sample_polyline(
 # Placement
 # ---------------------------------------------------------------------------
 
+def _dedupe(cars: List[ParkedCar], min_dist: float) -> List[ParkedCar]:
+    """Drop any car within ``min_dist`` (XZ) of one already kept, first-wins.
+
+    CSV cars are appended before fallback cars, so this gives CSV placement
+    priority: a fallback car that lands on the same kerb spot as a CSV car (the
+    CSV segment spans several split road-edges, so fallback re-covers part of it)
+    is removed, as are fallback-vs-fallback overlaps where two roads meet. The
+    threshold sits well below the ~2.25 m minimum spacing of a legitimate row and
+    the road-width gap between opposite kerbs, so real cars are never dropped.
+    """
+    from collections import defaultdict
+    grid: dict = defaultdict(list)
+    kept: List[ParkedCar] = []
+    md2 = min_dist * min_dist
+    for c in cars:
+        gx, gz = int(c.x // min_dist), int(c.z // min_dist)
+        clash = False
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for k in grid[(gx + dx, gz + dz)]:
+                    if (k.x - c.x) ** 2 + (k.z - c.z) ** 2 < md2:
+                        clash = True
+                        break
+                if clash:
+                    break
+            if clash:
+                break
+        if not clash:
+            kept.append(c)
+            grid[(gx, gz)].append(c)
+    return kept
+
+
 def place_parked_cars(
     segments: Sequence[ParkingSegment],
     graph: StreetGraph,
@@ -225,6 +262,7 @@ def place_parked_cars(
     z_min: float,
     size: float,
     fill: float = 0.85,
+    sidewalk_fallback: bool = False,
 ) -> List[ParkedCar]:
     """Place parked cars along the parking segments that fall inside this chunk.
 
@@ -237,13 +275,18 @@ def place_parked_cars(
     rect so a kerb crossing a seam contributes cars to each chunk without
     duplication. ``fill`` is the probability a candidate slot gets a car
     (1.0 = bumper-to-bumper; the issue asked for ~0.85, dense).
+
+    When ``sidewalk_fallback`` is set, streets that no kerb feature covers also get
+    cars — placed along the road's sidewalk edges (both sides) — so areas the
+    regulations CSV omits (unregulated residential, park-adjacent blocks) aren't
+    left empty. CSV placement wins where it exists, so the two never double-stack.
     """
     x_max, z_max = x_min + size, z_min + size
     slot = _CAR_LENGTH + _CAR_GAP
     jitter = _CAR_GAP * 0.5
     cars: List[ParkedCar] = []
 
-    for seg in segments:
+    for seg in segments or ():
         clipped = _clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:
             continue
@@ -295,4 +338,71 @@ def place_parked_cars(
                 ))
             s += slot + rng.uniform(-jitter, jitter)
 
+    if sidewalk_fallback:
+        _place_along_roads(graph, hmap, x_min, z_min, size, fill, cars)
+        # CSV cars come first, so dedupe keeps them and drops fallback cars that
+        # re-cover the same kerb (CSV segments span several split road-edges) or
+        # collide where two roads meet.
+        cars = _dedupe(cars, _DEDUPE_DIST_M)
+
     return cars
+
+
+def _place_along_roads(
+    graph: StreetGraph,
+    hmap: HeightmapData,
+    x_min: float,
+    z_min: float,
+    size: float,
+    fill: float,
+    cars: List[ParkedCar],
+) -> None:
+    """Append cars along both sidewalk edges of every road in the chunk.
+
+    Walks each road centerline (clipped to the chunk rect so seam roads aren't
+    double-populated) and drops cars on each side at the road edge, hugging the
+    kerb — the same road-side seating the CSV path produces. The two rows face
+    opposite ways, as parallel-parked cars do on a two-way street. Seeded per
+    (edge, side) so re-bakes are reproducible. Overlap with CSV cars (and between
+    roads at a junction) is resolved by the caller's dedupe pass.
+    """
+    x_max, z_max = x_min + size, z_min + size
+    slot = _CAR_LENGTH + _CAR_GAP
+    jitter = _CAR_GAP * 0.5
+
+    for edge in graph.edges:
+        if edge.width <= 0.0:
+            continue
+        clipped = _clip_polyline_to_rect(edge.centerline, x_min, z_min, x_max, z_max)
+        if len(clipped) < 2:
+            continue
+        arc = _arc_lengths(clipped)
+        total = arc[-1]
+        if total < _MIN_SEG_LEN:
+            continue
+
+        half_w = edge.width * 0.5
+        dist = max(half_w - _CAR_HALF_W, half_w * 0.5)  # centre just inside the road edge
+        street = edge.name
+
+        for side in (1.0, -1.0):
+            # Deterministic per edge+side; the +1 keeps the two sides' RNGs distinct.
+            rng = random.Random((abs(edge.osm_way_id) << 1) + (1 if side > 0 else 0))
+            s = _CAR_LENGTH * 0.5 + rng.uniform(0.0, slot)
+            while s < total - _CAR_LENGTH * 0.5:
+                if rng.random() <= fill:
+                    x, z, fx, fz = _sample_polyline(clipped, arc, s)
+                    rx, _, rz = _cross_up((fx, 0.0, fz))   # right of travel, unit XZ
+                    cx = x + rx * side * dist
+                    cz = z + rz * side * dist
+                    y = _sample_elevation(hmap, cx, cz) + _RAISE
+                    # Each side faces with its own kerb's traffic → opposite headings.
+                    rot_y = math.degrees(math.atan2(fx, fz)) + (180.0 if side < 0 else 0.0)
+                    cars.append(ParkedCar(
+                        x=cx, y=y, z=cz,
+                        rot_y=rot_y,
+                        model=rng.random(),
+                        street=street,
+                        source_id=abs(edge.osm_way_id),
+                    ))
+                s += slot + rng.uniform(-jitter, jitter)
