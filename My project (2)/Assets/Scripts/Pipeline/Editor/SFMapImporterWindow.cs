@@ -197,8 +197,8 @@ namespace SFMap.Pipeline.Editor
             TerrainData terrainData = null;
 
             // Roads, sidewalks, and intersections stay one-asset-and-GameObject-per-mesh so
-            // each is individually selectable; roads and intersections also carry per-mesh
-            // colliders + the Road layer.
+            // each is individually selectable; all carry per-mesh colliders, with roads and
+            // intersections also on the Road layer.
             var roadMeshes         = new List<Mesh>();
             var sidewalkMeshes     = new List<Mesh>();
             var intersectionMeshes = new List<Mesh>();
@@ -286,7 +286,7 @@ namespace SFMap.Pipeline.Editor
             var bldgMat = AssetDatabase.LoadAssetAtPath<Material>(GeneratedAssets.BuildingMaterial());
             int roadLayer = LayerMask.NameToLayer("Road");
 
-            // Roads/sidewalks: one GameObject per mesh (roads keep their collider + layer).
+            // Roads: one GameObject per mesh, each with a collider on the Road layer.
             var roadParent = CreateChild(chunkRoot, $"Roads {coord}");
             foreach (var mesh in roadMeshes)
             {
@@ -295,9 +295,14 @@ namespace SFMap.Pipeline.Editor
                 go.layer = roadLayer;
             }
 
+            // Sidewalks get a collider so cars can't drive through them, but stay off the
+            // Road layer so traffic raycasts don't treat the kerb as a drivable surface.
             var swParent = CreateChild(chunkRoot, $"Sidewalks {coord}");
             foreach (var mesh in sidewalkMeshes)
-                PlaceMesh(mesh, swParent, swMat);
+            {
+                var go = PlaceMesh(mesh, swParent, swMat);
+                go.AddComponent<MeshCollider>().sharedMesh = mesh;
+            }
 
             // Intersections: one GameObject per mesh, like roads (collider + Road layer),
             // so each junction is individually selectable in the Hierarchy.
