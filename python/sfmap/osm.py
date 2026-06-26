@@ -139,6 +139,7 @@ class StreetEdge:
     centerline: List[Tuple[float, float]]
     name: Optional[str] = None
     lanes: Optional[int] = None
+    is_driveway: bool = False   # service=driveway — a vehicle access throat, not a street
 
     @property
     def width(self) -> float:
@@ -152,6 +153,7 @@ class BuildingWay:
     osm_id: int
     footprint: List[Tuple[float, float]]
     height: float
+    building_type: Optional[str] = None   # OSM building=* value (residential, apartments, …)
 
 
 @dataclass
@@ -415,6 +417,7 @@ def _build_graph(
         hw_type = _HIGHWAY_TYPE_MAP.get(hw_str, HighwayType.UNCLASSIFIED)
         is_one_way, node_refs = _parse_oneway(w.tags, hw_str, w.node_refs)
         way_lanes = _parse_lanes(w.tags.get("lanes"))
+        is_driveway = w.tags.get("service") == "driveway"
 
         way_name = w.tags.get("name") or None
         for segment in _split_at_intersections(node_refs, street_nodes):
@@ -440,6 +443,7 @@ def _build_graph(
                 centerline=centerline,
                 name=way_name,
                 lanes=way_lanes,
+                is_driveway=is_driveway,
             ))
 
     # Build adjacency.
@@ -474,7 +478,10 @@ def _build_graph(
             except ValueError:
                 pass
 
-        buildings.append(BuildingWay(osm_id=w.way_id, footprint=footprint, height=height))
+        buildings.append(BuildingWay(
+            osm_id=w.way_id, footprint=footprint, height=height,
+            building_type=w.tags.get("building"),
+        ))
 
     return StreetGraph(
         source_bounds=bounds,
