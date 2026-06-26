@@ -59,13 +59,22 @@ namespace SFMap.Pipeline
         [Min(0.01f)] public float carScale = 0.5f;
 
         [Header("Lanes")]
-        [Tooltip("Cars drive this fraction of the road width right of the centerline on " +
-                 "multi-lane roads. 0.25 centres them in the right-hand half (their lane).")]
-        [Range(0f, 0.5f)] public float laneOffsetFraction = 0.25f;
+        [Tooltip("Physical width of one lane (metres). Sets lane count from road width " +
+                 "and centres each car in its assigned lane. Typical SF lane: 3–3.5 m.")]
+        [Min(1f)] public float laneWidth = 3.5f;
 
-        [Tooltip("Only offset into a lane on roads at least this wide (metres). Narrower " +
+        [Tooltip("Only use lane offsets on roads at least this wide (metres). Narrower " +
                  "single-track roads stay on the centerline. ~6.5 ≈ two lanes.")]
         [Min(0f)] public float multiLaneMinWidth = 6.5f;
+
+        [Tooltip("Minimum seconds a car waits before considering a lane change.")]
+        [Min(1f)] public float laneChangePeriodMin = 5f;
+
+        [Tooltip("Maximum seconds a car waits before considering a lane change.")]
+        [Min(1f)] public float laneChangePeriodMax = 15f;
+
+        [Tooltip("Seconds to complete a lane change (smooth lerp between lanes).")]
+        [Min(0.5f)] public float laneChangeDuration = 2f;
 
         [Header("Pacing")]
         [Tooltip("Seconds between population evaluations.")]
@@ -179,7 +188,8 @@ namespace SFMap.Pipeline
             var car = go.GetComponent<TrafficCar>();
             if (car == null) car = go.AddComponent<TrafficCar>();
             car.Init(net, edge, surface, Random.Range(minSpeed, maxSpeed), _mask, modelYawOffset,
-                     rideHeight, laneOffsetFraction, multiLaneMinWidth);
+                     rideHeight, multiLaneMinWidth, laneWidth,
+                     laneChangePeriodMin, laneChangePeriodMax, laneChangeDuration);
 
             _cars.Add(car);
             return true;
