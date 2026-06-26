@@ -30,6 +30,9 @@ namespace SFMap.Pipeline
         [Tooltip("Y offset above the terrain surface so lines sit on top of roads.")]
         public float heightOffset = 0.5f;
 
+        [Tooltip("Y used for roads outside any loaded terrain tile.")]
+        public float fallbackHeight = 50f;
+
         [Tooltip("Arrow head size in metres.")]
         [Min(0.5f)] public float arrowSize = 5f;
 
@@ -48,10 +51,6 @@ namespace SFMap.Pipeline
 
                 var pts = edge.Points;
                 if (pts == null || pts.Length < 2) continue;
-
-                // Skip roads with no points on a currently-loaded terrain tile —
-                // unloaded chunks have no heightmap to sample so lines would appear underground.
-                if (!AnyPointOnActiveTerrain(pts)) continue;
 
                 bool isMultiLane = edge.Width >= multiLaneMinWidth;
                 Gizmos.color = isMultiLane ? multiLaneColor : singleLaneColor;
@@ -78,7 +77,7 @@ namespace SFMap.Pipeline
             return world;
         }
 
-        static float SampleTerrainHeight(Vector3 worldPos)
+        float SampleTerrainHeight(Vector3 worldPos)
         {
             foreach (var terrain in Terrain.activeTerrains)
             {
@@ -88,24 +87,7 @@ namespace SFMap.Pipeline
                     worldPos.z >= tp.z && worldPos.z <= tp.z + sz.z)
                     return tp.y + terrain.SampleHeight(worldPos);
             }
-            return 0f;
-        }
-
-        static bool AnyPointOnActiveTerrain(Vector2[] pts)
-        {
-            foreach (var p in pts)
-            {
-                var world = new Vector3(p.x, 0f, p.y);
-                foreach (var terrain in Terrain.activeTerrains)
-                {
-                    var tp = terrain.GetPosition();
-                    var sz = terrain.terrainData.size;
-                    if (world.x >= tp.x && world.x <= tp.x + sz.x &&
-                        world.z >= tp.z && world.z <= tp.z + sz.z)
-                        return true;
-                }
-            }
-            return false;
+            return fallbackHeight;
         }
 
         void DrawArrowAlongEdge(Vector2[] pts, float fraction, bool forward)
