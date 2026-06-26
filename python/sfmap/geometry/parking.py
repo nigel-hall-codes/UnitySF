@@ -75,6 +75,10 @@ _DRIVEWAY_CLEARANCE = 3.0
 # Skip synthesising a driveway for a residential building when an OSM driveway curb cut
 # already sits within this distance of its frontage (avoids doubling up).
 _DRIVEWAY_DEDUPE_M = 6.0
+# How far to step into an OSM driveway from its (on-centerline) mouth node before
+# seating its keep-out, so the kerb-side direction is well defined. Small enough that
+# the projection back onto the road stays at the mouth even for angled driveways.
+_DRIVEWAY_PROBE_M = 4.0
 
 
 def _is_no_parking(regulation: Optional[str]) -> bool:
@@ -520,20 +524,27 @@ def _driveway_keepouts(graph: StreetGraph) -> List[Tuple[float, float]]:
     pts: List[Tuple[float, float]] = []
 
     # OSM driveways are road edges (service=driveway → highway=service). The curb cut
-    # is the end that meets a public street: of the edge's two nodes, the one nearest a
-    # non-driveway road. Seat that end against the public road it opens onto.
+    # is the end that meets a public street: the edge endpoint nearest a non-driveway
+    # road. That node usually sits *on* the road centerline (it's shared with the
+    # street way), so seating off it directly would leave the side-direction degenerate
+    # and pin the keep-out to the road centre. Step a few metres into the driveway
+    # first, so _curb_seat projects back to the mouth but gets a clean kerb-side
+    # direction from the driveway's own geometry.
     for edge in graph.edges:
         if not edge.is_driveway:
             continue
-        best: Optional[Tuple[float, float]] = None
-        best_d = float("inf")
-        for node in (edge.from_node, edge.to_node):
-            _, d, _ = _nearest_road(graph, node.world_x, node.world_z, exclude_driveways=True)
-            if d < best_d:
-                best_d, best = d, (node.world_x, node.world_z)
-        if best is None:
+        cl = edge.centerline
+        if len(cl) < 2:
             continue
-        seat = _curb_seat(graph, best[0], best[1])
+        d0 = _nearest_road(graph, cl[0][0], cl[0][1], exclude_driveways=True)[1]
+        d1 = _nearest_road(graph, cl[-1][0], cl[-1][1], exclude_driveways=True)[1]
+        mouth, inward = (cl[0], cl[1]) if d0 <= d1 else (cl[-1], cl[-2])
+        dx, dz = inward[0] - mouth[0], inward[1] - mouth[1]
+        dlen = math.hypot(dx, dz)
+        if dlen < 1e-6:
+            continue
+        step = min(_DRIVEWAY_PROBE_M, dlen)
+        seat = _curb_seat(graph, mouth[0] + dx / dlen * step, mouth[1] + dz / dlen * step)
         if seat is not None:
             pts.append(seat)
 
