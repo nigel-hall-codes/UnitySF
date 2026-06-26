@@ -183,7 +183,21 @@ def bake_chunk(
 
     # Flatten the heightmap under intersections then roads (in place) before
     # sampling mesh elevations, so terrain and geometry agree.
-    stamp_all(hmap, graph, polygons, boundaries)
+    #
+    # Stamp from a graph cropped to the *margin-expanded* rect, not the chunk
+    # rect. An intersection sitting in the margin band (just outside chunk bounds)
+    # with no road crossing the seam is kept by only one of two adjacent chunks'
+    # chunk-rect crops, so its stamp would reach the shared edge column in that one
+    # chunk only — leaving the two chunks with different terrain heights at the
+    # seam (#174). Cropping the stamp graph to the same margin band in both chunks
+    # gives them the same intersection set near the seam, so the stamps are
+    # symmetric. The chunk-bounded ``graph`` above still drives mesh generation
+    # (and the per-node centre-in-rect guards below) so geometry is unaffected.
+    margin_m = margin * cell
+    stamp_graph = full_graph.crop_to_chunk(
+        x_min - margin_m, z_min - margin_m, x_min + size + margin_m, z_min + size + margin_m
+    )
+    stamp_all(hmap, stamp_graph, polygons, boundaries)
 
     meshes: list[MeshEntry] = []
 
