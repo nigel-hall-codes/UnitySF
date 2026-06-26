@@ -39,11 +39,13 @@ namespace SFMap.Pipeline
             public readonly int ToNode;
             public readonly Vector2[] Points; // XZ centerline, FromNode → ToNode
             public readonly float Length;     // total XZ length, metres
+            public readonly float Width;      // road width, metres (0 if not serialised)
             public readonly int Reverse;      // index of the opposite-direction edge
 
-            public Edge(int from, int to, Vector2[] pts, float length, int reverse)
+            public Edge(int from, int to, Vector2[] pts, float length, float width, int reverse)
             {
-                FromNode = from; ToNode = to; Points = pts; Length = length; Reverse = reverse;
+                FromNode = from; ToNode = to; Points = pts;
+                Length = length; Width = width; Reverse = reverse;
             }
         }
 
@@ -100,7 +102,7 @@ namespace SFMap.Pipeline
                 foreach (var r in parsed.roads)
                 {
                     if (r.xz == null || r.xz.Length < 4) continue;
-                    AddPolyline(r.xz);
+                    AddPolyline(r.xz, r.w);
                     polylines++;
                 }
             }
@@ -110,7 +112,7 @@ namespace SFMap.Pipeline
                       $"{_nodes.Count} nodes (from {polylines} centerlines).");
         }
 
-        void AddPolyline(float[] xz)
+        void AddPolyline(float[] xz, float width)
         {
             int count = xz.Length / 2;
             var pts = new Vector2[count];
@@ -131,8 +133,8 @@ namespace SFMap.Pipeline
 
             int fwd = _edges.Count;
             int back = fwd + 1;
-            _edges.Add(new Edge(from, to, pts, length, back));
-            _edges.Add(new Edge(to, from, rev, length, fwd));
+            _edges.Add(new Edge(from, to, pts, length, width, back));
+            _edges.Add(new Edge(to, from, rev, length, width, fwd));
             _outgoing[from].Add(fwd);
             _outgoing[to].Add(back);
         }
@@ -215,6 +217,6 @@ namespace SFMap.Pipeline
 
         // Matches the JSON written by python/sfmap/serialize.py write_road_names().
         [Serializable] class RoadNamesJson { public RoadEntry[] roads; }
-        [Serializable] class RoadEntry { public string n; public float[] xz; }
+        [Serializable] class RoadEntry { public string n; public float[] xz; public float w; }
     }
 }

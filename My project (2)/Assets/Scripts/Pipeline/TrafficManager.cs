@@ -54,6 +54,19 @@ namespace SFMap.Pipeline
                  "Set 180 if cars drive backwards, ±90 if sideways.")]
         public float modelYawOffset = 0f;
 
+        [Tooltip("Uniform scale applied to spawned cars relative to the prefab. " +
+                 "0.5 = half the prefab's size.")]
+        [Min(0.01f)] public float carScale = 0.5f;
+
+        [Header("Lanes")]
+        [Tooltip("Cars drive this fraction of the road width right of the centerline on " +
+                 "multi-lane roads. 0.25 centres them in the right-hand half (their lane).")]
+        [Range(0f, 0.5f)] public float laneOffsetFraction = 0.25f;
+
+        [Tooltip("Only offset into a lane on roads at least this wide (metres). Narrower " +
+                 "single-track roads stay on the centerline. ~6.5 ≈ two lanes.")]
+        [Min(0f)] public float multiLaneMinWidth = 6.5f;
+
         [Header("Pacing")]
         [Tooltip("Seconds between population evaluations.")]
         [Min(0.05f)] public float updateInterval = 0.4f;
@@ -155,6 +168,7 @@ namespace SFMap.Pipeline
             Vector3 surface = hit.point + Vector3.up * rideHeight;
             var go = Instantiate(prefab, surface, Quaternion.identity, transform);
             go.name = $"TrafficCar_{prefab.name}";
+            go.transform.localScale *= carScale;
 
             // Ambient traffic is kinematic and ghost-like by design: drop any physics and
             // colliders the prefab ships with so cars never fight the transform driver or
@@ -164,7 +178,8 @@ namespace SFMap.Pipeline
 
             var car = go.GetComponent<TrafficCar>();
             if (car == null) car = go.AddComponent<TrafficCar>();
-            car.Init(net, edge, surface, Random.Range(minSpeed, maxSpeed), _mask, modelYawOffset, rideHeight);
+            car.Init(net, edge, surface, Random.Range(minSpeed, maxSpeed), _mask, modelYawOffset,
+                     rideHeight, laneOffsetFraction, multiLaneMinWidth);
 
             _cars.Add(car);
             return true;

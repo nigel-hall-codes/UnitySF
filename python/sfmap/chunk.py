@@ -228,11 +228,13 @@ def bake_chunk(
         if verts and indices:
             meshes.append(MeshEntry(MeshType.BUILDING, osm_id, verts, [], uvs, indices))
 
-    # Collect named road segments from the cropped graph for the street HUD.
-    # Multiple StreetEdge objects can share the same way_id (split at intersections);
-    # emit one entry per edge so the spatial query covers the full road geometry.
+    # Collect named road segments from the cropped graph for the street HUD and the
+    # runtime traffic system. Multiple StreetEdge objects can share the same way_id
+    # (split at intersections); emit one entry per edge so the spatial query covers
+    # the full road geometry. Width travels with each edge so traffic can offset into
+    # the right-hand lane on multi-lane roads.
     road_names = [
-        (e.name, e.centerline)
+        (e.name, e.centerline, e.width)
         for e in graph.edges
         if e.name
     ]

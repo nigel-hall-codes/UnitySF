@@ -50,8 +50,9 @@ class ChunkData:
     chunk_size_m: float
     heightmap: HeightmapData
     meshes: List[MeshEntry]
-    # Named road segments: list of (name, centerline_xz_points). Unnamed roads omitted.
-    road_names: List[Tuple[str, List[Tuple[float, float]]]] = None
+    # Named road segments: list of (name, centerline_xz_points, width_m).
+    # Unnamed roads omitted.
+    road_names: List[Tuple[str, List[Tuple[float, float]], float]] = None
 
     def __post_init__(self):
         if self.road_names is None:
@@ -118,21 +119,22 @@ def write_road_names(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     """Write chunk_CC_RR_names.json alongside the .bin for named roads only.
 
     JSON schema (Unity reads this as a TextAsset):
-      {"roads":[{"n":"Market Street","xz":[x1,z1,x2,z2,...]},...]}
+      {"roads":[{"n":"Market Street","xz":[x1,z1,x2,z2,...],"w":7.0},...]}
 
-    Centerline coords are Unity world-space XZ (same as the mesh vertices).
+    Centerline coords are Unity world-space XZ (same as the mesh vertices); "w" is
+    the road width in metres, used by the traffic system for lane offsetting.
     Returns None and writes nothing if there are no named roads in this chunk.
     """
     if not chunk.road_names:
         return None
 
     roads = []
-    for name, centerline in chunk.road_names:
+    for name, centerline, width in chunk.road_names:
         xz = []
         for x, z in centerline:
             xz.append(round(x, 3))
             xz.append(round(z, 3))
-        roads.append({"n": name, "xz": xz})
+        roads.append({"n": name, "xz": xz, "w": round(width, 2)})
 
     out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_names.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
