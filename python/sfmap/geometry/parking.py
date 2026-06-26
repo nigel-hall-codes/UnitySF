@@ -63,6 +63,26 @@ _NO_PARK_CLEARANCE = 2.0
 # improve driver sightlines and keep junctions feeling open.
 _INTERSECTION_CLEARANCE_M = 20.0
 
+# Driveways / vehicle access: keep a stretch of kerb clear at each curb cut so a
+# parked car doesn't block it. OSM maps most driveways as service=driveway ways —
+# which also carry highway=service, so they're road edges here (StreetEdge.is_driveway).
+# Residential buildings OSM leaves without a mapped driveway get a synthetic curb cut
+# in front of them, since in practice nearly all SF homes have one.
+_RESIDENTIAL_BUILDINGS = frozenset({
+    "residential", "apartments", "house", "detached", "semidetached_house",
+    "terrace", "bungalow", "garage", "garages",
+})
+# Radius (m) of kerb kept clear around a curb-cut seat: ~half a curb-cut width plus a
+# car half-length, so a car straddling the cut is dropped while the next one survives.
+_DRIVEWAY_CLEARANCE = 3.0
+# Skip synthesising a driveway for a residential building when an OSM driveway curb cut
+# already sits within this distance of its frontage (avoids doubling up).
+_DRIVEWAY_DEDUPE_M = 6.0
+# How far to step into an OSM driveway from its (on-centerline) mouth node before
+# seating its keep-out, so the kerb-side direction is well defined. Small enough that
+# the projection back onto the road stays at the mouth even for angled driveways.
+_DRIVEWAY_PROBE_M = 4.0
+
 
 def _is_no_parking(regulation: Optional[str]) -> bool:
     return "".join((regulation or "").lower().split()) in _NO_PARK_REGULATIONS
@@ -178,13 +198,20 @@ def _closest_point_on_segment(
 
 
 def _nearest_road(
-    graph: StreetGraph, x: float, z: float
+    graph: StreetGraph, x: float, z: float, exclude_driveways: bool = False
 ) -> Tuple[Optional[StreetEdge], float, Optional[Tuple[float, float]]]:
-    """Return (edge, distance, closest_point) for the road nearest to (x, z)."""
+    """Return (edge, distance, closest_point) for the road nearest to (x, z).
+
+    With ``exclude_driveways`` set, driveway edges (service=driveway) are ignored, so
+    the result is the nearest *public* street — used to seat a driveway's curb cut
+    against the road it opens onto rather than against the driveway itself.
+    """
     best_edge: Optional[StreetEdge] = None
     best_pt: Optional[Tuple[float, float]] = None
     best_d2 = float("inf")
     for edge in graph.edges:
+        if exclude_driveways and edge.is_driveway:
+            continue
         cl = edge.centerline
         for i in range(len(cl) - 1):
             cx, cz, d2 = _closest_point_on_segment(x, z, cl[i][0], cl[i][1], cl[i + 1][0], cl[i + 1][1])
@@ -382,6 +409,12 @@ def place_parked_cars(
         keepouts = _no_park_keepouts(no_park, graph, x_min, z_min, size)
         cars = _apply_keepouts(cars, keepouts, _NO_PARK_CLEARANCE)
 
+    # Leave a gap in front of driveway curb cuts (OSM driveways + a synthetic one for
+    # each residential building lacking a mapped driveway) so cars don't block them.
+    dw_keepouts = _driveway_keepouts(graph)
+    if dw_keepouts:
+        cars = _apply_keepouts(cars, dw_keepouts, _DRIVEWAY_CLEARANCE)
+
     # Clear cars near intersections — real SF law bans parking within ~6 m; we
     # exaggerate to _INTERSECTION_CLEARANCE_M to improve sightlines.
     inter_keepouts = _intersection_keepouts(graph, x_min, z_min, size)
@@ -485,6 +518,89 @@ def _apply_keepouts(
     return out
 
 
+def _curb_seat(
+    graph: StreetGraph, ox: float, oz: float
+) -> Optional[Tuple[float, float]]:
+    """Where a parked car sits on the public road in front of access point (ox, oz).
+
+    Projects onto the nearest non-driveway road centerline and steps back out toward
+    the access to the kerb-side road edge — the same lateral seat the placement uses —
+    so a keep-out here lands exactly where the blocking car would. Returns None when no
+    public road is within ``_ROAD_SEARCH_M``.
+    """
+    edge, dist, _ = _nearest_road(graph, ox, oz, exclude_driveways=True)
+    if edge is None or dist > _ROAD_SEARCH_M:
+        return None
+    rpx, rpz = _project_on_edge(edge, ox, oz)
+    sdx, sdz = ox - rpx, oz - rpz
+    slen = math.hypot(sdx, sdz)
+    if slen <= 1e-6:
+        return rpx, rpz
+    sdx, sdz = sdx / slen, sdz / slen
+    half_w = edge.width * 0.5
+    seat = max(half_w - _CAR_HALF_W, half_w * 0.5)
+    return rpx + sdx * seat, rpz + sdz * seat
+
+
+def _driveway_keepouts(graph: StreetGraph) -> List[Tuple[float, float]]:
+    """Curb-cut keep-out points: one per OSM driveway, plus a synthetic one for each
+    residential building OSM leaves without a mapped driveway.
+
+    Each point is the kerb-side road-edge seat directly in front of the access, so the
+    caller drops the parked car straddling the cut. Reads driveway edges and building
+    types straight off the (chunk-cropped) graph, so it needs no extra bake plumbing.
+    """
+    pts: List[Tuple[float, float]] = []
+
+    # OSM driveways are road edges (service=driveway → highway=service). The curb cut
+    # is the end that meets a public street: the edge endpoint nearest a non-driveway
+    # road. That node usually sits *on* the road centerline (it's shared with the
+    # street way), so seating off it directly would leave the side-direction degenerate
+    # and pin the keep-out to the road centre. Step a few metres into the driveway
+    # first, so _curb_seat projects back to the mouth but gets a clean kerb-side
+    # direction from the driveway's own geometry.
+    for edge in graph.edges:
+        if not edge.is_driveway:
+            continue
+        cl = edge.centerline
+        if len(cl) < 2:
+            continue
+        d0 = _nearest_road(graph, cl[0][0], cl[0][1], exclude_driveways=True)[1]
+        d1 = _nearest_road(graph, cl[-1][0], cl[-1][1], exclude_driveways=True)[1]
+        mouth, inward = (cl[0], cl[1]) if d0 <= d1 else (cl[-1], cl[-2])
+        dx, dz = inward[0] - mouth[0], inward[1] - mouth[1]
+        dlen = math.hypot(dx, dz)
+        if dlen < 1e-6:
+            continue
+        step = min(_DRIVEWAY_PROBE_M, dlen)
+        seat = _curb_seat(graph, mouth[0] + dx / dlen * step, mouth[1] + dz / dlen * step)
+        if seat is not None:
+            pts.append(seat)
+
+    osm_cuts = list(pts)
+    dd2 = _DRIVEWAY_DEDUPE_M * _DRIVEWAY_DEDUPE_M
+
+    # Every residential building should have a driveway; synthesise one in front of any
+    # that OSM didn't map (no curb cut already near its frontage). The centroid → nearest
+    # public road gives the kerb the building faces.
+    for b in graph.buildings:
+        if (b.building_type or "") not in _RESIDENTIAL_BUILDINGS:
+            continue
+        n = len(b.footprint)
+        if n == 0:
+            continue
+        cx = sum(p[0] for p in b.footprint) / n
+        cz = sum(p[1] for p in b.footprint) / n
+        seat = _curb_seat(graph, cx, cz)
+        if seat is None:
+            continue
+        if any((seat[0] - qx) ** 2 + (seat[1] - qz) ** 2 < dd2 for qx, qz in osm_cuts):
+            continue
+        pts.append(seat)
+
+    return pts
+
+
 def _place_along_roads(
     graph: StreetGraph,
     hmap: HeightmapData,
@@ -508,7 +624,9 @@ def _place_along_roads(
     jitter = _CAR_GAP * 0.5
 
     for edge in graph.edges:
-        if edge.width <= 0.0:
+        # Skip driveways themselves — they're narrow service throats, not parking kerbs,
+        # and the driveway keep-out pass already clears their mouth on the public street.
+        if edge.width <= 0.0 or edge.is_driveway:
             continue
         clipped = _clip_polyline_to_rect(edge.centerline, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:
