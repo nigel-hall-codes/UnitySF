@@ -88,6 +88,40 @@ def _is_no_parking(regulation: Optional[str]) -> bool:
     return "".join((regulation or "").lower().split()) in _NO_PARK_REGULATIONS
 
 
+def _norm_name(name: Optional[str]) -> str:
+    """Normalise a street name for case/spacing-insensitive matching."""
+    return " ".join((name or "").lower().split())
+
+
+def load_no_parking_roads(path: str) -> frozenset:
+    """Load the manual no-parking street list (a JSON escape hatch for #205).
+
+    The OSM tags already exclude freeways/trunks and explicitly-tagged kerbs
+    (:class:`StreetEdge.allows_parking`); this list covers roads we know locally
+    that OSM hasn't tagged. Schema::
+
+        {"streets": ["Great Highway", "Sloat Boulevard"]}
+
+    Returns a frozenset of normalised names. Accepts a bare JSON array too.
+    Unknown keys are ignored so the file can grow without breaking older bakes.
+    """
+    import json
+
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    names = data if isinstance(data, list) else (data.get("streets") or [])
+    return frozenset(_norm_name(n) for n in names if _norm_name(n))
+
+
+def _edge_allows_parking(edge: StreetEdge, no_parking_roads: Optional[frozenset]) -> bool:
+    """Whether parked cars may sit on ``edge``: OSM-derived flag AND manual list."""
+    if not edge.allows_parking:
+        return False
+    if no_parking_roads and _norm_name(edge.name) in no_parking_roads:
+        return False
+    return True
+
+
 @dataclass
 class ParkingSegment:
     """One regulated kerb feature, projected into world XZ."""
@@ -315,6 +349,7 @@ def place_parked_cars(
     size: float,
     fill: float = 0.85,
     sidewalk_fallback: bool = False,
+    no_parking_roads: Optional[frozenset] = None,
 ) -> List[ParkedCar]:
     """Place parked cars along the parking segments that fall inside this chunk.
 
@@ -335,6 +370,12 @@ def place_parked_cars(
 
     Segments flagged ``no_parking`` are never parked on; they instead become
     keep-out zones that also clear any CSV or fallback car from that stretch of kerb.
+
+    ``no_parking_roads`` (normalised street names) plus each edge's OSM-derived
+    :attr:`StreetEdge.allows_parking` flag exclude whole roads we know don't allow
+    parking (freeways/trunks, OSM ``parking:*=no``, and the manual list): no
+    fallback cars are placed on them, and a CSV kerb that snaps to such a road is
+    skipped.
     """
     x_max, z_max = x_min + size, z_min + size
     slot = _CAR_LENGTH + _CAR_GAP
@@ -358,6 +399,9 @@ def place_parked_cars(
         mid_x, mid_z, _, _ = _sample_polyline(clipped, arc, total * 0.5)
         edge, road_dist, _ = _nearest_road(graph, mid_x, mid_z)
         use_road = edge is not None and road_dist <= _ROAD_SEARCH_M
+        # A CSV kerb that snaps to a road we know bans parking gets no cars.
+        if use_road and not _edge_allows_parking(edge, no_parking_roads):
+            continue
         street = edge.name if use_road else None
         half_w = edge.width * 0.5 if use_road else 0.0
 
@@ -397,7 +441,7 @@ def place_parked_cars(
             s += slot + rng.uniform(-jitter, jitter)
 
     if sidewalk_fallback:
-        _place_along_roads(graph, hmap, x_min, z_min, size, fill, cars)
+        _place_along_roads(graph, hmap, x_min, z_min, size, fill, cars, no_parking_roads)
         # CSV cars come first, so dedupe keeps them and drops fallback cars that
         # re-cover the same kerb (CSV segments span several split road-edges) or
         # collide where two roads meet.
@@ -609,6 +653,7 @@ def _place_along_roads(
     size: float,
     fill: float,
     cars: List[ParkedCar],
+    no_parking_roads: Optional[frozenset] = None,
 ) -> None:
     """Append cars along both sidewalk edges of every road in the chunk.
 
@@ -626,7 +671,8 @@ def _place_along_roads(
     for edge in graph.edges:
         # Skip driveways themselves — they're narrow service throats, not parking kerbs,
         # and the driveway keep-out pass already clears their mouth on the public street.
-        if edge.width <= 0.0 or edge.is_driveway:
+        # Also skip roads we know ban parking (freeways/trunks, OSM tags, manual list).
+        if edge.width <= 0.0 or edge.is_driveway or not _edge_allows_parking(edge, no_parking_roads):
             continue
         clipped = _clip_polyline_to_rect(edge.centerline, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:

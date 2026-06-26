@@ -86,6 +86,19 @@ Old result (2026-06-22, `--chunk-size 1964 --hmap-res 513`): grid **9×8 = 72 ch
 | `--only col,row ...` | all | bake a subset, e.g. `--only 0,0 1,0` |
 | `--hmap-res N` | `129` | heightmap samples per chunk side; keys the `.heightcache` |
 | `--no-sidewalks` | off | skip sidewalk meshes (faster) |
+| `--parking FILE` | off | SF parking-regulations CSV → parked cars along regulated kerbs |
+| `--no-parking-fallback` | off | with `--parking`, don't fill CSV-omitted streets with sidewalk-placed cars |
+| `--no-parking-roads FILE` | off | JSON list of street names that never allow parked cars (manual override) |
+
+**No-parking roads.** Freeways/trunks (`highway=motorway/trunk` + links) and kerbs OSM tags
+`parking:*=no` are excluded from parked cars automatically. `--no-parking-roads` adds a manual
+list for roads we know locally that OSM hasn't tagged. Format (see `no_parking_roads.example.json`):
+
+```json
+{ "streets": ["Great Highway", "Sloat Boulevard"] }
+```
+
+Names match case- and spacing-insensitively against OSM `name`. A bare JSON array works too.
 
 The grid is anchored at the data's **SW corner** (not world origin), so geometry that
 straddles the projection origin still lands inside the grid.

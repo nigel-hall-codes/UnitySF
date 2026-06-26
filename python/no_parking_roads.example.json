@@ -1,0 +1,6 @@
+{
+  "_comment": "Manual no-parking street list for `sfmap_bake --no-parking-roads`. Freeways/trunks and OSM parking:*=no kerbs are already excluded automatically; list only roads we know locally that OSM hasn't tagged. Names match the OSM `name` tag, case- and spacing-insensitive. Copy to no_parking_roads.json and edit.",
+  "streets": [
+    "Great Highway"
+  ]
+}
