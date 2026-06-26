@@ -27,7 +27,7 @@ namespace SFMap.Pipeline
         [Min(0f)] public float multiLaneMinWidth = 6.5f;
 
         [Header("Gizmos")]
-        [Tooltip("Y offset above world origin so lines sit above the terrain.")]
+        [Tooltip("Y offset above the terrain surface so lines sit on top of roads.")]
         public float heightOffset = 0.5f;
 
         [Tooltip("Arrow head size in metres.")]
@@ -67,7 +67,25 @@ namespace SFMap.Pipeline
             }
         }
 
-        Vector3 ToWorld(Vector2 p) => new Vector3(p.x, heightOffset, p.y);
+        Vector3 ToWorld(Vector2 p)
+        {
+            var world = new Vector3(p.x, 0f, p.y);
+            world.y = SampleTerrainHeight(world) + heightOffset;
+            return world;
+        }
+
+        static float SampleTerrainHeight(Vector3 worldPos)
+        {
+            foreach (var terrain in Terrain.activeTerrains)
+            {
+                var tp = terrain.GetPosition();
+                var sz = terrain.terrainData.size;
+                if (worldPos.x >= tp.x && worldPos.x <= tp.x + sz.x &&
+                    worldPos.z >= tp.z && worldPos.z <= tp.z + sz.z)
+                    return tp.y + terrain.SampleHeight(worldPos);
+            }
+            return 0f;
+        }
 
         void DrawArrowAlongEdge(Vector2[] pts, float fraction, bool forward)
         {
