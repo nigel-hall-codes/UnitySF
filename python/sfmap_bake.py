@@ -36,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-sidewalks", action="store_true", help="Skip sidewalk geometry")
     p.add_argument("--parking", default=None, metavar="FILE",
                    help="SF parking-regulations CSV; places parked cars along regulated kerbs")
+    p.add_argument("--no-parking-fallback", action="store_true",
+                   help="With --parking, do NOT fill streets the CSV omits with sidewalk-placed "
+                        "cars (default: fill them)")
     return p
 
 
@@ -107,10 +110,13 @@ def main() -> int:
 
     # --- Parking regulations (optional) — project kerb features once -------
     parking_segments = None
+    parking_fallback = False
     if args.parking:
         parking_segments = parking.parse_parking_csv(args.parking, full_graph.origin)
+        parking_fallback = not args.no_parking_fallback
         print(f"[sfmap_bake] parsed parking: {len(parking_segments)} kerb segment(s) "
-              f"from {args.parking}")
+              f"from {args.parking}"
+              f"{' (+ sidewalk fallback for uncovered streets)' if parking_fallback else ''}")
 
     # --- Anchor the chunk grid at the data's SW corner ---------------------
     # The projection centres world coords on the OSM bounds, so geometry straddles
@@ -137,6 +143,7 @@ def main() -> int:
             args.chunk_size, args.hmap_res, include_sidewalks,
             base_x=base_x, base_z=base_z,
             parking_segments=parking_segments,
+            parking_fallback=parking_fallback,
         )
         serialize.write_chunk(chunk, args.out)
         serialize.write_road_names(chunk, args.out)

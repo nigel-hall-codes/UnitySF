@@ -159,6 +159,7 @@ def bake_chunk(
     base_x: float = 0.0,
     base_z: float = 0.0,
     parking_segments: Optional[list] = None,
+    parking_fallback: bool = False,
 ) -> ChunkData:
     """Produce the ChunkData for one chunk (col, row).
 
@@ -167,6 +168,8 @@ def bake_chunk(
     base_x/base_z anchor the chunk grid at the data's SW corner (see chunk_world_rect).
     parking_segments (projected once by the caller) place parked cars along the
     regulated kerbs that fall in this chunk; None/empty skips parked cars.
+    parking_fallback also seeds cars along the sidewalks of streets no kerb feature
+    covers, so areas the CSV omits aren't left empty.
     """
     x_min, z_min, size, _ = chunk_world_rect(col, row, chunk_size, base_x, base_z)
 
@@ -262,11 +265,14 @@ def bake_chunk(
     # expanded stamp_graph for the nearest-road lookup (so cars near a seam still
     # find their street) and the margin-expanded hmap for ground elevation, but
     # clip placement to the exact chunk rect so a kerb crossing a seam isn't
-    # double-populated. Empty when no parking source was supplied.
+    # double-populated. With parking_fallback, streets no kerb feature covers get
+    # cars along their sidewalks too. Empty when no parking source was supplied and
+    # fallback is off.
     parked_cars = []
-    if parking_segments:
+    if parking_segments or parking_fallback:
         parked_cars = place_parked_cars(
             parking_segments, stamp_graph, hmap, x_min, z_min, size,
+            sidewalk_fallback=parking_fallback,
         )
 
     # Slice the sampling margin back off: the serialized terrain covers exactly
