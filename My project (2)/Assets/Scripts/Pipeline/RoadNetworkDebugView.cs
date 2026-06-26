@@ -5,8 +5,8 @@ namespace SFMap.Pipeline
     /// <summary>
     /// Draws road-network gizmos in the Scene view while the game is running:
     /// centerlines coloured by lane count, and direction arrows showing each
-    /// directed edge. All roads are currently 2-way (forward + reverse pairs),
-    /// so every road shows arrows in both directions.
+    /// directed edge. Two-way roads (forward + reverse pairs) show arrows in both
+    /// directions; one-way roads (Reverse &lt; 0) show a single forward arrow.
     ///
     /// Add to any GameObject in the scene. Gizmos appear as soon as
     /// <see cref="RoadNetwork"/> finishes loading its graph.
@@ -42,9 +42,10 @@ namespace SFMap.Pipeline
             {
                 var edge = net.GetEdge(i);
 
-                // Each road is a (forward, reverse) index pair. Skip the higher index so
-                // we draw each physical road exactly once.
-                if (i > edge.Reverse) continue;
+                // Two-way roads are a (forward, reverse) index pair — skip the higher
+                // index so each is drawn once. One-way roads (Reverse < 0) are unpaired
+                // and always drawn.
+                if (edge.Reverse >= 0 && i > edge.Reverse) continue;
 
                 var pts = edge.Points;
                 if (pts == null || pts.Length < 2) continue;
@@ -60,9 +61,11 @@ namespace SFMap.Pipeline
 
                 if (showDirection)
                 {
-                    // Forward arrow at 35% along the edge; reverse arrow at 65%.
+                    // Forward arrow at 35% along the edge. Two-way roads also get a
+                    // reverse arrow at 65%; one-way roads (Reverse < 0) show only forward.
                     DrawArrowAlongEdge(pts, fraction: 0.35f, forward: true);
-                    DrawArrowAlongEdge(pts, fraction: 0.65f, forward: false);
+                    if (edge.Reverse >= 0)
+                        DrawArrowAlongEdge(pts, fraction: 0.65f, forward: false);
                 }
             }
         }
