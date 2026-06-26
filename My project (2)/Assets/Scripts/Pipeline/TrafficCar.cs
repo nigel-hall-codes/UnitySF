@@ -31,6 +31,8 @@ namespace SFMap.Pipeline
         int _mask;          // Road layer mask
         float _yawOffset;   // prefab forward-axis correction, degrees
         float _rideHeight;  // metres above the surface
+        float _laneFrac;    // lateral offset as a fraction of road width (0 = centerline)
+        float _multiLaneMinWidth; // only offset on roads at least this wide (metres)
         float _lostTime;    // seconds without finding road under us
         bool _ready;
         bool _firstConform;
@@ -39,8 +41,9 @@ namespace SFMap.Pipeline
         /// off the streamed map. The manager destroys and replaces it.
         public bool Done { get; private set; }
 
-        public void Init(RoadNetwork net, int edge, Vector3 startSurface,
-                         float speed, int roadMask, float yawOffset, float rideHeight)
+        public void Init(RoadNetwork net, int edge, Vector3 startSurface, float speed,
+                         int roadMask, float yawOffset, float rideHeight,
+                         float laneFrac, float multiLaneMinWidth)
         {
             _net = net;
             _edge = edge;
@@ -50,12 +53,21 @@ namespace SFMap.Pipeline
             _mask = roadMask;
             _yawOffset = yawOffset;
             _rideHeight = rideHeight;
+            _laneFrac = laneFrac;
+            _multiLaneMinWidth = multiLaneMinWidth;
             _lostTime = 0f;
             Done = false;
             _firstConform = true;
             _ready = true;
             transform.position = startSurface;
         }
+
+        // Metres to shift right of the centerline on the current edge: zero on narrow
+        // (single-lane) roads, otherwise a fraction of the road width so each direction
+        // settles into its own right-hand lane. Width is 0 on data baked before widths
+        // were serialised, which falls through to no offset (drive the centerline).
+        float LaneOffset(in RoadNetwork.Edge e)
+            => e.Width >= _multiLaneMinWidth ? e.Width * _laneFrac : 0f;
 
         void Update()
         {
@@ -116,22 +128,30 @@ namespace SFMap.Pipeline
             return true;
         }
 
-        // Snaps the car onto the road surface (Y + slope) and faces it along travel.
+        // Snaps the car onto the road surface (Y + slope) and faces it along travel,
+        // shifted into its right-hand lane on multi-lane roads.
         void Conform()
         {
-            var origin = new Vector3(_pos.x, RayTop, _pos.y);
-            bool grounded = Physics.Raycast(origin, Vector3.down, out var hit, RayLen, _mask,
-                                            QueryTriggerInteraction.Ignore);
-
-            Vector3 up = grounded ? hit.normal : Vector3.up;
-            float y = grounded ? hit.point.y + _rideHeight : transform.position.y;
-
             // Heading: direction toward the end of the current segment.
             var e = _net.GetEdge(_edge);
             Vector2 d = e.Points[_seg + 1] - _pos;
             if (d.sqrMagnitude < 1e-6f) d = e.Points[_seg + 1] - e.Points[_seg];
             Vector3 fwd = new Vector3(d.x, 0f, d.y);
             if (fwd.sqrMagnitude < 1e-6f) fwd = transform.forward;
+            fwd.Normalize();
+
+            // Shift the drive point right of the centerline into the right-hand lane.
+            // The road mesh is wide enough that the offset point still lands on it, so
+            // the raycast below grounds the car at its actual (offset) position.
+            Vector3 flatRight = Vector3.Cross(Vector3.up, fwd); // unit: fwd is normalised
+            Vector2 drive = _pos + new Vector2(flatRight.x, flatRight.z) * LaneOffset(e);
+
+            var origin = new Vector3(drive.x, RayTop, drive.y);
+            bool grounded = Physics.Raycast(origin, Vector3.down, out var hit, RayLen, _mask,
+                                            QueryTriggerInteraction.Ignore);
+
+            Vector3 up = grounded ? hit.normal : Vector3.up;
+            float y = grounded ? hit.point.y + _rideHeight : transform.position.y;
 
             // Build an orientation whose forward follows travel and whose up matches the
             // road normal, then apply the model's yaw correction.
@@ -139,7 +159,7 @@ namespace SFMap.Pipeline
             fwd = Vector3.Cross(right, up).normalized;
             Quaternion look = Quaternion.LookRotation(fwd, up) * Quaternion.Euler(0f, _yawOffset, 0f);
 
-            transform.position = new Vector3(_pos.x, y, _pos.y);
+            transform.position = new Vector3(drive.x, y, drive.y);
             transform.rotation = _firstConform
                 ? look
                 : Quaternion.Slerp(transform.rotation, look, 1f - Mathf.Exp(-10f * Time.deltaTime));
