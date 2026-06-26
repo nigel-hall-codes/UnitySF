@@ -49,6 +49,10 @@ namespace SFMap.Pipeline
                 var pts = edge.Points;
                 if (pts == null || pts.Length < 2) continue;
 
+                // Skip roads whose start point isn't on a currently-loaded terrain tile —
+                // unloaded chunks have no heightmap to sample so lines would appear underground.
+                if (!IsOnActiveTerrain(new Vector3(pts[0].x, 0f, pts[0].y))) continue;
+
                 bool isMultiLane = edge.Width >= multiLaneMinWidth;
                 Gizmos.color = isMultiLane ? multiLaneColor : singleLaneColor;
 
@@ -85,6 +89,19 @@ namespace SFMap.Pipeline
                     return tp.y + terrain.SampleHeight(worldPos);
             }
             return 0f;
+        }
+
+        static bool IsOnActiveTerrain(Vector3 worldPos)
+        {
+            foreach (var terrain in Terrain.activeTerrains)
+            {
+                var tp = terrain.GetPosition();
+                var sz = terrain.terrainData.size;
+                if (worldPos.x >= tp.x && worldPos.x <= tp.x + sz.x &&
+                    worldPos.z >= tp.z && worldPos.z <= tp.z + sz.z)
+                    return true;
+            }
+            return false;
         }
 
         void DrawArrowAlongEdge(Vector2[] pts, float fraction, bool forward)
