@@ -32,7 +32,7 @@ from .road import _clip_polyline_to_rect, _cross_up, _sample_elevation
 # half scale (see SFMapImporterWindow.ParkedCarScale), so the placement footprint
 # is halved to match: ~2.25 m long, ~1.0 m wide.
 _CAR_LENGTH = 2.25    # metres of kerb one parked car occupies
-_CAR_GAP    = 0.4     # bumper-to-bumper gap between adjacent cars
+_CAR_GAP    = 1.5     # bumper-to-bumper gap between adjacent cars
 _CAR_HALF_W = 0.5     # half the (scaled) car width
 _RAISE      = 0.20    # sit on the road surface (roads/sidewalks are raised the same)
 
@@ -59,9 +59,8 @@ _NO_PARK_REGULATIONS = {"noparkinganytime", "nostopping"}
 # opposite kerb (so cars across the street survive).
 _KEEPOUT_STEP = 1.5
 _NO_PARK_CLEARANCE = 2.0
-# SF law bans parking within ~6 m of an intersection; we exaggerate to ~20 m to
-# improve driver sightlines and keep junctions feeling open.
-_INTERSECTION_CLEARANCE_M = 20.0
+# SF law bans parking within ~6 m of an intersection.
+_INTERSECTION_CLEARANCE_M = 6.0
 
 # Driveways / vehicle access: keep a stretch of kerb clear at each curb cut so a
 # parked car doesn't block it. OSM maps most driveways as service=driveway ways —
