@@ -59,6 +59,9 @@ _NO_PARK_REGULATIONS = {"noparkinganytime", "nostopping"}
 # opposite kerb (so cars across the street survive).
 _KEEPOUT_STEP = 1.5
 _NO_PARK_CLEARANCE = 2.0
+# SF law bans parking within ~6 m of an intersection; we exaggerate to ~20 m to
+# improve driver sightlines and keep junctions feeling open.
+_INTERSECTION_CLEARANCE_M = 20.0
 
 
 def _is_no_parking(regulation: Optional[str]) -> bool:
@@ -379,6 +382,11 @@ def place_parked_cars(
         keepouts = _no_park_keepouts(no_park, graph, x_min, z_min, size)
         cars = _apply_keepouts(cars, keepouts, _NO_PARK_CLEARANCE)
 
+    # Clear cars near intersections — real SF law bans parking within ~6 m; we
+    # exaggerate to _INTERSECTION_CLEARANCE_M to improve sightlines.
+    inter_keepouts = _intersection_keepouts(graph, x_min, z_min, size)
+    cars = _apply_keepouts(cars, inter_keepouts, _INTERSECTION_CLEARANCE_M)
+
     return cars
 
 
@@ -422,6 +430,27 @@ def _no_park_keepouts(
             pts.append((x, z))
             s += _KEEPOUT_STEP
     return pts
+
+
+def _intersection_keepouts(
+    graph: StreetGraph,
+    x_min: float,
+    z_min: float,
+    size: float,
+) -> List[Tuple[float, float]]:
+    """Return one keepout point per intersection node that is near this chunk.
+
+    A single point per node is sufficient because _apply_keepouts does a true
+    distance check, so the full _INTERSECTION_CLEARANCE_M radius is enforced.
+    """
+    x_max, z_max = x_min + size, z_min + size
+    margin = _INTERSECTION_CLEARANCE_M
+    return [
+        (node.world_x, node.world_z)
+        for node in graph.intersection_nodes
+        if (x_min - margin <= node.world_x <= x_max + margin
+            and z_min - margin <= node.world_z <= z_max + margin)
+    ]
 
 
 def _apply_keepouts(
