@@ -11,11 +11,13 @@ public class CameraFollow : MonoBehaviour {
 	public float lookSpeed = 5;
 	[Range(10, 360)]
 	public float orbitSpeed = 120f;
+	[Range(2, 30)]
+	public float distance = 10f;
+	[Range(-5, 20)]
+	public float height = 5f;
 	public bool autoRotate = true;
 
-	Vector3 initialCameraPosition;
-	Vector3 initialCarPosition;
-	Vector3 absoluteInitCameraPosition;
+	Vector3 _offsetDirFlat;
 	float _orbitYaw = 0f;
 	float _freePitch = 0f;
 
@@ -25,9 +27,13 @@ public class CameraFollow : MonoBehaviour {
 	// huge offset into absoluteInitCameraPosition (camera ends up far from the car instead
 	// of behind it). Awake always precedes every Start, so the authored offset is used.
 	void Awake(){
-		initialCameraPosition = gameObject.transform.position;
-		initialCarPosition = carTransform.position;
-		absoluteInitCameraPosition = initialCameraPosition - initialCarPosition;
+		Vector3 initialCameraPosition = gameObject.transform.position;
+		Vector3 initialCarPosition = carTransform.position;
+		Vector3 absoluteInitCameraPosition = initialCameraPosition - initialCarPosition;
+		Vector3 flat = new Vector3(absoluteInitCameraPosition.x, 0f, absoluteInitCameraPosition.z);
+		distance = flat.magnitude;
+		_offsetDirFlat = flat.magnitude > 0.001f ? flat.normalized : Vector3.back;
+		height = absoluteInitCameraPosition.y;
 	}
 
 	void FixedUpdate()
@@ -39,7 +45,7 @@ public class CameraFollow : MonoBehaviour {
 
 		if (autoRotate)
 		{
-			Vector3 orbitOffset = Quaternion.AngleAxis(_orbitYaw, Vector3.up) * absoluteInitCameraPosition;
+			Vector3 orbitOffset = Quaternion.AngleAxis(_orbitYaw, Vector3.up) * (_offsetDirFlat * distance) + Vector3.up * height;
 			transform.position = Vector3.Lerp(transform.position, carTransform.position + orbitOffset, followSpeed * Time.deltaTime);
 
 			Vector3 _lookDirection = carTransform.position - transform.position;
@@ -50,7 +56,7 @@ public class CameraFollow : MonoBehaviour {
 		{
 			_freePitch = Mathf.Clamp(_freePitch - lookY * orbitSpeed * Time.fixedDeltaTime, -80f, 80f);
 
-			Vector3 orbitOffset = Quaternion.Euler(-_freePitch, _orbitYaw, 0f) * absoluteInitCameraPosition;
+			Vector3 orbitOffset = Quaternion.Euler(-_freePitch, _orbitYaw, 0f) * (_offsetDirFlat * distance) + Vector3.up * height;
 			transform.position = Vector3.Lerp(transform.position, carTransform.position + orbitOffset, followSpeed * Time.deltaTime);
 
 			transform.rotation = Quaternion.LookRotation(carTransform.position - transform.position, Vector3.up);
