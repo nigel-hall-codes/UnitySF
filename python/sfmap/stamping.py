@@ -32,6 +32,11 @@ def stamp_intersections(
     pad = math.hypot(cell_w, cell_h) * 0.5
     elev_range = max(hmap.max_elevation_m - hmap.min_elevation_m, 0.001)
 
+    # Snapshot: each intersection samples its centre grade from pre-stamp
+    # terrain so processing order (set iteration) cannot corrupt the lookup.
+    hmap_pre = copy.copy(hmap)
+    hmap_pre.values = hmap.values.copy()
+
     for node in graph.intersection_nodes:
         poly = polygons.get(node.osm_id)
         if poly is None:
@@ -46,7 +51,7 @@ def stamp_intersections(
         r_sq = r * r
 
         # Stamp to the elevation sampled at the node centre before any changes.
-        elevation = hmap.sample_bilinear(cx, cz) * (hmap.max_elevation_m - hmap.min_elevation_m) + hmap.min_elevation_m
+        elevation = hmap_pre.sample_bilinear(cx, cz) * (hmap.max_elevation_m - hmap.min_elevation_m) + hmap.min_elevation_m
         normalized = (elevation - hmap.min_elevation_m) / elev_range
 
         clamp_r = r + pad * 2
