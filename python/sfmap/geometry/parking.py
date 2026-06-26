@@ -47,6 +47,23 @@ _MIN_SEG_LEN = _CAR_LENGTH
 # kerbs, so only genuine overlaps (CSV vs fallback, or roads meeting) are removed.
 _DEDUPE_DIST_M = 1.3
 
+# REGULATION values (CSV) that mean "never park here" — used as keep-out zones.
+# Compared after lowercasing and stripping all whitespace, so case/spacing variants
+# ("No parking any time", "No Parking Anytime") collapse to one key. The map is
+# treated as daytime, so "No overnight parking" and "Limited No Parking" are NOT
+# excluded (parking is legal there in the daytime).
+_NO_PARK_REGULATIONS = {"noparkinganytime", "nostopping"}
+# Keep-out sampling step + clearance (metres): a car within _NO_PARK_CLEARANCE of a
+# point sampled every _KEEPOUT_STEP along a no-parking kerb is removed. Clearance sits
+# above the step (so the corridor is continuous) yet below the road-width gap to the
+# opposite kerb (so cars across the street survive).
+_KEEPOUT_STEP = 1.5
+_NO_PARK_CLEARANCE = 2.0
+
+
+def _is_no_parking(regulation: Optional[str]) -> bool:
+    return "".join((regulation or "").lower().split()) in _NO_PARK_REGULATIONS
+
 
 @dataclass
 class ParkingSegment:
@@ -54,6 +71,7 @@ class ParkingSegment:
     object_id: int
     points: List[Tuple[float, float]]      # world-space (x, z) polyline
     neighborhood: str = ""
+    no_parking: bool = False               # REGULATION forbids parking → keep-out zone
 
 
 @dataclass
@@ -103,9 +121,11 @@ def _parse_multilinestring(wkt: str) -> List[List[Tuple[float, float]]]:
 def parse_parking_csv(path: str, origin: GeoOrigin) -> List[ParkingSegment]:
     """Read the parking-regulations CSV and project every kerb feature to world XZ.
 
-    Uses the ``shape`` (WKT geometry) and ``objectid`` columns; a single feature
-    with a multi-part geometry yields one ParkingSegment per part (the part index
-    is folded into the object_id so seeds stay distinct).
+    Uses the ``shape`` (WKT geometry), ``objectid`` and ``REGULATION`` columns; a
+    single feature with a multi-part geometry yields one ParkingSegment per part
+    (the part index is folded into the object_id so seeds stay distinct). Segments
+    whose REGULATION forbids parking are flagged ``no_parking`` and become keep-out
+    zones rather than parking spots.
     """
     import csv
 
@@ -122,12 +142,14 @@ def parse_parking_csv(path: str, origin: GeoOrigin) -> List[ParkingSegment]:
             except ValueError:
                 base_id = 0
             neighborhood = (row.get("analysis_neighborhood") or "").strip()
+            no_parking = _is_no_parking(row.get("REGULATION"))
             for part, line in enumerate(lines):
                 world = [to_world_xz(lon, lat, origin) for lon, lat in line]
                 segments.append(ParkingSegment(
                     object_id=base_id * 100 + part,
                     points=world,
                     neighborhood=neighborhood,
+                    no_parking=no_parking,
                 ))
     return segments
 
@@ -280,13 +302,19 @@ def place_parked_cars(
     cars — placed along the road's sidewalk edges (both sides) — so areas the
     regulations CSV omits (unregulated residential, park-adjacent blocks) aren't
     left empty. CSV placement wins where it exists, so the two never double-stack.
+
+    Segments flagged ``no_parking`` are never parked on; they instead become
+    keep-out zones that also clear any CSV or fallback car from that stretch of kerb.
     """
     x_max, z_max = x_min + size, z_min + size
     slot = _CAR_LENGTH + _CAR_GAP
     jitter = _CAR_GAP * 0.5
     cars: List[ParkedCar] = []
 
-    for seg in segments or ():
+    parkable = [s for s in (segments or ()) if not s.no_parking]
+    no_park = [s for s in (segments or ()) if s.no_parking]
+
+    for seg in parkable:
         clipped = _clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:
             continue
@@ -345,7 +373,87 @@ def place_parked_cars(
         # collide where two roads meet.
         cars = _dedupe(cars, _DEDUPE_DIST_M)
 
+    if no_park:
+        # Clear cars from kerbs the CSV marks no-parking. Keep-out points use the
+        # same road-edge snapping as placement, so they line up with where cars sit.
+        keepouts = _no_park_keepouts(no_park, graph, x_min, z_min, size)
+        cars = _apply_keepouts(cars, keepouts, _NO_PARK_CLEARANCE)
+
     return cars
+
+
+def _no_park_keepouts(
+    segments: Sequence[ParkingSegment],
+    graph: StreetGraph,
+    x_min: float,
+    z_min: float,
+    size: float,
+) -> List[Tuple[float, float]]:
+    """Sample keep-out points along no-parking kerbs, snapped to the road edge.
+
+    Mirrors the CSV placement's lateral snapping so a keep-out point lands exactly
+    where a car on that kerb would sit; the caller then drops any car near one.
+    """
+    x_max, z_max = x_min + size, z_min + size
+    pts: List[Tuple[float, float]] = []
+    for seg in segments:
+        clipped = _clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
+        if len(clipped) < 2:
+            continue
+        arc = _arc_lengths(clipped)
+        total = arc[-1]
+        if total < 0.5:
+            continue
+        mid_x, mid_z, _, _ = _sample_polyline(clipped, arc, total * 0.5)
+        edge, road_dist, _ = _nearest_road(graph, mid_x, mid_z)
+        use_road = edge is not None and road_dist <= _ROAD_SEARCH_M
+        half_w = edge.width * 0.5 if use_road else 0.0
+        s = 0.0
+        while s <= total:
+            x, z, _, _ = _sample_polyline(clipped, arc, s)
+            if use_road:
+                rpx, rpz = _project_on_edge(edge, x, z)
+                sdx, sdz = x - rpx, z - rpz
+                slen = math.hypot(sdx, sdz)
+                if slen > 1e-6:
+                    sdx, sdz = sdx / slen, sdz / slen
+                    dist = max(half_w - _CAR_HALF_W, half_w * 0.5)
+                    x, z = rpx + sdx * dist, rpz + sdz * dist
+            pts.append((x, z))
+            s += _KEEPOUT_STEP
+    return pts
+
+
+def _apply_keepouts(
+    cars: List[ParkedCar],
+    keepouts: List[Tuple[float, float]],
+    clearance: float,
+) -> List[ParkedCar]:
+    """Drop any car within ``clearance`` (XZ) of a keep-out point."""
+    if not keepouts:
+        return cars
+    from collections import defaultdict
+    grid: dict = defaultdict(list)
+    for kx, kz in keepouts:
+        grid[(int(kx // clearance), int(kz // clearance))].append((kx, kz))
+    c2 = clearance * clearance
+    out: List[ParkedCar] = []
+    for car in cars:
+        gx, gz = int(car.x // clearance), int(car.z // clearance)
+        blocked = False
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for kx, kz in grid[(gx + dx, gz + dz)]:
+                    if (kx - car.x) ** 2 + (kz - car.z) ** 2 < c2:
+                        blocked = True
+                        break
+                if blocked:
+                    break
+            if blocked:
+                break
+        if not blocked:
+            out.append(car)
+    return out
 
 
 def _place_along_roads(
