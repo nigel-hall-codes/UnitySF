@@ -42,6 +42,28 @@ _HIGHWAY_WIDTHS: Dict[HighwayType, float] = {
     HighwayType.FOOTWAY: 0.0,
 }
 
+# Width allotted per traffic lane, in meters. Used when an edge carries an
+# explicit OSM `lanes` count; otherwise width falls back to _HIGHWAY_WIDTHS.
+_LANE_WIDTH = 3.5
+
+
+def _parse_lanes(raw: Optional[str]) -> Optional[int]:
+    """Parse an OSM `lanes` tag into a positive lane count, or None.
+
+    OSM values are usually a plain integer ("2"), but the tag can also carry
+    a decimal ("1.5") or a `;`-separated list ("2;3" for direction splits).
+    Take the first numeric token, round to the nearest whole lane, and reject
+    anything non-positive or unparseable.
+    """
+    if not raw:
+        return None
+    token = raw.split(";")[0].strip()
+    try:
+        lanes = int(round(float(token)))
+    except ValueError:
+        return None
+    return lanes if lanes > 0 else None
+
 _HIGHWAY_TYPE_MAP: Dict[str, HighwayType] = {
     "primary": HighwayType.PRIMARY,
     "primary_link": HighwayType.PRIMARY,
@@ -85,9 +107,12 @@ class StreetEdge:
     is_one_way: bool
     centerline: List[Tuple[float, float]]
     name: Optional[str] = None
+    lanes: Optional[int] = None
 
     @property
     def width(self) -> float:
+        if self.lanes is not None:
+            return self.lanes * _LANE_WIDTH
         return _HIGHWAY_WIDTHS.get(self.highway_type, 6.0)
 
 
@@ -358,6 +383,7 @@ def _build_graph(
         hw_str = w.tags.get("highway", "unclassified")
         hw_type = _HIGHWAY_TYPE_MAP.get(hw_str, HighwayType.UNCLASSIFIED)
         is_one_way = w.tags.get("oneway") in ("yes", "1", "true")
+        way_lanes = _parse_lanes(w.tags.get("lanes"))
 
         way_name = w.tags.get("name") or None
         for segment in _split_at_intersections(w.node_refs, street_nodes):
@@ -382,6 +408,7 @@ def _build_graph(
                 is_one_way=is_one_way,
                 centerline=centerline,
                 name=way_name,
+                lanes=way_lanes,
             ))
 
     # Build adjacency.
