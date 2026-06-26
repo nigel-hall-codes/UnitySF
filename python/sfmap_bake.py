@@ -36,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-sidewalks", action="store_true", help="Skip sidewalk geometry")
     p.add_argument("--parking", default=None, metavar="FILE",
                    help="SF parking-regulations CSV; places parked cars along regulated kerbs")
+    p.add_argument("--no-parking-roads", default=None, metavar="FILE",
+                   help="JSON list of street names that never allow parked cars (manual override; "
+                        "freeways/trunks and OSM parking:*=no tags are excluded automatically)")
     p.add_argument("--no-parking-fallback", action="store_true",
                    help="With --parking, do NOT fill streets the CSV omits with sidewalk-placed "
                         "cars (default: fill them)")
@@ -118,6 +121,14 @@ def main() -> int:
               f"from {args.parking}"
               f"{' (+ sidewalk fallback for uncovered streets)' if parking_fallback else ''}")
 
+    # Manual no-parking road list (optional) — OSM already excludes freeways/trunks
+    # and explicitly-tagged kerbs; this covers roads we know locally that OSM hasn't.
+    no_parking_roads = None
+    if args.no_parking_roads:
+        no_parking_roads = parking.load_no_parking_roads(args.no_parking_roads)
+        print(f"[sfmap_bake] no-parking roads: {len(no_parking_roads)} street name(s) "
+              f"from {args.no_parking_roads}")
+
     # --- Anchor the chunk grid at the data's SW corner ---------------------
     # The projection centres world coords on the OSM bounds, so geometry straddles
     # the origin into negative XZ. Anchoring the grid at (0,0) would drop everything
@@ -144,6 +155,7 @@ def main() -> int:
             base_x=base_x, base_z=base_z,
             parking_segments=parking_segments,
             parking_fallback=parking_fallback,
+            no_parking_roads=no_parking_roads,
         )
         serialize.write_chunk(chunk, args.out)
         serialize.write_road_names(chunk, args.out)

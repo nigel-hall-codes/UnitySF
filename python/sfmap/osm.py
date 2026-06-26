@@ -46,6 +46,45 @@ _HIGHWAY_WIDTHS: Dict[HighwayType, float] = {
 # explicit OSM `lanes` count; otherwise width falls back to _HIGHWAY_WIDTHS.
 _LANE_WIDTH = 3.5
 
+# Highway classes you never park on. These reach us as road edges (they're in
+# _ROAD_HIGHWAY_VALUES) but carry no parking, so parked-car placement must skip
+# them — and they're not in _HIGHWAY_TYPE_MAP, so they'd otherwise be mistaken
+# for plain unclassified streets and get a parked-car row.
+_NO_PARKING_HIGHWAYS = frozenset({
+    "motorway", "motorway_link", "trunk", "trunk_link",
+})
+# OSM `parking:*` / `parking:lane:*` values that forbid parking on a side.
+_NO_PARKING_TAG_VALUES = frozenset({"no", "no_parking", "no_stopping"})
+
+
+def _road_allows_parking(tags: Dict[str, str], highway: str) -> bool:
+    """Whether parked cars belong on this road, from OSM tags alone.
+
+    False for motorway/trunk (and their links) — you never park on a freeway —
+    and for explicit OSM parking tags that forbid it on *both* sides. Conservative
+    by design: a lone `parking:left=no` (with the other side unknown) still allows
+    parking, so only an unambiguous both-sides "no" excludes the road. Everything
+    unspecified defaults to allowed, preserving the existing placement behaviour.
+    """
+    if highway in _NO_PARKING_HIGHWAYS:
+        return False
+    if (tags.get("parking:both") or tags.get("parking:lane:both") or "").strip().lower() \
+            in _NO_PARKING_TAG_VALUES:
+        return False
+
+    def _side(*keys: str) -> Optional[str]:
+        for k in keys:
+            v = (tags.get(k) or "").strip().lower()
+            if v:
+                return v
+        return None
+
+    left = _side("parking:left", "parking:lane:left")
+    right = _side("parking:right", "parking:lane:right")
+    if left in _NO_PARKING_TAG_VALUES and right in _NO_PARKING_TAG_VALUES:
+        return False
+    return True
+
 
 def _parse_lanes(raw: Optional[str]) -> Optional[int]:
     """Parse an OSM `lanes` tag into a positive lane count, or None.
@@ -140,6 +179,7 @@ class StreetEdge:
     name: Optional[str] = None
     lanes: Optional[int] = None
     is_driveway: bool = False   # service=driveway — a vehicle access throat, not a street
+    allows_parking: bool = True  # False on freeways/trunks & OSM parking:*=no — no parked cars
 
     @property
     def width(self) -> float:
@@ -418,6 +458,7 @@ def _build_graph(
         is_one_way, node_refs = _parse_oneway(w.tags, hw_str, w.node_refs)
         way_lanes = _parse_lanes(w.tags.get("lanes"))
         is_driveway = w.tags.get("service") == "driveway"
+        allows_parking = _road_allows_parking(w.tags, hw_str)
 
         way_name = w.tags.get("name") or None
         for segment in _split_at_intersections(node_refs, street_nodes):
@@ -444,6 +485,7 @@ def _build_graph(
                 name=way_name,
                 lanes=way_lanes,
                 is_driveway=is_driveway,
+                allows_parking=allows_parking,
             ))
 
     # Build adjacency.
