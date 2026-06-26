@@ -49,9 +49,9 @@ namespace SFMap.Pipeline
                 var pts = edge.Points;
                 if (pts == null || pts.Length < 2) continue;
 
-                // Skip roads whose start point isn't on a currently-loaded terrain tile —
+                // Skip roads with no points on a currently-loaded terrain tile —
                 // unloaded chunks have no heightmap to sample so lines would appear underground.
-                if (!IsOnActiveTerrain(new Vector3(pts[0].x, 0f, pts[0].y))) continue;
+                if (!AnyPointOnActiveTerrain(pts)) continue;
 
                 bool isMultiLane = edge.Width >= multiLaneMinWidth;
                 Gizmos.color = isMultiLane ? multiLaneColor : singleLaneColor;
@@ -91,15 +91,19 @@ namespace SFMap.Pipeline
             return 0f;
         }
 
-        static bool IsOnActiveTerrain(Vector3 worldPos)
+        static bool AnyPointOnActiveTerrain(Vector2[] pts)
         {
-            foreach (var terrain in Terrain.activeTerrains)
+            foreach (var p in pts)
             {
-                var tp = terrain.GetPosition();
-                var sz = terrain.terrainData.size;
-                if (worldPos.x >= tp.x && worldPos.x <= tp.x + sz.x &&
-                    worldPos.z >= tp.z && worldPos.z <= tp.z + sz.z)
-                    return true;
+                var world = new Vector3(p.x, 0f, p.y);
+                foreach (var terrain in Terrain.activeTerrains)
+                {
+                    var tp = terrain.GetPosition();
+                    var sz = terrain.terrainData.size;
+                    if (world.x >= tp.x && world.x <= tp.x + sz.x &&
+                        world.z >= tp.z && world.z <= tp.z + sz.z)
+                        return true;
+                }
             }
             return false;
         }
