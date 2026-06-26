@@ -26,18 +26,19 @@ from typing import List, Optional, Sequence, Tuple
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
 from ..projection import GeoOrigin, to_world_xz
-from .road import _clip_polyline_to_rect, _cross_up, _sample_elevation
+from .road import _clip_polyline_to_rect, _sample_elevation
 
-# Car footprint (from the Awb low-poly vehicle colliders): ~4.4 m long, ~2.0 m wide.
-_CAR_LENGTH = 4.5     # metres of kerb one parked car occupies
-_CAR_GAP    = 0.8     # bumper-to-bumper gap between adjacent cars
-_CAR_HALF_W = 1.0     # half the car width, used to offset the body off the kerb line
-_KERB_OFFSET = _CAR_HALF_W + 0.2  # metres to nudge the car toward the carriageway
+# The Awb low-poly vehicles are ~4.4 m long, ~2.0 m wide, but they're imported at
+# half scale (see SFMapImporterWindow.ParkedCarScale), so the placement footprint
+# is halved to match: ~2.25 m long, ~1.0 m wide.
+_CAR_LENGTH = 2.25    # metres of kerb one parked car occupies
+_CAR_GAP    = 0.4     # bumper-to-bumper gap between adjacent cars
+_CAR_HALF_W = 0.5     # half the (scaled) car width
 _RAISE      = 0.20    # sit on the road surface (roads/sidewalks are raised the same)
 
-# Don't tag/offset against a road further than this — the feature is then either
-# stray data or its street isn't in this map extent. The car is still placed
-# (centred on the kerb line) so coverage doesn't depend on the road graph.
+# Don't snap against a road further than this — the feature is then either stray
+# data or its street isn't in this map extent. The car is still placed (on the
+# kerb line) so coverage doesn't depend on the road graph.
 _ROAD_SEARCH_M = 30.0
 # Skip segments shorter than one car — nothing useful fits.
 _MIN_SEG_LEN = _CAR_LENGTH
@@ -165,6 +166,19 @@ def _nearest_road(
     return best_edge, math.sqrt(best_d2) if best_edge else float("inf"), best_pt
 
 
+def _project_on_edge(edge: StreetEdge, x: float, z: float) -> Tuple[float, float]:
+    """Closest point on ``edge``'s centerline to (x, z)."""
+    best_pt = (edge.centerline[0][0], edge.centerline[0][1])
+    best_d2 = float("inf")
+    cl = edge.centerline
+    for i in range(len(cl) - 1):
+        cx, cz, d2 = _closest_point_on_segment(x, z, cl[i][0], cl[i][1], cl[i + 1][0], cl[i + 1][1])
+        if d2 < best_d2:
+            best_d2 = d2
+            best_pt = (cx, cz)
+    return best_pt
+
+
 def _arc_lengths(poly: Sequence[Tuple[float, float]]) -> List[float]:
     arc = [0.0] * len(poly)
     for i in range(1, len(poly)):
@@ -214,10 +228,13 @@ def place_parked_cars(
 ) -> List[ParkedCar]:
     """Place parked cars along the parking segments that fall inside this chunk.
 
-    ``graph`` is used only to find the nearest road per car (for the kerb-side
-    offset direction and the street tag); ``hmap`` provides per-car ground
-    elevation. Segments are clipped to ``[x_min, x_min+size] × [z_min, z_min+size]``
-    so a kerb crossing a chunk seam contributes cars to each chunk without
+    The kerb feature gives *where along* the street (and which side, and the
+    street name); the actual lateral position is snapped to the rendered road:
+    each car is projected onto the nearest road centerline and pushed back out,
+    on the kerb's side, to just inside the road edge — so it parks against the
+    kerb on the road side rather than wherever the (imprecise) kerb line falls.
+    ``hmap`` provides per-car ground elevation. Segments are clipped to the chunk
+    rect so a kerb crossing a seam contributes cars to each chunk without
     duplication. ``fill`` is the probability a candidate slot gets a car
     (1.0 = bumper-to-bumper; the issue asked for ~0.85, dense).
     """
@@ -235,11 +252,13 @@ def place_parked_cars(
         if total < _MIN_SEG_LEN:
             continue
 
-        # Tag the whole segment with the nearest road once (from its midpoint),
-        # so all its cars share a street and we don't pay the search per car.
+        # Pick the road this kerb belongs to once (nearest to the segment midpoint),
+        # so all its cars share a street and snap to the same carriageway.
         mid_x, mid_z, _, _ = _sample_polyline(clipped, arc, total * 0.5)
         edge, road_dist, _ = _nearest_road(graph, mid_x, mid_z)
-        street = edge.name if (edge is not None and road_dist <= _ROAD_SEARCH_M) else None
+        use_road = edge is not None and road_dist <= _ROAD_SEARCH_M
+        street = edge.name if use_road else None
+        half_w = edge.width * 0.5 if use_road else 0.0
 
         rng = random.Random(seg.object_id)
         # Start half a car in (+ jitter) so cars don't cluster at clipped seam ends.
@@ -247,18 +266,23 @@ def place_parked_cars(
         while s < total - _CAR_LENGTH * 0.5:
             if rng.random() <= fill:
                 x, z, fx, fz = _sample_polyline(clipped, arc, s)
-                rx, _, rz = _cross_up((fx, 0.0, fz))   # right of travel, unit XZ
+                cx, cz = x, z
 
-                # Nudge toward the carriageway: pick the offset sign that moves
-                # the car toward the nearest road, so it lands in the parking lane
-                # rather than up on the sidewalk.
-                sign = 1.0
-                if edge is not None and road_dist <= _ROAD_SEARCH_M:
-                    _, _, rp = _nearest_road(graph, x, z)
-                    if rp is not None and ((rp[0] - x) * rx + (rp[1] - z) * rz) < 0.0:
-                        sign = -1.0
-                cx = x + rx * _KERB_OFFSET * sign
-                cz = z + rz * _KERB_OFFSET * sign
+                if use_road:
+                    # Project onto the road, then step back out toward the kerb side
+                    # to just inside the road edge: the car body sits in the road,
+                    # hugging the kerb. side_dir = unit(kerb_point - road_point).
+                    rpx, rpz = _project_on_edge(edge, x, z)
+                    sdx, sdz = x - rpx, z - rpz
+                    slen = math.hypot(sdx, sdz)
+                    if slen > 1e-6:
+                        sdx, sdz = sdx / slen, sdz / slen
+                        # Outer (kerb-side) edge of the car at the road edge (half_w);
+                        # centre is one car-half-width inside. Floor keeps it sane on
+                        # very narrow roads.
+                        dist = max(half_w - _CAR_HALF_W, half_w * 0.5)
+                        cx = rpx + sdx * dist
+                        cz = rpz + sdz * dist
 
                 y = _sample_elevation(hmap, cx, cz) + _RAISE
                 rot_y = math.degrees(math.atan2(fx, fz))  # Unity +Z forward → heading

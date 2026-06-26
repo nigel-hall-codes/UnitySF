@@ -82,6 +82,11 @@ namespace SFMap.Pipeline.Editor
             "Assets/Awb-Free Low Poly Vehicles/Prefabs/Pick Up_11.prefab",
         };
 
+        // The Awb vehicles are authored a bit oversized for this map; halve them.
+        // The python placement footprint (sfmap/geometry/parking.py) is scaled to
+        // match, so spacing stays dense without overlap.
+        const float ParkedCarScale = 0.5f;
+
         [MenuItem("Window/SF Map Importer")]
         public static void Open() => GetWindow<SFMapImporterWindow>("SF Map Importer");
 
@@ -416,6 +421,7 @@ namespace SFMap.Pipeline.Editor
                 go.transform.SetParent(group, false);
                 go.transform.localPosition = new Vector3(car.p[0], car.p[1], car.p[2]);
                 go.transform.localRotation = Quaternion.Euler(0f, car.r, 0f);
+                go.transform.localScale = prefab.transform.localScale * ParkedCarScale;
                 placed++;
             }
 
