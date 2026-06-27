@@ -66,6 +66,20 @@ doing it by hand. We build a primitive bike, let the wizard set it up, then atta
 When these hold, we fold the bike into a clean implementation against the streaming world
 (spawn onto streamed road like `CarRoadSpawner`, camera follow, gearing/sound polish).
 
+## Environment note — NWH patched for Unity 6000.5
+
+NWH VP2 (as imported) calls `Object.GetInstanceID()`, which Unity 6000.5 promoted from a
+deprecation *warning* to an obsolete-*error* (`CS0619`), so NWH would not compile. Three vendor
+call sites were patched to the replacement API (`GetEntityId()`):
+
+- `Assets/NWH/Common/Scripts/NUI/NUIDrawer.cs:65,71` — `GetInstanceID().ToString()` → `GetEntityId().ToString()`
+- `Assets/NWH/WheelController/Scripts/WheelController.cs:348` — `GetInstanceID()` → `(int)GetEntityId()`
+  (cast keeps the value equal to `ModifiableContactPair.bodyInstanceID`, which the contact filter compares against)
+
+These files are **not** under version control (NWH is an untracked Asset Store import), so the
+edits live only in the working tree. **Re-importing or updating NWH will overwrite them** — re-apply,
+or take an official NWH build that supports Unity 6000.5.
+
 ## Known spike limitations (deliberately deferred)
 
 - No camera rig, sound, or gear UI tuning — stock NWH defaults.
