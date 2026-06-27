@@ -98,10 +98,16 @@ namespace SFMap.Pipeline
             if (e.Width < _multiLaneMinWidth) return 0f;
             float half = e.Width * 0.5f;
             int n = Mathf.Max(1, Mathf.FloorToInt(half / _laneWidth));
-            // Lane 0 = outermost right; offset = half - 0.5*laneWidth.
-            // Lane n-1 = innermost right; offset = half - (n-0.5)*laneWidth.
-            float fromOff = half - (Mathf.Clamp(_laneIndex, 0, n - 1) + 0.5f) * _laneWidth;
-            float toOff   = half - (Mathf.Clamp(_targetLaneIndex, 0, n - 1) + 0.5f) * _laneWidth;
+            // Distribute the n lanes evenly across the carriageway rather than packing
+            // them at the fixed _laneWidth against the outer edge — otherwise any slack
+            // (half not a clean multiple of _laneWidth) pools on the centerline side and
+            // cars hug the kerb (#216). With an effective lane width of half/n, lane 0
+            // centres a single-lane carriageway and multi-lane roads spread evenly.
+            float lane = half / n;
+            // Lane 0 = outermost right; offset = half - 0.5*lane.
+            // Lane n-1 = innermost right; offset = half - (n-0.5)*lane.
+            float fromOff = half - (Mathf.Clamp(_laneIndex, 0, n - 1) + 0.5f) * lane;
+            float toOff   = half - (Mathf.Clamp(_targetLaneIndex, 0, n - 1) + 0.5f) * lane;
             return Mathf.Lerp(fromOff, toOff, _laneChangeT);
         }
 
