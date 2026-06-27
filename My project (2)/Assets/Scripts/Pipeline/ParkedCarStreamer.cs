@@ -130,6 +130,10 @@ namespace SFMap.Pipeline
                     cam.projectionMatrix * cam.worldToCameraMatrix, _planes);
                 _planesValid = true;
             }
+            else
+            {
+                _planesValid = false;
+            }
 
             UpdateChunks(WorldToChunk(t.position));
             Despawn(t.position);
