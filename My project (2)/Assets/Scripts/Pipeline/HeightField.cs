@@ -63,8 +63,12 @@ namespace SFMap.Pipeline
             WorldWidth   = BitConverter.ToSingle(data, off); off += 4;
             WorldHeight  = BitConverter.ToSingle(data, off); off += 4;
 
-            if (Resolution < 2)
-                throw new Exception($"Resolution {Resolution} is too small.");
+            if (Resolution < 2 || Resolution > 32768)
+                throw new Exception($"Resolution {Resolution} out of valid range [2, 32768].");
+
+            if (WorldWidth <= 0f || WorldHeight <= 0f)
+                throw new Exception(
+                    $"Invalid world extents: width={WorldWidth}, height={WorldHeight}.");
 
             int count = Resolution * Resolution;
             int expected = off + count * sizeof(float);
@@ -109,7 +113,8 @@ namespace SFMap.Pipeline
         /// </summary>
         public bool IsOccluded(Vector3 from, Vector3 to, int steps = 12)
         {
-            for (int i = 1; i < steps; i++)
+            // i=1..steps inclusive — endpoint (the car's own position) is checked at i==steps.
+            for (int i = 1; i <= steps; i++)
             {
                 float t = (float)i / steps;
                 float x = from.x + t * (to.x - from.x);

@@ -79,6 +79,7 @@ namespace SFMap.Pipeline
         // ---- Frustum planes (pre-allocated, filled via matrix to avoid per-tick GC) ----
         readonly Plane[] _planes = new Plane[6];
         bool _planesValid;
+        Camera _cam;   // cached once per tick alongside _planes
 
         // ---- Hill occlusion (optional) ----
         HeightField _heightField;
@@ -130,6 +131,7 @@ namespace SFMap.Pipeline
             _chunkData.Clear();
             _loading.Clear();
             _planesValid = false;
+            _cam = null;
         }
 
         void Update()
@@ -143,11 +145,11 @@ namespace SFMap.Pipeline
             if (t == null) return;
 
             // Update frustum planes once per tick (non-allocating via matrix overload).
-            var cam = Camera.main;
-            if (cam != null)
+            _cam = Camera.main;
+            if (_cam != null)
             {
                 GeometryUtility.CalculateFrustumPlanes(
-                    cam.projectionMatrix * cam.worldToCameraMatrix, _planes);
+                    _cam.projectionMatrix * _cam.worldToCameraMatrix, _planes);
                 _planesValid = true;
             }
             else
@@ -292,11 +294,9 @@ namespace SFMap.Pipeline
                 return false;
 
             if (_heightField == null) return true;
+            if (_cam == null) return true;
 
-            var cam = Camera.main;
-            if (cam == null) return true;
-
-            return !_heightField.IsOccluded(cam.transform.position, pos, occlusionSteps);
+            return !_heightField.IsOccluded(_cam.transform.position, pos, occlusionSteps);
         }
 
         // -----------------------------------------------------------------------
