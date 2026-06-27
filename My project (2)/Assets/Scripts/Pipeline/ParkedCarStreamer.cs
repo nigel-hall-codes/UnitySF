@@ -45,6 +45,12 @@ namespace SFMap.Pipeline
         [Tooltip("Seconds between spawn/despawn evaluations.")]
         [Min(0.05f)] public float updateInterval = 0.4f;
 
+        [Header("Density")]
+        [Tooltip("Fraction of eligible parked-car positions to populate. " +
+                 "1 = all spots filled (current behaviour). 0 = no parked cars. " +
+                 "The same subset of spots is always absent at a given value — no flickering.")]
+        [Range(0f, 1f)] public float density = 1f;
+
         [Header("Occlusion (optional)")]
         [Tooltip("Heightcache file from Assets/SFMapData/ (*.heightcache). " +
                  "When assigned, cars occluded behind hills are also culled. " +
@@ -70,6 +76,7 @@ namespace SFMap.Pipeline
             public GameObject go;
             public int        prefabIdx;
             public Vector3    pos;
+            public long       id;
         }
         readonly Dictionary<(ChunkCoord, int), CarRecord> _active = new();
 
@@ -232,9 +239,10 @@ namespace SFMap.Pipeline
             foreach (var kv in _active)
             {
                 var r = kv.Value;
-                bool tooFar   = SqXZ(r.pos, center) > maxSq;
-                bool notVisible = _planesValid && !IsVisible(r.pos);
-                if (tooFar || notVisible)
+                bool tooFar      = SqXZ(r.pos, center) > maxSq;
+                bool notVisible  = _planesValid && !IsVisible(r.pos);
+                bool belowDensity = DensityKey(r.id) >= density;
+                if (tooFar || notVisible || belowDensity)
                     _removeCars.Add(kv.Key);
             }
 
@@ -265,6 +273,7 @@ namespace SFMap.Pipeline
 
                     var key = (kv.Key, i);
                     if (_active.ContainsKey(key)) continue;
+                    if (DensityKey(car.id) >= density) continue;
 
                     var pos = new Vector3(car.p[0], car.p[1], car.p[2]);
                     if (SqXZ(pos, center) > maxSq) continue;
@@ -278,7 +287,7 @@ namespace SFMap.Pipeline
                     go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, car.r, 0f));
                     go.transform.localScale = carPrefabs[idx].transform.localScale * carScale;
 
-                    _active[key] = new CarRecord { go = go, prefabIdx = idx, pos = pos };
+                    _active[key] = new CarRecord { go = go, prefabIdx = idx, pos = pos, id = car.id };
                     spawns++;
                 }
             }
@@ -349,6 +358,14 @@ namespace SFMap.Pipeline
         {
             float dx = a.x - b.x, dz = a.z - b.z;
             return dx * dx + dz * dz;
+        }
+
+        // Fibonacci hash of the OSM feature id → stable float in [0, 1) per parking spot.
+        // Used to deterministically thin the spawn set when density < 1.
+        static float DensityKey(long id)
+        {
+            uint folded = unchecked((uint)(id ^ (id >> 32)));
+            return unchecked(folded * 2654435761u) / (float)uint.MaxValue;
         }
     }
 }
