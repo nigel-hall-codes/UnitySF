@@ -68,13 +68,18 @@ When these hold, we fold the bike into a clean implementation against the stream
 
 ## Environment note — NWH patched for Unity 6000.5
 
-NWH VP2 (as imported) calls `Object.GetInstanceID()`, which Unity 6000.5 promoted from a
-deprecation *warning* to an obsolete-*error* (`CS0619`), so NWH would not compile. Three vendor
-call sites were patched to the replacement API (`GetEntityId()`):
+NWH VP2 (as imported) uses several instance-ID APIs that Unity 6000.5 promoted from deprecation
+*warnings* to obsolete-*errors* (`CS0619`), so NWH would not compile. Patched to the `EntityId`
+replacements Unity's own messages point to:
 
 - `Assets/NWH/Common/Scripts/NUI/NUIDrawer.cs:65,71` — `GetInstanceID().ToString()` → `GetEntityId().ToString()`
-- `Assets/NWH/WheelController/Scripts/WheelController.cs:348` — `GetInstanceID()` → `(int)GetEntityId()`
-  (cast keeps the value equal to `ModifiableContactPair.bodyInstanceID`, which the contact filter compares against)
+- `Assets/NWH/WheelController/Scripts/WheelController.cs` — the rigidbody-id contact filter moved
+  off `int` instance IDs onto `EntityId` wholesale (Unity also deprecated the `EntityId`→`int`
+  operator and `ModifiableContactPair.bodyInstanceID`/`otherBodyInstanceID`):
+  - field `_targetRigidbodyId` `int` → `EntityId` (~line 291)
+  - `_targetRigidbodyId = targetRigidbody.GetEntityId();` (~line 348)
+  - comparisons use `pair.bodyEntityId` / `pair.otherBodyEntityId` (~lines 1196–1202)
+  `EntityId` compares with `==`/`!=`, so the contact-filtering semantics are unchanged.
 
 These files are **not** under version control (NWH is an untracked Asset Store import), so the
 edits live only in the working tree. **Re-importing or updating NWH will overwrite them** — re-apply,
