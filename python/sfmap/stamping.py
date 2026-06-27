@@ -9,7 +9,7 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from .elevation import HeightmapData
-from .geometry.road import _clip_polyline_to_rect
+from .geometry.road import _MAX_SEG_M, _clip_polyline_to_rect, _densify_polyline
 from .osm import StreetEdge, StreetGraph
 
 _SIDEWALK_WIDTH = 1.5  # metres — must match road.py to stamp the full footprint
@@ -164,6 +164,10 @@ def stamp_roads(
         )
         if len(cl) < 2:
             continue
+        # Match the road mesh's subdivision so the stamped grade follows the
+        # heightfield up steep grades instead of ramping linearly between sparse
+        # OSM nodes and tearing a seam at the road edge (#219).
+        cl = _densify_polyline(cl, _MAX_SEG_M)
         sampled_y = [
             hmap_snap.sample_bilinear(x, z) * (hmap.max_elevation_m - hmap.min_elevation_m) + hmap.min_elevation_m
             for x, z in cl
