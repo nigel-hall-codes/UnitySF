@@ -12,6 +12,12 @@ from .road import MeshArrays, _sample_elevation
 
 _DEFAULT_HEIGHT = 10.0  # metres when building has no height tag
 
+# Metres the foundation is sunk below the lowest terrain sample under the
+# footprint. Guarantees the walls bury into the ground at every corner — and
+# across edge midpoints over concave terrain — so no gap or floating sliver
+# shows beneath a building on a slope (#219).
+_FOUNDATION_EMBED = 1.0
+
 
 def build_building_meshes(
     graph: StreetGraph,
@@ -49,12 +55,15 @@ def _build_single(
     if _signed_area_xz(fp) < 0:
         fp = fp[::-1]
 
-    # Sample base elevation at footprint centroid.
-    cx = sum(p[0] for p in fp) / n
-    cz = sum(p[1] for p in fp) / n
-    base_y = _sample_elevation(hmap, cx, cz)
+    # Sample terrain across the whole footprint, not just the centroid: on a
+    # slope the corners sit at very different elevations. Sink the base below the
+    # lowest sample so the walls bury into the ground everywhere (no downhill
+    # gap), and lift the roof off the highest sample so the uphill side keeps its
+    # full height above ground (no sinking into the hill). See issue #219.
+    elevs = [_sample_elevation(hmap, px, pz) for px, pz in fp]
+    base_y = min(elevs) - _FOUNDATION_EMBED
     height = b.height if b.height > 0.0 else default_height
-    top_y = base_y + height
+    top_y = max(elevs) + height
 
     verts: List[Tuple[float, float, float]] = []
     uvs: List[Tuple[float, float]] = []

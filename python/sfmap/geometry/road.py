@@ -9,6 +9,16 @@ from ..osm import StreetEdge, StreetGraph
 
 _RAISE = 0.20   # metres above terrain — clears bilinear interpolation bleed
 
+# Max XZ length of a road centerline segment before it is subdivided. Raw OSM
+# centerlines only carry a vertex at each tagged node, so a straight block can be
+# a single segment tens of metres long. On steep grades that segment becomes one
+# long flat quad that facets across the hill, and the matching stamp ramps the
+# terrain linearly over the same span — diverging from the finely-sampled natural
+# terrain at the road edges and tearing a seam. Densifying to a few metres (well
+# under the default ~2.3 m heightmap cell pitch range) lets both the mesh and the
+# stamp follow the hill's curvature. See issue #219.
+_MAX_SEG_M = 4.0
+
 MeshArrays = Tuple[
     List[Tuple[float, float, float]],  # vertices (x, y, z)
     List[Tuple[float, float]],          # UVs (u, v)
@@ -65,6 +75,10 @@ def _build_single_road(
     # Clip centerline to chunk heightmap bounds so out-of-bounds points don't
     # get clamped to the wrong edge elevation.
     cl_xz = _clip_polyline_to_rect(edge.centerline, bx0, bz0, bx1, bz1)
+
+    # Subdivide long segments so cross-sections track the heightfield up steep
+    # grades instead of bridging the hill with one flat quad (#219).
+    cl_xz = _densify_polyline(cl_xz, _MAX_SEG_M)
 
     # Sample terrain elevation at each centerline point (heightmap is post-stamp).
     sampled = [
@@ -196,6 +210,32 @@ def _vertex_normals(
 def _sample_elevation(hmap: HeightmapData, x: float, z: float) -> float:
     norm = hmap.sample_bilinear(x, z)
     return hmap.min_elevation_m + norm * (hmap.max_elevation_m - hmap.min_elevation_m)
+
+
+def _densify_polyline(
+    cl: List[Tuple[float, float]],
+    max_seg: float,
+) -> List[Tuple[float, float]]:
+    """Insert evenly-spaced points so no XZ segment exceeds ``max_seg`` metres.
+
+    Shared by road meshing and stamping so both follow the heightfield at the
+    same resolution on steep grades (#219). Endpoints and existing vertices are
+    preserved; only interior subdivision points are added.
+    """
+    if len(cl) < 2 or max_seg <= 0.0:
+        return cl
+    out: List[Tuple[float, float]] = [cl[0]]
+    for i in range(1, len(cl)):
+        x0, z0 = cl[i - 1]
+        x1, z1 = cl[i]
+        seg = math.hypot(x1 - x0, z1 - z0)
+        if seg > max_seg:
+            steps = int(math.ceil(seg / max_seg))
+            for s in range(1, steps):
+                t = s / steps
+                out.append((x0 + t * (x1 - x0), z0 + t * (z1 - z0)))
+        out.append((x1, z1))
+    return out
 
 
 def _clip_polyline_to_rect(
