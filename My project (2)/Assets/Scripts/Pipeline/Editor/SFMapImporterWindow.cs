@@ -4,6 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
+using SFMap.Pipeline;
 
 namespace SFMap.Pipeline.Editor
 {
@@ -25,23 +26,6 @@ namespace SFMap.Pipeline.Editor
         public float worldZ;
     }
 
-    // JSON layout produced by python/sfmap/serialize.py write_parked_cars()
-    [Serializable]
-    class ParkedCarsJson
-    {
-        public ParkedCarJson[] cars;
-    }
-
-    [Serializable]
-    class ParkedCarJson
-    {
-        public float[] p;   // world position [x, y, z]
-        public float   r;   // heading in degrees about +Y
-        public float   m;   // [0,1) model selector → index into CarPrefabPaths
-        public string  s;   // nearest street name (may be empty)
-        public long    id;  // source regulation feature id
-    }
-
     public class SFMapImporterWindow : EditorWindow
     {
         const uint ChunkMagic   = 0x4B4E4843u; // "CHNK"
@@ -49,8 +33,9 @@ namespace SFMap.Pipeline.Editor
 
         enum MeshType : byte { Road = 0, Intersection = 1, Sidewalk = 2, Building = 3 }
 
-        [SerializeField] string chunkDir   = "";
-        [SerializeField] string presetName = "default";
+        [SerializeField] string chunkDir    = "";
+        [SerializeField] string presetName  = "default";
+        [SerializeField] bool   bakeParkedCars = true;
 
         // 7-color pastel palette for buildings. Each building picks one by hashing
         // its osm_id and the colour is baked into the building's vertex colors, so
@@ -104,6 +89,7 @@ namespace SFMap.Pipeline.Editor
             EditorGUILayout.EndHorizontal();
 
             presetName = EditorGUILayout.TextField("Preset Name", presetName);
+            bakeParkedCars = EditorGUILayout.Toggle("Bake Parked Cars into Prefab", bakeParkedCars);
 
             EditorGUILayout.Space();
             if (GUILayout.Button("Import Chunks"))
@@ -158,9 +144,11 @@ namespace SFMap.Pipeline.Editor
                         globalMinElev = chunkMinElev;
 
                     ImportRoadNames(chunkDir, coord);
+                    ImportParkedCarsJson(chunkDir, coord);
 
                     var chunkRootGo = mapRoot.transform.Find(coord.ToString()).gameObject;
-                    ImportParkedCars(chunkDir, coord, chunkRootGo);
+                    if (bakeParkedCars)
+                        ImportParkedCars(chunkDir, coord, chunkRootGo);
 
                     PrefabUtility.SaveAsPrefabAsset(chunkRootGo,
                         GeneratedAssets.ChunkPrefabPath(coord));
@@ -371,6 +359,17 @@ namespace SFMap.Pipeline.Editor
             if (!File.Exists(src)) return;
 
             string dst = GeneratedAssets.ChunkRoadNamesAsset(coord);
+            Directory.CreateDirectory(Path.GetDirectoryName(dst));
+            File.Copy(src, dst, overwrite: true);
+            AssetDatabase.ImportAsset(dst);
+        }
+
+        static void ImportParkedCarsJson(string chunkDir, ChunkCoord coord)
+        {
+            string src = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_parked.json");
+            if (!File.Exists(src)) return;
+
+            string dst = GeneratedAssets.ChunkParkedCarsAsset(coord);
             Directory.CreateDirectory(Path.GetDirectoryName(dst));
             File.Copy(src, dst, overwrite: true);
             AssetDatabase.ImportAsset(dst);

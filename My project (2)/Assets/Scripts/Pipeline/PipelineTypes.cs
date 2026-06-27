@@ -49,5 +49,24 @@ namespace SFMap.Pipeline
         // Road name sidecar — TextAsset imported from chunk_CC_RR_names.json
         public static string ChunkRoadNamesAsset(ChunkCoord c) => $"{ResourcesRoot}/{c}_names.json";
         public static string RuntimeChunkRoadNames(ChunkCoord c) => $"Generated/{ActivePreset}/{c}_names";
+
+        // Parked-car position sidecar — TextAsset imported from chunk_CC_RR_parked.json
+        public static string ChunkParkedCarsAsset(ChunkCoord c)   => $"{ResourcesRoot}/{c}_parked.json";
+        public static string RuntimeChunkParkedCars(ChunkCoord c) => $"Generated/{ActivePreset}/{c}_parked";
+    }
+
+    // JSON layout produced by python/sfmap/serialize.py write_parked_cars().
+    // Shared here (not Editor-only) so ParkedCarStreamer can deserialise at runtime.
+    [Serializable]
+    public class ParkedCarsJson { public ParkedCarJson[] cars; }
+
+    [Serializable]
+    public class ParkedCarJson
+    {
+        public float[] p;   // world position [x, y, z]
+        public float   r;   // heading in degrees about +Y
+        public float   m;   // [0,1) model selector → floor(m * prefabCount) = index
+        public string  s;   // nearest street name (may be empty)
+        public long    id;  // source OSM regulation feature id
     }
 }
