@@ -2,9 +2,9 @@
     "name": "SFMap.Vehicles",
     "rootNamespace": "SFMap.Vehicles",
     "references": [
-        "NWH.Common",
-        "NWH.VehiclePhysics2",
-        "NWH.WheelController"
+        "GUID:c76e28da8ce572043b1fb2da95817e18",
+        "GUID:4333e1ebda3404646a79cf687ca3e9e0",
+        "GUID:b0a6eca0b075c1a488b2694245dfb139"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
