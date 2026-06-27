@@ -45,6 +45,16 @@ namespace SFMap.Pipeline
         [Tooltip("Seconds between spawn/despawn evaluations.")]
         [Min(0.05f)] public float updateInterval = 0.4f;
 
+        [Header("Occlusion (optional)")]
+        [Tooltip("Heightcache file from Assets/SFMapData/ (*.heightcache). " +
+                 "When assigned, cars occluded behind hills are also culled. " +
+                 "r129 or r257 is a good balance of accuracy vs. memory.")]
+        public TextAsset heightCacheAsset;
+
+        [Tooltip("Number of ray-march steps per car when testing hill occlusion. " +
+                 "Higher = more accurate, slightly more CPU. 12 is sufficient for 300m view radius.")]
+        [Min(2)] public int occlusionSteps = 12;
+
         // ---- Manifest / grid ----
         ChunkManifest _manifest;
         float _chunkSize, _originX, _originZ;
@@ -69,6 +79,9 @@ namespace SFMap.Pipeline
         // ---- Frustum planes (pre-allocated, filled via matrix to avoid per-tick GC) ----
         readonly Plane[] _planes = new Plane[6];
         bool _planesValid;
+
+        // ---- Hill occlusion (optional) ----
+        HeightField _heightField;
 
         // ---- Scratch lists (reused to avoid per-tick GC) ----
         readonly List<ChunkCoord>       _removeChunks = new();
@@ -99,6 +112,13 @@ namespace SFMap.Pipeline
             var a = _manifest.chunks[0];
             _originX = a.worldX - a.col * _chunkSize;
             _originZ = a.worldZ - a.row * _chunkSize;
+
+            _heightField = HeightField.Load(heightCacheAsset);
+            if (_heightField != null)
+                Debug.Log($"[ParkedCarStreamer] Loaded heightfield '{heightCacheAsset.name}' " +
+                          $"({_heightField.Resolution}×{_heightField.Resolution}, " +
+                          $"{_heightField.MinElevation:F0}–{_heightField.MaxElevation:F0} m).", this);
+
             _ready = true;
         }
 
@@ -267,7 +287,17 @@ namespace SFMap.Pipeline
         // -----------------------------------------------------------------------
 
         protected virtual bool IsVisible(Vector3 pos)
-            => GeometryUtility.TestPlanesAABB(_planes, new Bounds(pos, Vector3.one * 4f));
+        {
+            if (!GeometryUtility.TestPlanesAABB(_planes, new Bounds(pos, Vector3.one * 4f)))
+                return false;
+
+            if (_heightField == null) return true;
+
+            var cam = Camera.main;
+            if (cam == null) return true;
+
+            return !_heightField.IsOccluded(cam.transform.position, pos, occlusionSteps);
+        }
 
         // -----------------------------------------------------------------------
         // Pool
