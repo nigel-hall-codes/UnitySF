@@ -405,9 +405,22 @@ def _join_setbacks(a: _Arm, b: _Arm) -> Tuple[float, float]:
     pb_x =  b.dir_z * b.half_width
     pb_z = -b.dir_x * b.half_width
 
+    # The bevel only exists to tame the runaway miter spike of two *near-parallel*
+    # arms, so its trigger radius must sit outside the carriageways, not inside
+    # them. A fixed 5 m threshold beveled legitimate ~perpendicular corners of any
+    # street wider than ~7 m (half-width > 5/√2 ≈ 3.5 m): a 90° join of two
+    # half-width-hw arms miters at radius hw·√2 ≤ hw_a + hw_b, so a constant 5 m
+    # clamped that real corner to a smaller setback than the road's own half-width.
+    # That pulled each road end inside its neighbour, collapsed the corner points,
+    # and forced compute_polygons onto its convex-hull fallback — which no longer
+    # welds to the carriageways, leaving the paving gap at the junction (#224).
+    # Scaling the radius with the two half-widths keeps real perpendicular/obtuse
+    # corners on the miter (watertight) and still bevels only genuine acute spikes.
+    bevel_radius = max(_BEVEL_THRESHOLD, a.half_width + b.half_width)
+    bevel_a = math.sqrt(max(0.0, bevel_radius ** 2 - a.half_width ** 2))
+    bevel_b = math.sqrt(max(0.0, bevel_radius ** 2 - b.half_width ** 2))
+
     det = -a.dir_x * b.dir_z + a.dir_z * b.dir_x
-    bevel_a = math.sqrt(max(0.0, _BEVEL_THRESHOLD ** 2 - a.half_width ** 2))
-    bevel_b = math.sqrt(max(0.0, _BEVEL_THRESHOLD ** 2 - b.half_width ** 2))
 
     if abs(det) < 1e-6:
         return bevel_a, bevel_b
@@ -419,7 +432,7 @@ def _join_setbacks(a: _Arm, b: _Arm) -> Tuple[float, float]:
 
     miter_x = pa_x + t * a.dir_x
     miter_z = pa_z + t * a.dir_z
-    if math.hypot(miter_x, miter_z) <= _BEVEL_THRESHOLD:
+    if math.hypot(miter_x, miter_z) <= bevel_radius:
         return max(0.0, t), max(0.0, s)
 
     return bevel_a, bevel_b
