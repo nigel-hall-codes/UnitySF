@@ -7,6 +7,12 @@ import time
 from datetime import datetime, timezone
 
 
+# Default heightfield source low-pass radius (σ, metres). Mirrors
+# sfmap.elevation._HMAP_SMOOTH_SIGMA_M; kept here as a literal so build_parser()
+# (and --help) need not import scipy via sfmap.elevation. See #233.
+_DEFAULT_HMAP_SMOOTH_M = 2.0
+
+
 def parse_chunk_pair(value: str):
     """Parse 'col,row' into a (int, int) tuple."""
     try:
@@ -30,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", default="./chunks/", metavar="DIR", help="Output directory (default: ./chunks/)")
     p.add_argument("--only", nargs="+", type=parse_chunk_pair, metavar="col,row", help="Bake only the specified chunks (e.g. --only 0,0 1,0)")
     p.add_argument("--hmap-res", type=int, default=129, metavar="N", help="Heightmap resolution per chunk (default: 129)")
+    p.add_argument("--hmap-smooth", type=float, default=_DEFAULT_HMAP_SMOOTH_M, metavar="METRES",
+                   help="Source low-pass radius (Gaussian sigma, metres) suppressing triangle-edge "
+                        f"creases in the heightfield; 0 disables (default: {_DEFAULT_HMAP_SMOOTH_M})")
     p.add_argument("--vertical-exaggeration", type=float, default=1.3, metavar="FACTOR",
                    help="Scale terrain relief by this factor to read as steep as real life "
                         "(1.0 = true elevation; default: 1.3)")
@@ -101,7 +110,8 @@ def main() -> int:
     print(f"[sfmap_bake] parsed graph: {len(full_graph.nodes)} nodes, "
           f"{len(full_graph.edges)} edges, {len(full_graph.buildings)} buildings")
 
-    full_hmap = elevation.parse(args.elev, full_graph.source_bounds, full_graph.origin, args.hmap_res)
+    full_hmap = elevation.parse(args.elev, full_graph.source_bounds, full_graph.origin, args.hmap_res,
+                                smooth_sigma_m=args.hmap_smooth)
     elevation.apply_vertical_exaggeration(full_hmap, args.vertical_exaggeration)
     print(f"[sfmap_bake] heightmap {full_hmap.resolution}² "
           f"elev[{full_hmap.min_elevation_m:.1f}, {full_hmap.max_elevation_m:.1f}]m "
