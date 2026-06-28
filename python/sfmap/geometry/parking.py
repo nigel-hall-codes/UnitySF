@@ -36,6 +36,17 @@ _CAR_GAP    = 1.5     # bumper-to-bumper gap between adjacent cars
 _CAR_HALF_W = 0.5     # half the (scaled) car width
 _RAISE      = 0.20    # sit on the road surface (roads/sidewalks are raised the same)
 
+# Slope conforming: sample the heightfield this far either side of a car (metres) to
+# estimate the surface normal it rests on — about a car footprint, so the tilt tracks
+# the grade the body spans without picking up sub-car sampling noise. The road itself
+# is conformed to the same field (#219), so cars end up flush with it.
+_NORMAL_EPS = 2.0
+# Don't tilt a car whose ground is flatter than this: the normal is left straight up,
+# omitted from the sidecar, and the runtime keeps the car level. Avoids visible jitter
+# from heightfield noise on nominally flat blocks.
+_MIN_TILT_DEG = 2.0
+_FLAT_NY = math.cos(math.radians(_MIN_TILT_DEG))  # normal.y at/above this → treat as flat
+
 # Don't snap against a road further than this — the feature is then either stray
 # data or its street isn't in this map extent. The car is still placed (on the
 # kerb line) so coverage doesn't depend on the road graph.
@@ -140,6 +151,9 @@ class ParkedCar:
     model: float                            # [0,1) prefab selector (Unity maps to its list)
     street: Optional[str] = None            # nearest road name, for per-street toggling later
     source_id: int = 0                      # originating regulation feature id
+    nx: float = 0.0                         # ground normal (Unity world axes); (0,1,0)
+    ny: float = 1.0                         # when flat, so the car can be tilted onto the
+    nz: float = 0.0                         # local grade instead of sitting level on a hill
 
 
 # ---------------------------------------------------------------------------
@@ -302,6 +316,27 @@ def _sample_polyline(
     return x, z, fx, fz
 
 
+def _surface_normal(hmap: HeightmapData, x: float, z: float) -> Tuple[float, float, float]:
+    """Unit ground normal at (x, z) in Unity world axes (Y up).
+
+    Central-differences the heightfield ``_NORMAL_EPS`` either side so a parked car can
+    be tilted to rest on the local grade (the road is conformed to the same field, #219,
+    so the two stay flush). Returns straight up ``(0, 1, 0)`` when the slope is gentler
+    than ``_MIN_TILT_DEG`` — flat enough that tilting would only add sampling jitter — so
+    the serialiser can omit it and the runtime keeps the car level.
+    """
+    e = _NORMAL_EPS
+    dhdx = (_sample_elevation(hmap, x + e, z) - _sample_elevation(hmap, x - e, z)) / (2.0 * e)
+    dhdz = (_sample_elevation(hmap, x, z + e) - _sample_elevation(hmap, x, z - e)) / (2.0 * e)
+    # Normal to the height surface y = h(x, z) is (-dh/dx, 1, -dh/dz), then normalised.
+    nx, ny, nz = -dhdx, 1.0, -dhdz
+    length = math.sqrt(nx * nx + ny * ny + nz * nz)
+    nx, ny, nz = nx / length, ny / length, nz / length
+    if ny >= _FLAT_NY:
+        return 0.0, 1.0, 0.0
+    return nx, ny, nz
+
+
 # ---------------------------------------------------------------------------
 # Placement
 # ---------------------------------------------------------------------------
@@ -430,12 +465,14 @@ def place_parked_cars(
 
                 y = _sample_elevation(hmap, cx, cz) + _RAISE
                 rot_y = math.degrees(math.atan2(fx, fz))  # Unity +Z forward → heading
+                nx, ny, nz = _surface_normal(hmap, cx, cz)
                 cars.append(ParkedCar(
                     x=cx, y=y, z=cz,
                     rot_y=rot_y,
                     model=rng.random(),
                     street=street,
                     source_id=seg.object_id,
+                    nx=nx, ny=ny, nz=nz,
                 ))
             s += slot + rng.uniform(-jitter, jitter)
 
@@ -698,11 +735,13 @@ def _place_along_roads(
                     y = _sample_elevation(hmap, cx, cz) + _RAISE
                     # Each side faces with its own kerb's traffic → opposite headings.
                     rot_y = math.degrees(math.atan2(fx, fz)) + (180.0 if side < 0 else 0.0)
+                    nx, ny, nz = _surface_normal(hmap, cx, cz)
                     cars.append(ParkedCar(
                         x=cx, y=y, z=cz,
                         rot_y=rot_y,
                         model=rng.random(),
                         street=street,
                         source_id=abs(edge.osm_way_id),
+                        nx=nx, ny=ny, nz=nz,
                     ))
                 s += slot + rng.uniform(-jitter, jitter)

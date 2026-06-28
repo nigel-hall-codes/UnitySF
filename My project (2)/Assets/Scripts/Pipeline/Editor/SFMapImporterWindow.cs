@@ -419,7 +419,7 @@ namespace SFMap.Pipeline.Editor
                 var go = (GameObject)PrefabUtility.InstantiatePrefab(prefab);
                 go.transform.SetParent(group, false);
                 go.transform.localPosition = new Vector3(car.p[0], car.p[1], car.p[2]);
-                go.transform.localRotation = Quaternion.Euler(0f, car.r, 0f);
+                go.transform.localRotation = car.Rotation();
                 go.transform.localScale = prefab.transform.localScale * ParkedCarScale;
                 placed++;
             }

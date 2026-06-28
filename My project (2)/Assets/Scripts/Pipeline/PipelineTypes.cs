@@ -68,5 +68,26 @@ namespace SFMap.Pipeline
         public float   m;   // [0,1) model selector → floor(m * prefabCount) = index
         public string  s;   // nearest street name (may be empty)
         public long    id;  // source OSM regulation feature id
+        public float[] n;   // ground normal [x, y, z] for slope tilt; null/empty → level
+
+        /// <summary>
+        /// World rotation for this car: heading <see cref="r"/> about +Y, then tilted so
+        /// its up-axis matches the baked ground normal <see cref="n"/> — so on a hill the
+        /// car rests on the grade instead of sitting level with one side buried in the road.
+        /// Falls back to a level heading when no normal was baked (flat ground) or it is
+        /// degenerate. Shared by the runtime streamer and the prefab-bake importer so both
+        /// orient cars identically.
+        /// </summary>
+        public Quaternion Rotation()
+        {
+            var heading = Quaternion.Euler(0f, r, 0f);
+            if (n == null || n.Length < 3) return heading;
+            var up = new Vector3(n[0], n[1], n[2]);
+            if (up.sqrMagnitude < 1e-6f) return heading;
+            up.Normalize();
+            var fwd = Vector3.ProjectOnPlane(heading * Vector3.forward, up);
+            if (fwd.sqrMagnitude < 1e-6f) return heading;
+            return Quaternion.LookRotation(fwd.normalized, up);
+        }
     }
 }
