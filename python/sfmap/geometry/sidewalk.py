@@ -10,6 +10,11 @@ from .road import MeshArrays, _anchor_centerline, _clip_polyline_to_rect, _cross
 
 _WIDTH = 1.5    # metres per sidewalk strip (left and right)
 _RAISE = 0.20   # metres above terrain — clears bilinear interpolation bleed
+# The outer edge (away from the road) ramps down to meet the terrain instead of
+# ending in a sharp _RAISE-high cliff that cars catch on. Sinking it slightly
+# below the sampled terrain guarantees the strip crosses terrain height *inside*
+# the strip (flush, no lip) and lets the terrain cover the seam (no z-fight).
+_OUTER_SINK = 0.05  # metres the outer edge tucks below terrain
 
 
 def build_sidewalk_meshes(
@@ -93,17 +98,17 @@ def _build_single_sidewalk(
         ri_x, ri_z = cx + rx * half_w, cz + rz * half_w
         ro_x, ro_z = cx + rx * outer_offset, cz + rz * outer_offset
 
-        # left-outer (index i*4)
-        verts.append((lo_x, _sample_elevation(hmap, lo_x, lo_z) + _RAISE, lo_z))
+        # left-outer (index i*4) — ramps down to meet terrain, no cliff
+        verts.append((lo_x, _sample_elevation(hmap, lo_x, lo_z) - _OUTER_SINK, lo_z))
         uvs.append((1.0, v_coord))
-        # left-inner (index i*4 + 1)
+        # left-inner (index i*4 + 1) — flush with the road surface (+_RAISE)
         verts.append((li_x, _sample_elevation(hmap, li_x, li_z) + _RAISE, li_z))
         uvs.append((0.0, v_coord))
-        # right-inner (index i*4 + 2)
+        # right-inner (index i*4 + 2) — flush with the road surface (+_RAISE)
         verts.append((ri_x, _sample_elevation(hmap, ri_x, ri_z) + _RAISE, ri_z))
         uvs.append((0.0, v_coord))
-        # right-outer (index i*4 + 3)
-        verts.append((ro_x, _sample_elevation(hmap, ro_x, ro_z) + _RAISE, ro_z))
+        # right-outer (index i*4 + 3) — ramps down to meet terrain, no cliff
+        verts.append((ro_x, _sample_elevation(hmap, ro_x, ro_z) - _OUTER_SINK, ro_z))
         uvs.append((1.0, v_coord))
 
     # 2 strips × (n-1) quads × 2 tris × 3 indices = (n-1) * 12
