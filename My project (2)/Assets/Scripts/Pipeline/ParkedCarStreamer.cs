@@ -284,7 +284,7 @@ namespace SFMap.Pipeline
                     if (carPrefabs[idx] == null) continue;
 
                     var go = Rent(idx);
-                    go.transform.SetPositionAndRotation(pos, Quaternion.Euler(0f, car.r, 0f));
+                    go.transform.SetPositionAndRotation(pos, car.Rotation());
                     go.transform.localScale = carPrefabs[idx].transform.localScale * carScale;
 
                     _active[key] = new CarRecord { go = go, prefabIdx = idx, pos = pos, id = car.id };
