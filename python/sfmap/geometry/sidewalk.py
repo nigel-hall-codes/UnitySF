@@ -6,7 +6,16 @@ from typing import Dict, List, Optional, Tuple
 
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
-from .road import MeshArrays, _anchor_centerline, _clip_polyline_to_rect, _cross_up, _forward, _sample_elevation
+from .road import (
+    _MAX_SEG_M,
+    MeshArrays,
+    _anchor_centerline,
+    _clip_polyline_to_rect,
+    _cross_up,
+    _densify_polyline,
+    _forward,
+    _sample_elevation,
+)
 
 _WIDTH = 1.5    # metres per sidewalk strip (left and right)
 _RAISE = 0.20   # metres above terrain — clears bilinear interpolation bleed
@@ -53,6 +62,12 @@ def _build_single_sidewalk(
     bz1 = hmap.world_z_min + hmap.world_height
 
     cl_xz = _clip_polyline_to_rect(edge.centerline, bx0, bz0, bx1, bz1)
+
+    # Subdivide long segments to match the road mesh and stamp, so the sidewalk
+    # strips track the heightfield up steep grades instead of faceting beside the
+    # smoothly-conforming carriageway (#219).
+    cl_xz = _densify_polyline(cl_xz, _MAX_SEG_M)
+
     sampled = [
         (x, _sample_elevation(hmap, x, z), z)
         for x, z in cl_xz

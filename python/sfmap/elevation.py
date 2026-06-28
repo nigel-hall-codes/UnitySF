@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
+from scipy.ndimage import gaussian_filter
 from scipy.spatial import Delaunay
 
 from .projection import GeoOrigin, OsmBounds, to_world_xz
@@ -15,6 +16,16 @@ _FEET_TO_METERS = 0.3048
 _CLIP_BUFFER_METERS = 200.0
 _MIN_SPACING_SQ = 8.0 ** 2  # thin contour points to ~8m minimum spacing
 _CACHE_MAGIC = 0x454D4843  # "EMHC" — matches C# cache
+
+# Default source low-pass radius (metres, σ). The rasterizer fills the grid by
+# linear barycentric interpolation per Delaunay triangle, which is only C⁰ — the
+# gradient jumps across every triangle edge, seeding crease lines and the road
+# waviness #230 is about. A small Gaussian low-pass over the rasterized grid
+# attenuates those creases at the source (also smoothing buildings/sidewalks
+# that sample the same field) while leaving real, longer-wavelength relief
+# intact. Kept smaller than the ~8 m contour-point spacing so genuine grade is
+# preserved. 0 disables. Validated/tuned on real terrain in #232. See #233.
+_HMAP_SMOOTH_SIGMA_M = 2.0
 
 
 @dataclass
@@ -146,11 +157,16 @@ def parse(
     bounds: OsmBounds,
     origin: GeoOrigin,
     resolution: int = 513,
+    smooth_sigma_m: float = _HMAP_SMOOTH_SIGMA_M,
 ) -> HeightmapData:
     """Parse elevation CSV and return a normalised heightmap.
 
     Reads from disk cache when the CSV hasn't changed since the last bake.
     CSV format: header row, then rows of `id, elev_feet, "LINESTRING (lon lat, ...)"`.
+
+    ``smooth_sigma_m`` low-passes the rasterized grid to suppress triangle-edge
+    creases at the source (0 disables). The cache stores the smoothed grid, so
+    changing this value requires re-baking / ``clear_cache`` to take effect.
     """
     x_min, z_min, width, height = _world_rect(bounds, origin)
 
@@ -177,7 +193,14 @@ def parse(
     if max_elev - min_elev < 0.01:
         max_elev = min_elev + 1.0
 
-    values = _rasterize(pts_arr, elevs_arr, min_elev, max_elev, resolution, x_min, z_min, width, height)
+    values, covered = _rasterize(pts_arr, elevs_arr, min_elev, max_elev, resolution, x_min, z_min, width, height)
+
+    if smooth_sigma_m > 0.0 and resolution > 1:
+        cell_w = width / (resolution - 1)
+        cell_h = height / (resolution - 1)
+        cell_m = 0.5 * (cell_w + cell_h)
+        if cell_m > 1e-6:
+            values = _low_pass_normalized(values, covered, smooth_sigma_m / cell_m)
 
     hmap = HeightmapData(
         values=values,
@@ -303,12 +326,19 @@ def _rasterize(
     z_min: float,
     width: float,
     height: float,
-) -> np.ndarray:
-    """Triangulate pts and rasterize elevation into a (resolution × resolution) grid."""
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Triangulate pts and rasterize elevation into a (resolution × resolution) grid.
+
+    Returns ``(values, covered)`` where ``covered`` marks cells a triangle
+    actually filled (1.0) vs. cells left at 0.0 because they fall outside the
+    contour convex hull. The mask lets the low-pass smooth only real data
+    instead of bleeding the outside-hull zeros inward.
+    """
     values = np.zeros((resolution, resolution), dtype=np.float32)
+    covered = np.zeros((resolution, resolution), dtype=np.float32)
 
     if len(pts) < 3:
-        return values
+        return values, covered
 
     tri = Delaunay(pts)
     elev_range = max_elev - min_elev
@@ -336,8 +366,36 @@ def _rasterize(
                     continue
                 elev = u * ea + v * eb + w * ec
                 values[row, col] = (elev - min_elev) / elev_range
+                covered[row, col] = 1.0
 
-    return values
+    return values, covered
+
+
+def _low_pass_normalized(
+    values: np.ndarray,
+    covered: np.ndarray,
+    sigma_cells: float,
+) -> np.ndarray:
+    """Gaussian low-pass that ignores outside-hull (uncovered) cells.
+
+    Plain blurring would pull the 0.0 in uncovered cells into the valid region,
+    darkening the terrain near the convex-hull boundary. Normalized convolution
+    — ``blur(values·mask) / blur(mask)`` — weights each output only by covered
+    neighbours, so the edge stays put. Uncovered cells are left at their original
+    value. Returns a float32 grid the same shape as ``values``.
+    """
+    if sigma_cells <= 0.0:
+        return values
+
+    masked = (values * covered).astype(np.float64)
+    mask = covered.astype(np.float64)
+    num = gaussian_filter(masked, sigma_cells, mode="constant", cval=0.0)
+    den = gaussian_filter(mask, sigma_cells, mode="constant", cval=0.0)
+
+    out = values.astype(np.float64).copy()
+    valid = (covered > 0.0) & (den > 1e-6)
+    out[valid] = num[valid] / den[valid]
+    return out.astype(np.float32)
 
 
 def _barycentric(

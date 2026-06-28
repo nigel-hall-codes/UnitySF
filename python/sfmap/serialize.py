@@ -156,13 +156,17 @@ def write_parked_cars(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     """Write chunk_CC_RR_parked.json alongside the .bin for placed parked cars.
 
     JSON schema (Unity reads this as a TextAsset at import time):
-      {"cars":[{"p":[x,y,z],"r":heading_deg,"m":0.42,"s":"Geary Boulevard","id":4918},...]}
+      {"cars":[{"p":[x,y,z],"r":heading_deg,"m":0.42,"s":"Geary Boulevard","id":4918,
+                "n":[nx,ny,nz]},...]}
 
     "p" is the Unity world-space position, "r" the Y heading in degrees, "m" a
     model selector in [0,1) the importer maps onto its vehicle-prefab list, "s"
     the nearest street name (omitted when unknown) — kept so a future tool can add
-    or remove cars by street — and "id" the originating regulation feature id.
-    Returns None and writes nothing when the chunk has no parked cars.
+    or remove cars by street — "id" the originating regulation feature id, and "n"
+    the ground normal the car should rest on (Unity axes, Y up) so it tilts onto a
+    hill instead of sitting level. "n" is omitted on flat ground, where the runtime
+    leaves the car level. Returns None and writes nothing when the chunk has no
+    parked cars.
     """
     if not chunk.parked_cars:
         return None
@@ -177,6 +181,11 @@ def write_parked_cars(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
         }
         if c.street:
             entry["s"] = c.street
+        # Ground normal only when the car is on a real slope; flat cars omit it and
+        # the runtime leaves them level (_surface_normal returns straight up below the
+        # tilt threshold, so nx/nz are exactly 0 there).
+        if c.nx or c.nz:
+            entry["n"] = [round(c.nx, 4), round(c.ny, 4), round(c.nz, 4)]
         cars.append(entry)
 
     out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_parked.json"
