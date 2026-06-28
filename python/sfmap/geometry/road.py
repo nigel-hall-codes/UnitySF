@@ -19,6 +19,13 @@ _RAISE = 0.20   # metres above terrain — clears bilinear interpolation bleed
 # stamp follow the hill's curvature. See issue #219.
 _MAX_SEG_M = 4.0
 
+# Arc-length window (metres) of the centerline vertical-profile smoother. The
+# smoother suppresses the high-frequency vertical noise roads inherit from the
+# uneven terrain heightfield (sparse contours, triangle-edge creases) while
+# leaving genuine grades intact. Tuned/validated separately in #232; keep small
+# enough not to flatten real grade changes. See issues #230/#231.
+_SMOOTH_WINDOW_M = 12.0
+
 MeshArrays = Tuple[
     List[Tuple[float, float, float]],  # vertices (x, y, z)
     List[Tuple[float, float]],          # UVs (u, v)
@@ -100,6 +107,19 @@ def _build_single_road(
     n = len(centerline)
     if n < 2:
         return None
+
+    # Smooth the interior vertical profile so the road stops reproducing
+    # high-frequency terrain noise, while genuine grades pass through. Applied
+    # identically in the stamp pass (stamping.stamp_roads) so the stamped grade
+    # the mesh resamples below stays consistent — XZ and the anchored endpoints
+    # are kept exact. See #230/#231.
+    smooth_y = _smooth_centerline_profile(
+        [(cx, cz) for cx, _, cz in centerline],
+        [cy for _, cy, _ in centerline],
+    )
+    centerline = [
+        (centerline[i][0], smooth_y[i], centerline[i][2]) for i in range(n)
+    ]
 
     # Whether each end is anchored to an intersection polygon. Anchored ends weld
     # to the intersection fan: the fan sticks its rim corners onto the exact same
@@ -235,6 +255,82 @@ def _densify_polyline(
                 t = s / steps
                 out.append((x0 + t * (x1 - x0), z0 + t * (z1 - z0)))
         out.append((x1, z1))
+    return out
+
+
+def _smooth_centerline_profile(
+    cl_xz: List[Tuple[float, float]],
+    y: List[float],
+    window_m: float = _SMOOTH_WINDOW_M,
+) -> List[float]:
+    """Smooth the *vertical* profile of a densified road centerline.
+
+    Roads inherit high-frequency vertical noise from the uneven terrain
+    heightfield (sparse contour samples, triangle-edge creases). This filters
+    that wiggle out of ``y`` while letting genuine grades through. It is applied
+    **identically** in the road mesh pass (``_build_single_road``) and the stamp
+    pass (``stamping.stamp_roads``) so the stamped grade and the resampled mesh
+    surface stay consistent — diverging would tear a seam at the road edge, the
+    exact failure #219 fixed. See #230/#231.
+
+    Properties (relied on by tests and by the stamp/mesh invariant):
+
+    - **XZ untouched** — only ``y`` is filtered; ``cl_xz`` is read-only.
+    - **Endpoints exact** — ``y[0]`` and ``y[-1]`` pass through unchanged so the
+      road stays welded to its intersection nodes and chunk-boundary anchors.
+    - **Straight grades pass through** — each interior point is replaced by a
+      local *linear* (degree-1) least-squares fit over an arc-length window, so a
+      constant-grade ramp is reproduced exactly (a line fit of collinear points
+      has zero residual) while only curvature/second-derivative content within
+      the window is attenuated. This is why a linear fit is preferred over a
+      moving average, which would round off real grade changes.
+
+    Arc length is measured along **XZ**, which is bit-identical between the two
+    passes for identical input, so the filtered ``y`` is identical too.
+    """
+    n = len(y)
+    if n < 3 or window_m <= 0.0:
+        return list(y)
+
+    # Cumulative XZ arc length — the smoothing coordinate.
+    s = [0.0] * n
+    for i in range(1, n):
+        dx = cl_xz[i][0] - cl_xz[i - 1][0]
+        dz = cl_xz[i][1] - cl_xz[i - 1][1]
+        s[i] = s[i - 1] + math.hypot(dx, dz)
+
+    half = window_m * 0.5
+    out = list(y)  # endpoints (0, n-1) left exact by construction
+    lo = 0
+    hi = 0
+    for i in range(1, n - 1):
+        si = s[i]
+        while s[lo] < si - half:
+            lo += 1
+        if hi < i:
+            hi = i
+        while hi < n - 1 and s[hi + 1] <= si + half:
+            hi += 1
+
+        # Tricube-weighted least-squares line fit, evaluated at ds = 0 (= s[i]).
+        sw = swx = swy = swxx = swxy = 0.0
+        for j in range(lo, hi + 1):
+            ds = s[j] - si
+            u = abs(ds) / half
+            w = 1.0 - u * u * u
+            w = w * w * w  # tricube
+            sw += w
+            swx += w * ds
+            swy += w * y[j]
+            swxx += w * ds * ds
+            swxy += w * ds * y[j]
+
+        denom = sw * swxx - swx * swx
+        if abs(denom) < 1e-12:
+            continue  # window too narrow to fit a line — leave the point as-is
+        slope = (sw * swxy - swx * swy) / denom
+        out[i] = (swy - slope * swx) / sw  # intercept = fitted value at s[i]
+
     return out
 
 
