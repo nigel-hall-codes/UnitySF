@@ -303,6 +303,12 @@ namespace SFMap.Pipeline
                      minSpeed, maxSpeed, acceleration, braking,
                      timeHeadway, minFollowGap, speedVariation);
 
+            // Per-car variety: a weighted-random body colour and runtime brake/indicator lights
+            // the car drives from its own braking/turn state. Purely cosmetic — never gates motion.
+            var appearance = go.AddComponent<TrafficCarAppearance>();
+            appearance.Configure();
+            car.SetAppearance(appearance);
+
             _cars.Add(car);
             return true;
         }
