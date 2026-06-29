@@ -26,6 +26,7 @@ namespace SFMap.Pipeline
         const float LostGrace = 1.5f; // give up after this long with no road underneath
         const float RayTop = 1000f;   // raycast origin height above the world
         const float RayLen = 2000f;
+        const float BrakeDistance = 10f; // start easing the throttle within this far of the stop line
 
         RoadNetwork _net;
         int _edge;          // current edge index
@@ -47,6 +48,10 @@ namespace SFMap.Pipeline
         float _lostTime;    // seconds without finding road under us
         bool _ready;
         bool _firstConform;
+        float _approachWindow; // start watching a controlled node this far ahead, metres
+        float _stopSetback;    // stop this far back from the node centre (the stop line), metres
+        int _crossNode;        // node we've requested/hold a crossing reservation for, or -1
+        bool _holdsCrossing;   // true once granted occupancy of _crossNode (driving through)
 
         /// Set when the car finishes its route (dead-end with nowhere to go) or drives
         /// off the streamed map. The manager destroys and replaces it.
@@ -55,7 +60,8 @@ namespace SFMap.Pipeline
         public void Init(RoadNetwork net, int edge, Vector3 startSurface, float speed,
                          int roadMask, float yawOffset, float rideHeight,
                          float multiLaneMinWidth, float laneWidth,
-                         float laneChangePeriodMin, float laneChangePeriodMax, float laneChangeDuration)
+                         float laneChangePeriodMin, float laneChangePeriodMax, float laneChangeDuration,
+                         float approachWindow, float stopSetback)
         {
             _net = net;
             _edge = edge;
@@ -70,6 +76,10 @@ namespace SFMap.Pipeline
             _laneChangeDuration = laneChangeDuration;
             _laneChangePeriodMin = laneChangePeriodMin;
             _laneChangePeriodMax = laneChangePeriodMax;
+            _approachWindow = approachWindow;
+            _stopSetback = stopSetback;
+            _crossNode = -1;
+            _holdsCrossing = false;
             _laneChangeT = 1f; // start settled in the assigned lane
             _lostTime = 0f;
             Done = false;
@@ -131,7 +141,7 @@ namespace SFMap.Pipeline
                 }
             }
 
-            Advance(_speed * Time.deltaTime);
+            Advance(IntersectionGovernedStep(_speed * Time.deltaTime));
             if (Done) return; // reached a dead-end; manager will cull
             Conform();
         }
@@ -150,6 +160,56 @@ namespace SFMap.Pipeline
 
             _targetLaneIndex = next;
             _laneChangeT = 0f;
+        }
+
+        // Caps this frame's travel so the car obeys the controlled node ahead: it eases to a
+        // stop at the stop line and only rolls through once it has been granted the crossing.
+        // For an uncontrolled upcoming node it returns the desired step unchanged (a true
+        // no-op, so cars never stutter at mid-block welds or chunk-crop joints).
+        float IntersectionGovernedStep(float desired)
+        {
+            var e = _net.GetEdge(_edge);
+            int node = e.ToNode;
+            if (_net.ControlAt(node) == RoadNetwork.IntersectionControl.None) return desired;
+
+            float remaining = DistanceToEdgeEnd(); // metres from _pos to the node centre
+            if (remaining > _approachWindow) return desired; // not close enough to care yet
+
+            // Already cleared to cross this node (we are its occupant) — drive straight through.
+            if (_holdsCrossing && _crossNode == node) return desired;
+
+            // Join the junction's FIFO queue (idempotent) and take our turn when granted.
+            bool granted = _net.RequestCross(node, this);
+            _crossNode = node;
+            if (granted) { _holdsCrossing = true; return desired; }
+
+            // Waiting our turn: ease to a halt at the stop line, set back from the node centre.
+            float toStopLine = remaining - _stopSetback;
+            if (toStopLine <= 0f) return 0f; // at/over the line — hold
+            float throttle = Mathf.Clamp01(toStopLine / BrakeDistance); // linear slow-down
+            return Mathf.Min(desired * throttle, toStopLine);            // never overshoot the line
+        }
+
+        // Remaining XZ distance from the current position to the end (ToNode) of this edge.
+        float DistanceToEdgeEnd()
+        {
+            var pts = _net.GetEdge(_edge).Points;
+            float d = Vector2.Distance(_pos, pts[_seg + 1]);
+            for (int i = _seg + 1; i + 1 < pts.Length; i++)
+                d += Vector2.Distance(pts[i], pts[i + 1]);
+            return d;
+        }
+
+        /// Releases any junction reservation this car holds or is queued for. Called by the car
+        /// itself once it clears a node and by <see cref="TrafficManager"/> before culling — the
+        /// mandatory deadlock backstop, since a car destroyed mid-crossing would otherwise wedge
+        /// the junction for every other car forever.
+        public void ReleaseReservation()
+        {
+            if (_crossNode < 0 || _net == null) { _crossNode = -1; _holdsCrossing = false; return; }
+            _net.ReleaseCross(_crossNode, this);
+            _crossNode = -1;
+            _holdsCrossing = false;
         }
 
         // Walks `distance` metres along the centerline, hopping to the next segment —
@@ -191,7 +251,12 @@ namespace SFMap.Pipeline
             _seg++;
             if (_seg < pts.Length - 1) return true;
 
-            int next = _net.NextEdge(e.ToNode, _edge);
+            // We've reached the end node of this edge. If we were crossing it under a
+            // reservation, free the junction now so the next waiting car can take its turn.
+            int crossed = e.ToNode;
+            if (_crossNode == crossed) ReleaseReservation();
+
+            int next = _net.NextEdge(crossed, _edge);
             if (next < 0) { Done = true; return false; }
 
             _edge = next;

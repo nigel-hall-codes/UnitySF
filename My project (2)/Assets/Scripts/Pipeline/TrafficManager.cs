@@ -76,6 +76,14 @@ namespace SFMap.Pipeline
         [Tooltip("Seconds to complete a lane change (smooth lerp between lanes).")]
         [Min(0.5f)] public float laneChangeDuration = 2f;
 
+        [Header("Intersections")]
+        [Tooltip("How far ahead (metres) a car starts watching a controlled junction so it " +
+                 "can ease to a stop and take its turn. ~25 reads naturally at city speeds.")]
+        [Min(1f)] public float intersectionApproach = 25f;
+
+        [Tooltip("How far back from the junction centre (metres) cars hold at the stop line.")]
+        [Min(0f)] public float stopSetback = 4f;
+
         [Header("Pacing")]
         [Tooltip("Seconds between population evaluations.")]
         [Min(0.05f)] public float updateInterval = 0.4f;
@@ -135,6 +143,9 @@ namespace SFMap.Pipeline
 
                 if (car.Done || SqXZ(car.transform.position, center) > maxSq)
                 {
+                    // Backstop: free any junction reservation before the car vanishes, else a
+                    // car culled mid-crossing would wedge that junction for everyone (#245).
+                    car.ReleaseReservation();
                     Destroy(car.gameObject);
                     _cars.RemoveAt(i);
                 }
@@ -189,7 +200,8 @@ namespace SFMap.Pipeline
             if (car == null) car = go.AddComponent<TrafficCar>();
             car.Init(net, edge, surface, Random.Range(minSpeed, maxSpeed), _mask, modelYawOffset,
                      rideHeight, multiLaneMinWidth, laneWidth,
-                     laneChangePeriodMin, laneChangePeriodMax, laneChangeDuration);
+                     laneChangePeriodMin, laneChangePeriodMax, laneChangeDuration,
+                     intersectionApproach, stopSetback);
 
             _cars.Add(car);
             return true;
