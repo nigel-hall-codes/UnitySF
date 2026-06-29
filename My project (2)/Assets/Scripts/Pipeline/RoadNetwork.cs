@@ -35,6 +35,17 @@ namespace SFMap.Pipeline
         // merge two genuinely distinct intersections.
         const float SnapTolerance = 0.6f;
 
+        // A controlled node whose widest incident road is at least this wide reads as an
+        // arterial and is classified Signal rather than an all-way Stop. SF arterials are
+        // signalised, residential junctions are all-way stops — a width proxy (#244 design).
+        const float SignalWidthThreshold = 11f;
+
+        /// How a junction regulates traffic, derived from graph topology at build time.
+        /// <see cref="None"/> for through-nodes (degree ≤ 2 — mid-block welds, bends and
+        /// chunk-crop joints); junctions (degree ≥ 3) are <see cref="Stop"/> or
+        /// <see cref="Signal"/> by a road-width proxy. v1 traffic treats Signal as Stop.
+        public enum IntersectionControl { None, Stop, Signal }
+
         public readonly struct Edge
         {
             public readonly int FromNode;
@@ -55,6 +66,23 @@ namespace SFMap.Pipeline
         readonly List<Edge> _edges = new();
         readonly List<List<int>> _outgoing = new();      // node index → outgoing edge indices
         readonly Dictionary<long, List<int>> _nodeHash = new(); // spatial hash for endpoint welding
+
+        // Per-node intersection classification, filled once by Classify() after Load().
+        int[] _degree;                       // distinct neighbour count per node
+        IntersectionControl[] _control;      // derived control per node
+
+        // Per-node FIFO single-occupancy crossing reservation, created lazily for the
+        // controlled nodes that cars actually queue at. See RequestCross/ReleaseCross.
+        readonly Dictionary<int, Junction> _junctions = new();
+
+        // A controlled junction's right-of-way state: one car may occupy the crossing at a
+        // time; the rest wait in arrival (FIFO) order. Cars are stored as the opaque tokens
+        // the contract takes (object), so RoadNetwork never depends on TrafficCar.
+        sealed class Junction
+        {
+            public readonly List<object> Waiting = new(); // arrival-ordered queue (head = front)
+            public object Occupant;                        // the car currently crossing, or null
+        }
 
         /// True once at least one drivable edge has been built.
         public bool IsReady => _edges.Count > 0;
@@ -110,8 +138,46 @@ namespace SFMap.Pipeline
             }
 
             _nodeHash.Clear(); // welding scratch no longer needed
+            Classify();        // needs the final _edges/_outgoing, so run after welding
             Debug.Log($"[RoadNetwork] {polylines} centerlines → {_edges.Count} directed edges, " +
                       $"{_nodes.Count} nodes (one-way roads contribute a single edge).");
+        }
+
+        // Derives each node's IntersectionControl from graph topology in one O(nodes+edges)
+        // pass: degree (distinct neighbours, counting both directions so one-way roads still
+        // contribute) decides controlled vs through, and the widest incident road splits
+        // Stop from Signal. Pure topology — stable and independent of which chunks stream.
+        void Classify()
+        {
+            int n = _nodes.Count;
+            _degree = new int[n];
+            _control = new IntersectionControl[n];
+            if (n == 0) return;
+
+            var neighbours = new HashSet<int>[n];
+            var widest = new float[n];
+            for (int i = 0; i < n; i++) neighbours[i] = new HashSet<int>();
+
+            foreach (var e in _edges)
+            {
+                neighbours[e.FromNode].Add(e.ToNode);
+                neighbours[e.ToNode].Add(e.FromNode);
+                if (e.Width > widest[e.FromNode]) widest[e.FromNode] = e.Width;
+                if (e.Width > widest[e.ToNode]) widest[e.ToNode] = e.Width;
+            }
+
+            int controlled = 0;
+            for (int i = 0; i < n; i++)
+            {
+                int deg = neighbours[i].Count;
+                _degree[i] = deg;
+                if (deg <= 2) { _control[i] = IntersectionControl.None; continue; }
+                _control[i] = widest[i] >= SignalWidthThreshold
+                    ? IntersectionControl.Signal
+                    : IntersectionControl.Stop;
+                controlled++;
+            }
+            Debug.Log($"[RoadNetwork] {controlled} controlled junctions (degree ≥ 3) of {n} nodes.");
         }
 
         void AddPolyline(float[] xz, float width, bool oneWay)
@@ -237,6 +303,60 @@ namespace SFMap.Pipeline
         }
 
         public Edge GetEdge(int index) => _edges[index];
+
+        // --- Intersection control (derived; #244 design / #245) ----------------------------
+
+        /// How the junction at <paramref name="node"/> is regulated. <see cref="IntersectionControl.None"/>
+        /// for through-nodes (degree ≤ 2) — cars must never pause there — and Stop/Signal for
+        /// junctions. Safe before classification (returns None) and for out-of-range indices.
+        public IntersectionControl ControlAt(int node) =>
+            _control != null && (uint)node < (uint)_control.Length
+                ? _control[node] : IntersectionControl.None;
+
+        /// Distinct neighbour count of <paramref name="node"/> (both travel directions).
+        public int Degree(int node) =>
+            _degree != null && (uint)node < (uint)_degree.Length ? _degree[node] : 0;
+
+        /// Welded XZ position of <paramref name="node"/> — the junction centre cars stop short of.
+        public Vector2 GetNode(int node) => _nodes[node];
+
+        // --- Take-turns: per-node FIFO single-occupancy crossing reservation ---------------
+
+        /// Requests permission for <paramref name="car"/> to cross <paramref name="node"/>.
+        /// Idempotent: the car joins the FIFO queue on first call and is granted (returns true)
+        /// only once it is the queue head AND the crossing is free — giving the all-way-stop
+        /// "first to arrive, first to go" cadence. Returns true again for the current occupant
+        /// so a car mid-cross keeps moving. The caller MUST <see cref="ReleaseCross"/> once it
+        /// has cleared the node, and on cull/destroy, or the junction deadlocks.
+        public bool RequestCross(int node, object car)
+        {
+            if (car == null) return true; // defensive: never block on a null token
+            var j = JunctionFor(node);
+            if (ReferenceEquals(j.Occupant, car)) return true; // already crossing
+            if (!j.Waiting.Contains(car)) j.Waiting.Add(car);  // enqueue once, in arrival order
+            if (j.Occupant == null && j.Waiting.Count > 0 && ReferenceEquals(j.Waiting[0], car))
+            {
+                j.Waiting.RemoveAt(0);
+                j.Occupant = car;
+                return true;
+            }
+            return false;
+        }
+
+        /// Releases any hold or queue slot <paramref name="car"/> has at <paramref name="node"/>,
+        /// freeing the crossing for the next waiter. Safe to call when the car holds nothing.
+        public void ReleaseCross(int node, object car)
+        {
+            if (car == null || !_junctions.TryGetValue(node, out var j)) return;
+            if (ReferenceEquals(j.Occupant, car)) j.Occupant = null;
+            j.Waiting.Remove(car);
+        }
+
+        Junction JunctionFor(int node)
+        {
+            if (!_junctions.TryGetValue(node, out var j)) { j = new Junction(); _junctions[node] = j; }
+            return j;
+        }
 
         // Matches the JSON written by python/sfmap/serialize.py write_road_names().
         [Serializable] class RoadNamesJson { public RoadEntry[] roads; }
