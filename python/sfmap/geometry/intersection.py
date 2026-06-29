@@ -14,7 +14,7 @@ from .road import _sample_elevation
 _BEVEL_THRESHOLD = 5.0   # metres; miter points beyond this become two-vertex bevels
 _RAISE = 0.20            # metres; clears bilinear bleed, matches road.py
 _SW_WIDTH = 1.5          # metres; sidewalk strip width, matches sidewalk.py
-_OUTER_SINK = 0.05       # metres; outer sidewalk edge tucks below terrain, matches sidewalk.py
+_OUTER_RAISE = 0.05      # metres; outer sidewalk edge rides just above terrain, matches sidewalk.py
 _MIN_CORNER_GAP_DEG = 30.0  # skip corner fills for near-parallel arm pairs
 
 
@@ -279,12 +279,13 @@ def build_sidewalk_corner_meshes(
             ro_bz = node.world_z + b.dir_z * tb + pb_z * outer_b
 
             # Inner corners stay flush with the road (+_RAISE); outer corners ramp
-            # down to meet terrain (-_OUTER_SINK), matching the sidewalk strip ends
-            # so the corner fill is continuous and forms no cliff for cars to catch.
+            # down toward terrain but stay a hair above it (+_OUTER_RAISE), matching
+            # the sidewalk strip ends so the corner fill is continuous, stays fully
+            # visible (never buried by terrain), and forms no cliff for cars to catch.
             li_ay = _sample_elevation(hmap, li_ax, li_az) + _RAISE
-            lo_ay = _sample_elevation(hmap, lo_ax, lo_az) - _OUTER_SINK
+            lo_ay = _sample_elevation(hmap, lo_ax, lo_az) + _OUTER_RAISE
             ri_by = _sample_elevation(hmap, ri_bx, ri_bz) + _RAISE
-            ro_by = _sample_elevation(hmap, ro_bx, ro_bz) - _OUTER_SINK
+            ro_by = _sample_elevation(hmap, ro_bx, ro_bz) + _OUTER_RAISE
 
             # Sort the four corners into CW order (front-facing from above in Unity
             # left-handed coords) by angle from their centroid.  A fixed vertex
