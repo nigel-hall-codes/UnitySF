@@ -35,6 +35,17 @@ namespace SFMap.Pipeline
         // merge two genuinely distinct intersections.
         const float SnapTolerance = 0.6f;
 
+        // A controlled node whose widest incident road is at least this wide reads as an
+        // arterial and is classified Signal rather than an all-way Stop. SF arterials are
+        // signalised, residential junctions are all-way stops — a width proxy (#244 design).
+        const float SignalWidthThreshold = 11f;
+
+        /// How a junction regulates traffic, derived from graph topology at build time.
+        /// <see cref="None"/> for through-nodes (degree ≤ 2 — mid-block welds, bends and
+        /// chunk-crop joints); junctions (degree ≥ 3) are <see cref="Stop"/> or
+        /// <see cref="Signal"/> by a road-width proxy. v1 traffic treats Signal as Stop.
+        public enum IntersectionControl { None, Stop, Signal }
+
         public readonly struct Edge
         {
             public readonly int FromNode;
@@ -55,6 +66,31 @@ namespace SFMap.Pipeline
         readonly List<Edge> _edges = new();
         readonly List<List<int>> _outgoing = new();      // node index → outgoing edge indices
         readonly Dictionary<long, List<int>> _nodeHash = new(); // spatial hash for endpoint welding
+
+        // Per-node intersection classification, filled once by Classify() after Load().
+        int[] _degree;                       // distinct neighbour count per node
+        IntersectionControl[] _control;      // derived control per node
+
+        // Drivable-road width range across the whole graph, captured once by Classify().
+        // The bake collapses OSM highway class into width (primary≈10 … residential≈7 …
+        // service≈4), so width is the runtime road-class proxy used to bias spawn density
+        // toward arterials (#249). _widthMax <= _widthMin means no usable widths (all-equal
+        // or unserialised) → callers treat every road as neutral.
+        float _widthMin;
+        float _widthMax;
+
+        // Per-node FIFO single-occupancy crossing reservation, created lazily for the
+        // controlled nodes that cars actually queue at. See RequestCross/ReleaseCross.
+        readonly Dictionary<int, Junction> _junctions = new();
+
+        // A controlled junction's right-of-way state: one car may occupy the crossing at a
+        // time; the rest wait in arrival (FIFO) order. Cars are stored as the opaque tokens
+        // the contract takes (object), so RoadNetwork never depends on TrafficCar.
+        sealed class Junction
+        {
+            public readonly List<object> Waiting = new(); // arrival-ordered queue (head = front)
+            public object Occupant;                        // the car currently crossing, or null
+        }
 
         /// True once at least one drivable edge has been built.
         public bool IsReady => _edges.Count > 0;
@@ -110,8 +146,56 @@ namespace SFMap.Pipeline
             }
 
             _nodeHash.Clear(); // welding scratch no longer needed
+            Classify();        // needs the final _edges/_outgoing, so run after welding
             Debug.Log($"[RoadNetwork] {polylines} centerlines → {_edges.Count} directed edges, " +
                       $"{_nodes.Count} nodes (one-way roads contribute a single edge).");
+        }
+
+        // Derives each node's IntersectionControl from graph topology in one O(nodes+edges)
+        // pass: degree (distinct neighbours, counting both directions so one-way roads still
+        // contribute) decides controlled vs through, and the widest incident road splits
+        // Stop from Signal. Pure topology — stable and independent of which chunks stream.
+        void Classify()
+        {
+            int n = _nodes.Count;
+            _degree = new int[n];
+            _control = new IntersectionControl[n];
+            if (n == 0) return;
+
+            var neighbours = new HashSet<int>[n];
+            var widest = new float[n];
+            for (int i = 0; i < n; i++) neighbours[i] = new HashSet<int>();
+
+            float wmin = float.MaxValue, wmax = 0f;
+            foreach (var e in _edges)
+            {
+                neighbours[e.FromNode].Add(e.ToNode);
+                neighbours[e.ToNode].Add(e.FromNode);
+                if (e.Width > widest[e.FromNode]) widest[e.FromNode] = e.Width;
+                if (e.Width > widest[e.ToNode]) widest[e.ToNode] = e.Width;
+                if (e.Width > 0f)                       // ignore unserialised (0-width) edges
+                {
+                    if (e.Width < wmin) wmin = e.Width;
+                    if (e.Width > wmax) wmax = e.Width;
+                }
+            }
+            // Only a usable range when at least one positive width was seen; otherwise leave
+            // min == max == 0 so NormalizedWidth falls back to the neutral midpoint.
+            _widthMin = wmax > 0f ? wmin : 0f;
+            _widthMax = wmax;
+
+            int controlled = 0;
+            for (int i = 0; i < n; i++)
+            {
+                int deg = neighbours[i].Count;
+                _degree[i] = deg;
+                if (deg <= 2) { _control[i] = IntersectionControl.None; continue; }
+                _control[i] = widest[i] >= SignalWidthThreshold
+                    ? IntersectionControl.Signal
+                    : IntersectionControl.Stop;
+                controlled++;
+            }
+            Debug.Log($"[RoadNetwork] {controlled} controlled junctions (degree ≥ 3) of {n} nodes.");
         }
 
         void AddPolyline(float[] xz, float width, bool oneWay)
@@ -219,24 +303,114 @@ namespace SFMap.Pipeline
             return outs[0]; // unreachable
         }
 
+        // Random probes per spawn query. A small fixed budget keeps the cost trivial while
+        // giving the weighted pick a few in-ring candidates to choose between.
+        const int SpawnRingProbes = 24;
+
         /// Returns a random edge whose start node lies within [minDist, maxDist] of
         /// <paramref name="center"/> on the XZ plane, or -1 if none turns up within the
         /// sampling budget. Used to spawn traffic in a ring around the camera.
-        public int RandomEdgeNear(Vector3 center, float minDist, float maxDist)
+        ///
+        /// <paramref name="classBias"/> (≥ 0) biases the pick toward higher-class (wider)
+        /// roads so arterials carry more traffic than residential streets (#249); 0 = the
+        /// original uniform-random behaviour. The in-ring probes feed a single-slot weighted
+        /// reservoir (weight from <see cref="ClassWeight"/>), so the result is still drawn
+        /// from the ring — only the per-edge probability is reweighted. O(probes), no alloc.
+        public int RandomEdgeNear(Vector3 center, float minDist, float maxDist, float classBias)
         {
             if (_edges.Count == 0) return -1;
             var c = new Vector2(center.x, center.z);
             float minSq = minDist * minDist, maxSq = maxDist * maxDist;
-            for (int a = 0; a < 24; a++)
+
+            int chosen = -1;
+            float totalW = 0f;
+            for (int a = 0; a < SpawnRingProbes; a++)
             {
                 int idx = UnityEngine.Random.Range(0, _edges.Count);
                 float d2 = (_nodes[_edges[idx].FromNode] - c).sqrMagnitude;
-                if (d2 >= minSq && d2 <= maxSq) return idx;
+                if (d2 < minSq || d2 > maxSq) continue;       // outside the spawn ring
+
+                float w = ClassWeight(_edges[idx].Width, classBias);
+                totalW += w;
+                // Weighted reservoir of size 1: each candidate replaces the incumbent with
+                // probability w/totalW, leaving every edge selected ∝ its weight. With
+                // classBias == 0 all weights are 1, recovering a uniform in-ring pick.
+                if (totalW > 0f && UnityEngine.Random.value <= w / totalW) chosen = idx;
             }
-            return -1;
+            return chosen;
+        }
+
+        // Spawn weight for a road of the given width: 1 + classBias·normalizedWidth, so the
+        // widest arterial is (1 + classBias)× as likely to be picked as the narrowest street
+        // and every edge keeps a weight ≥ 1 (no road is ever fully starved). Always finite and
+        // positive — guards against negative bias, zero width and an all-equal width range.
+        float ClassWeight(float width, float classBias)
+            => 1f + Mathf.Max(0f, classBias) * NormalizedWidth(width);
+
+        // Maps a road width onto [0,1] across the graph's drivable-width range. Unserialised
+        // (≤ 0) widths and a degenerate all-equal range collapse to the neutral midpoint, so
+        // pre-width bakes and single-width maps spawn uniformly (no divide-by-zero).
+        float NormalizedWidth(float width)
+        {
+            if (width <= 0f || _widthMax <= _widthMin) return 0.5f;
+            return Mathf.Clamp01((width - _widthMin) / (_widthMax - _widthMin));
         }
 
         public Edge GetEdge(int index) => _edges[index];
+
+        // --- Intersection control (derived; #244 design / #245) ----------------------------
+
+        /// How the junction at <paramref name="node"/> is regulated. <see cref="IntersectionControl.None"/>
+        /// for through-nodes (degree ≤ 2) — cars must never pause there — and Stop/Signal for
+        /// junctions. Safe before classification (returns None) and for out-of-range indices.
+        public IntersectionControl ControlAt(int node) =>
+            _control != null && (uint)node < (uint)_control.Length
+                ? _control[node] : IntersectionControl.None;
+
+        /// Distinct neighbour count of <paramref name="node"/> (both travel directions).
+        public int Degree(int node) =>
+            _degree != null && (uint)node < (uint)_degree.Length ? _degree[node] : 0;
+
+        /// Welded XZ position of <paramref name="node"/> — the junction centre cars stop short of.
+        public Vector2 GetNode(int node) => _nodes[node];
+
+        // --- Take-turns: per-node FIFO single-occupancy crossing reservation ---------------
+
+        /// Requests permission for <paramref name="car"/> to cross <paramref name="node"/>.
+        /// Idempotent: the car joins the FIFO queue on first call and is granted (returns true)
+        /// only once it is the queue head AND the crossing is free — giving the all-way-stop
+        /// "first to arrive, first to go" cadence. Returns true again for the current occupant
+        /// so a car mid-cross keeps moving. The caller MUST <see cref="ReleaseCross"/> once it
+        /// has cleared the node, and on cull/destroy, or the junction deadlocks.
+        public bool RequestCross(int node, object car)
+        {
+            if (car == null) return true; // defensive: never block on a null token
+            var j = JunctionFor(node);
+            if (ReferenceEquals(j.Occupant, car)) return true; // already crossing
+            if (!j.Waiting.Contains(car)) j.Waiting.Add(car);  // enqueue once, in arrival order
+            if (j.Occupant == null && j.Waiting.Count > 0 && ReferenceEquals(j.Waiting[0], car))
+            {
+                j.Waiting.RemoveAt(0);
+                j.Occupant = car;
+                return true;
+            }
+            return false;
+        }
+
+        /// Releases any hold or queue slot <paramref name="car"/> has at <paramref name="node"/>,
+        /// freeing the crossing for the next waiter. Safe to call when the car holds nothing.
+        public void ReleaseCross(int node, object car)
+        {
+            if (car == null || !_junctions.TryGetValue(node, out var j)) return;
+            if (ReferenceEquals(j.Occupant, car)) j.Occupant = null;
+            j.Waiting.Remove(car);
+        }
+
+        Junction JunctionFor(int node)
+        {
+            if (!_junctions.TryGetValue(node, out var j)) { j = new Junction(); _junctions[node] = j; }
+            return j;
+        }
 
         // Matches the JSON written by python/sfmap/serialize.py write_road_names().
         [Serializable] class RoadNamesJson { public RoadEntry[] roads; }

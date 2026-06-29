@@ -26,12 +26,33 @@ namespace SFMap.Pipeline
         const float LostGrace = 1.5f; // give up after this long with no road underneath
         const float RayTop = 1000f;   // raycast origin height above the world
         const float RayLen = 2000f;
+        const float BrakeDistance = 10f; // start easing the throttle within this far of the stop line
+        const float BrakeSpeedEps = 0.3f; // commanded slowdown bigger than this lights the brakes
+        const float TurnSignalAngle = 25f; // a planned exit turning more than this signals the turn
+
+        /// Which way the car will turn at the junction it is approaching — drives the indicator.
+        public enum Indicator { None, Left, Right }
+
+        // Road-width band that maps to the [minSpeed, maxSpeed] cruise range. A narrow
+        // residential street drives at minSpeed, an arterial at maxSpeed; widths between
+        // interpolate. Width 0 (data baked before widths were serialised) reads as mid-band.
+        const float NarrowWidth = 6f;  // single-lane-ish carriageway
+        const float WideWidth = 14f;   // multi-lane arterial
 
         RoadNetwork _net;
+        TrafficManager _manager;  // owner; queried for the car ahead (car-following)
         int _edge;          // current edge index
         int _seg;           // current segment within the edge (0 .. Points.Length-2)
         Vector2 _pos;       // current XZ position along the centerline
-        float _speed;       // metres/second
+        float _speed;       // metres/second — current speed, accel/decel-limited toward a target
+        float _minSpeed;    // cruise on the narrowest road, metres/second
+        float _maxSpeed;    // cruise on the widest road, metres/second
+        float _accel;       // how fast the car speeds up, metres/second²
+        float _decel;       // how fast the car slows down, metres/second² (usually > accel)
+        float _timeHeadway; // seconds of gap the car keeps to the leader (car-following)
+        float _minFollowGap; // bumper standstill gap to the leader, metres
+        float _speedFactor; // per-car cruise multiplier (mild variation so cars differ)
+        float _distToEnd;   // cached XZ distance from _pos to this edge's end node (this frame)
         int _mask;          // Road layer mask
         float _yawOffset;   // prefab forward-axis correction, degrees
         float _rideHeight;  // metres above the surface
@@ -47,21 +68,46 @@ namespace SFMap.Pipeline
         float _lostTime;    // seconds without finding road under us
         bool _ready;
         bool _firstConform;
+        float _approachWindow; // start watching a controlled node this far ahead, metres
+        float _stopSetback;    // stop this far back from the node centre (the stop line), metres
+        int _crossNode;        // node we've requested/hold a crossing reservation for, or -1
+        bool _holdsCrossing;   // true once granted occupancy of _crossNode (driving through)
+
+        float _desiredSpeed;   // this frame's target speed (cruise capped by car-following)
+        bool _intersectionHold; // this frame the stop-line governor is throttling/holding us
+        bool _braking;         // true when slowing or holding — drives the brake lights
+        int _plannedEdge;      // onward edge pre-chosen while approaching a junction, or -1
+        int _plannedNode;      // the junction _plannedEdge was chosen for, or -1
+        Indicator _signal;     // turn the car is signalling on its approach
+        TrafficCarAppearance _appearance; // optional: brake/indicator lights + body colour
 
         /// Set when the car finishes its route (dead-end with nowhere to go) or drives
         /// off the streamed map. The manager destroys and replaces it.
         public bool Done { get; private set; }
 
-        public void Init(RoadNetwork net, int edge, Vector3 startSurface, float speed,
+        /// Current edge index — the manager buckets cars by this for car-following lookups.
+        public int CurrentEdge => _edge;
+
+        /// Current lane index — a follower only yields to a leader sharing its lane.
+        public int CurrentLane => _laneIndex;
+
+        /// Cached XZ distance from this car to its edge's end node, refreshed each frame.
+        /// Smaller means further along the edge, so the car ahead has the smaller value.
+        public float DistanceToEnd => _distToEnd;
+
+        public void Init(RoadNetwork net, TrafficManager manager, int edge, Vector3 startSurface,
                          int roadMask, float yawOffset, float rideHeight,
                          float multiLaneMinWidth, float laneWidth,
-                         float laneChangePeriodMin, float laneChangePeriodMax, float laneChangeDuration)
+                         float laneChangePeriodMin, float laneChangePeriodMax, float laneChangeDuration,
+                         float approachWindow, float stopSetback,
+                         float minSpeed, float maxSpeed, float accel, float decel,
+                         float timeHeadway, float minFollowGap, float speedVariation)
         {
             _net = net;
+            _manager = manager;
             _edge = edge;
             _seg = 0;
             _pos = net.GetEdge(edge).Points[0];
-            _speed = speed;
             _mask = roadMask;
             _yawOffset = yawOffset;
             _rideHeight = rideHeight;
@@ -70,10 +116,26 @@ namespace SFMap.Pipeline
             _laneChangeDuration = laneChangeDuration;
             _laneChangePeriodMin = laneChangePeriodMin;
             _laneChangePeriodMax = laneChangePeriodMax;
+            _approachWindow = approachWindow;
+            _stopSetback = stopSetback;
+            _crossNode = -1;
+            _holdsCrossing = false;
+            _plannedEdge = -1;
+            _plannedNode = -1;
+            _signal = Indicator.None;
+            _braking = false;
             _laneChangeT = 1f; // start settled in the assigned lane
             _lostTime = 0f;
             Done = false;
             _firstConform = true;
+
+            _minSpeed = minSpeed;
+            _maxSpeed = maxSpeed;
+            _accel = Mathf.Max(0.1f, accel);
+            _decel = Mathf.Max(0.1f, decel);
+            _timeHeadway = Mathf.Max(0.1f, timeHeadway); // guard div-by-zero in the gap controller
+            _minFollowGap = Mathf.Max(0f, minFollowGap);
+            _speedFactor = 1f + Random.Range(-speedVariation, speedVariation);
 
             // Pick a random starting lane based on how many fit in this road's half-width.
             var startEdge = net.GetEdge(edge);
@@ -85,9 +147,16 @@ namespace SFMap.Pipeline
             // Stagger first change check so cars don't all decide simultaneously.
             _laneChangeTimer = Random.Range(laneChangePeriodMin, laneChangePeriodMax);
 
+            // Start already rolling at the starting road's cruise so cars don't crawl up from 0.
+            _speed = CruiseSpeed(startEdge);
+
             _ready = true;
             transform.position = startSurface;
         }
+
+        /// Wires the (optional) visual driver so the car can turn its brake/indicator lights on
+        /// and off as it brakes and turns. Set once at spawn by <see cref="TrafficManager"/>.
+        public void SetAppearance(TrafficCarAppearance appearance) => _appearance = appearance;
 
         // Metres to shift right of the centerline. On narrow (single-lane) roads this
         // is 0. On multi-lane roads the car's lane index determines its physical offset,
@@ -131,9 +200,108 @@ namespace SFMap.Pipeline
                 }
             }
 
-            Advance(_speed * Time.deltaTime);
+            // Speed pipeline, all composed as a single min():
+            //   1. accel/decel-limit _speed toward the free-road cruise capped by car-following,
+            //   2. let the intersection governor cap THIS frame's step at the stop line,
+            //   3. reflect any intersection braking back into _speed so the resume is smooth.
+            // The net per-frame speed is therefore min(cruise, car-following, intersection).
+            _distToEnd = DistanceToEdgeEnd();
+            UpdateSpeed();
+            UpdateTurnSignal();
+
+            float dt = Time.deltaTime;
+            float free = _speed * dt;
+            _intersectionHold = false;             // IntersectionGovernedStep sets it if it throttles
+            float governed = IntersectionGovernedStep(free);
+            if (dt > 1e-5f && governed < free) _speed = governed / dt; // braked at the line
+
+            // Brake lights: on when the car is being commanded to slow (a slower leader or a
+            // narrower road dropping the cruise target) or when the stop-line governor is
+            // easing it down / holding it at a junction. Off while free-cruising or pulling away.
+            _braking = _desiredSpeed < _speed - BrakeSpeedEps || _intersectionHold;
+            if (_appearance != null) _appearance.SetState(_braking, _signal);
+
+            Advance(governed);
             if (Done) return; // reached a dead-end; manager will cull
             Conform();
+        }
+
+        // Looks one junction ahead: while the car is within the approach window of a real
+        // junction (degree ≥ 3, where it actually chooses a direction) it pre-picks its onward
+        // edge — the SAME choice StepSegment will later honour — and signals left/right when that
+        // exit turns by more than TurnSignalAngle. Through-nodes and gentle bends signal nothing.
+        void UpdateTurnSignal()
+        {
+            var e = _net.GetEdge(_edge);
+            int node = e.ToNode;
+
+            if (_distToEnd > _approachWindow || _net.Degree(node) < 3)
+            {
+                _signal = Indicator.None;
+                return; // not near a junction worth signalling for
+            }
+
+            if (_plannedNode != node)
+            {
+                _plannedEdge = _net.NextEdge(node, _edge);
+                _plannedNode = node;
+            }
+            if (_plannedEdge < 0) { _signal = Indicator.None; return; }
+
+            // Heading as we arrive at the node vs. the heading the chosen exit leaves on.
+            var inPts = e.Points;
+            Vector2 incoming = inPts[inPts.Length - 1] - inPts[inPts.Length - 2];
+            var outPts = _net.GetEdge(_plannedEdge).Points;
+            Vector2 outgoing = outPts[1] - outPts[0];
+            if (incoming.sqrMagnitude < 1e-6f || outgoing.sqrMagnitude < 1e-6f)
+            {
+                _signal = Indicator.None;
+                return;
+            }
+            incoming.Normalize();
+            outgoing.Normalize();
+
+            float dot = Mathf.Clamp(Vector2.Dot(incoming, outgoing), -1f, 1f);
+            if (Mathf.Acos(dot) * Mathf.Rad2Deg < TurnSignalAngle)
+            {
+                _signal = Indicator.None; // close to straight through
+                return;
+            }
+            // 2-D cross (perp-dot): with +X right and +Z forward, a left turn is positive.
+            float cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+            _signal = cross > 0f ? Indicator.Left : Indicator.Right;
+        }
+
+        // Free-road cruise on this edge: wider roads drive faster, scaled by this car's mild
+        // per-car variation. Width 0 (unserialised) reads as mid-band so old data still moves.
+        float CruiseSpeed(in RoadNetwork.Edge e)
+        {
+            float t = e.Width <= 0f
+                ? 0.5f
+                : Mathf.Clamp01((e.Width - NarrowWidth) / (WideWidth - NarrowWidth));
+            return Mathf.Lerp(_minSpeed, _maxSpeed, t) * _speedFactor;
+        }
+
+        // Eases _speed toward the target this frame under bounded accel/decel. The target is the
+        // free-road cruise, lowered to a car-following cap whenever there is a slower car ahead on
+        // the same edge and lane — a constant-time-headway controller that holds a safe gap and
+        // smoothly reaches 0 as the gap closes, so cars never drive through the leader.
+        void UpdateSpeed()
+        {
+            float target = CruiseSpeed(_net.GetEdge(_edge));
+
+            var leader = _manager != null ? _manager.FindLeader(this, _edge, _laneIndex, _distToEnd) : null;
+            if (leader != null)
+            {
+                float gap = _distToEnd - leader.DistanceToEnd;             // centerline gap to the car ahead
+                float follow = (gap - _minFollowGap) / _timeHeadway;       // _timeHeadway guarded > 0 in Init
+                if (follow < target) target = follow;
+            }
+            if (target < 0f) target = 0f;                                  // never reverse
+
+            _desiredSpeed = target; // remembered for the brake-light test in Update
+            float rate = target > _speed ? _accel : _decel;
+            _speed = Mathf.MoveTowards(_speed, target, rate * Time.deltaTime);
         }
 
         // Shifts into an adjacent lane on multi-lane roads. No-ops if the road is too
@@ -150,6 +318,57 @@ namespace SFMap.Pipeline
 
             _targetLaneIndex = next;
             _laneChangeT = 0f;
+        }
+
+        // Caps this frame's travel so the car obeys the controlled node ahead: it eases to a
+        // stop at the stop line and only rolls through once it has been granted the crossing.
+        // For an uncontrolled upcoming node it returns the desired step unchanged (a true
+        // no-op, so cars never stutter at mid-block welds or chunk-crop joints).
+        float IntersectionGovernedStep(float desired)
+        {
+            var e = _net.GetEdge(_edge);
+            int node = e.ToNode;
+            if (_net.ControlAt(node) == RoadNetwork.IntersectionControl.None) return desired;
+
+            float remaining = _distToEnd; // metres from _pos to the node centre (cached this frame)
+            if (remaining > _approachWindow) return desired; // not close enough to care yet
+
+            // Already cleared to cross this node (we are its occupant) — drive straight through.
+            if (_holdsCrossing && _crossNode == node) return desired;
+
+            // Join the junction's FIFO queue (idempotent) and take our turn when granted.
+            bool granted = _net.RequestCross(node, this);
+            _crossNode = node;
+            if (granted) { _holdsCrossing = true; return desired; }
+
+            // Waiting our turn: ease to a halt at the stop line, set back from the node centre.
+            float toStopLine = remaining - _stopSetback;
+            if (toStopLine <= 0f) { _intersectionHold = true; return 0f; } // at/over the line — hold
+            float throttle = Mathf.Clamp01(toStopLine / BrakeDistance); // linear slow-down
+            if (throttle < 1f) _intersectionHold = true;                // within braking range of the line
+            return Mathf.Min(desired * throttle, toStopLine);           // never overshoot the line
+        }
+
+        // Remaining XZ distance from the current position to the end (ToNode) of this edge.
+        float DistanceToEdgeEnd()
+        {
+            var pts = _net.GetEdge(_edge).Points;
+            float d = Vector2.Distance(_pos, pts[_seg + 1]);
+            for (int i = _seg + 1; i + 1 < pts.Length; i++)
+                d += Vector2.Distance(pts[i], pts[i + 1]);
+            return d;
+        }
+
+        /// Releases any junction reservation this car holds or is queued for. Called by the car
+        /// itself once it clears a node and by <see cref="TrafficManager"/> before culling — the
+        /// mandatory deadlock backstop, since a car destroyed mid-crossing would otherwise wedge
+        /// the junction for every other car forever.
+        public void ReleaseReservation()
+        {
+            if (_crossNode < 0 || _net == null) { _crossNode = -1; _holdsCrossing = false; return; }
+            _net.ReleaseCross(_crossNode, this);
+            _crossNode = -1;
+            _holdsCrossing = false;
         }
 
         // Walks `distance` metres along the centerline, hopping to the next segment —
@@ -191,7 +410,19 @@ namespace SFMap.Pipeline
             _seg++;
             if (_seg < pts.Length - 1) return true;
 
-            int next = _net.NextEdge(e.ToNode, _edge);
+            // We've reached the end node of this edge. If we were crossing it under a
+            // reservation, free the junction now so the next waiting car can take its turn.
+            int crossed = e.ToNode;
+            if (_crossNode == crossed) ReleaseReservation();
+
+            // Take the exit we pre-chose (and signalled) on the approach, so the indicator
+            // never lies; otherwise pick fresh. Clear the plan + signal once consumed.
+            int next = _plannedNode == crossed && _plannedEdge >= 0
+                ? _plannedEdge
+                : _net.NextEdge(crossed, _edge);
+            _plannedNode = -1;
+            _plannedEdge = -1;
+            _signal = Indicator.None;
             if (next < 0) { Done = true; return false; }
 
             _edge = next;
