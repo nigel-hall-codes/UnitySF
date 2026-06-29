@@ -27,6 +27,11 @@ namespace SFMap.Pipeline
         const float RayTop = 1000f;   // raycast origin height above the world
         const float RayLen = 2000f;
         const float BrakeDistance = 10f; // start easing the throttle within this far of the stop line
+        const float BrakeSpeedEps = 0.3f; // commanded slowdown bigger than this lights the brakes
+        const float TurnSignalAngle = 25f; // a planned exit turning more than this signals the turn
+
+        /// Which way the car will turn at the junction it is approaching — drives the indicator.
+        public enum Indicator { None, Left, Right }
 
         // Road-width band that maps to the [minSpeed, maxSpeed] cruise range. A narrow
         // residential street drives at minSpeed, an arterial at maxSpeed; widths between
@@ -68,6 +73,14 @@ namespace SFMap.Pipeline
         int _crossNode;        // node we've requested/hold a crossing reservation for, or -1
         bool _holdsCrossing;   // true once granted occupancy of _crossNode (driving through)
 
+        float _desiredSpeed;   // this frame's target speed (cruise capped by car-following)
+        bool _intersectionHold; // this frame the stop-line governor is throttling/holding us
+        bool _braking;         // true when slowing or holding — drives the brake lights
+        int _plannedEdge;      // onward edge pre-chosen while approaching a junction, or -1
+        int _plannedNode;      // the junction _plannedEdge was chosen for, or -1
+        Indicator _signal;     // turn the car is signalling on its approach
+        TrafficCarAppearance _appearance; // optional: brake/indicator lights + body colour
+
         /// Set when the car finishes its route (dead-end with nowhere to go) or drives
         /// off the streamed map. The manager destroys and replaces it.
         public bool Done { get; private set; }
@@ -107,6 +120,10 @@ namespace SFMap.Pipeline
             _stopSetback = stopSetback;
             _crossNode = -1;
             _holdsCrossing = false;
+            _plannedEdge = -1;
+            _plannedNode = -1;
+            _signal = Indicator.None;
+            _braking = false;
             _laneChangeT = 1f; // start settled in the assigned lane
             _lostTime = 0f;
             Done = false;
@@ -136,6 +153,10 @@ namespace SFMap.Pipeline
             _ready = true;
             transform.position = startSurface;
         }
+
+        /// Wires the (optional) visual driver so the car can turn its brake/indicator lights on
+        /// and off as it brakes and turns. Set once at spawn by <see cref="TrafficManager"/>.
+        public void SetAppearance(TrafficCarAppearance appearance) => _appearance = appearance;
 
         // Metres to shift right of the centerline. On narrow (single-lane) roads this
         // is 0. On multi-lane roads the car's lane index determines its physical offset,
@@ -186,13 +207,69 @@ namespace SFMap.Pipeline
             // The net per-frame speed is therefore min(cruise, car-following, intersection).
             _distToEnd = DistanceToEdgeEnd();
             UpdateSpeed();
+            UpdateTurnSignal();
 
             float dt = Time.deltaTime;
-            float governed = IntersectionGovernedStep(_speed * dt);
-            if (dt > 1e-5f && governed < _speed * dt) _speed = governed / dt; // braked at the line
+            float free = _speed * dt;
+            _intersectionHold = false;             // IntersectionGovernedStep sets it if it throttles
+            float governed = IntersectionGovernedStep(free);
+            if (dt > 1e-5f && governed < free) _speed = governed / dt; // braked at the line
+
+            // Brake lights: on when the car is being commanded to slow (a slower leader or a
+            // narrower road dropping the cruise target) or when the stop-line governor is
+            // easing it down / holding it at a junction. Off while free-cruising or pulling away.
+            _braking = _desiredSpeed < _speed - BrakeSpeedEps || _intersectionHold;
+            if (_appearance != null) _appearance.SetState(_braking, _signal);
+
             Advance(governed);
             if (Done) return; // reached a dead-end; manager will cull
             Conform();
+        }
+
+        // Looks one junction ahead: while the car is within the approach window of a real
+        // junction (degree ≥ 3, where it actually chooses a direction) it pre-picks its onward
+        // edge — the SAME choice StepSegment will later honour — and signals left/right when that
+        // exit turns by more than TurnSignalAngle. Through-nodes and gentle bends signal nothing.
+        void UpdateTurnSignal()
+        {
+            var e = _net.GetEdge(_edge);
+            int node = e.ToNode;
+
+            if (_distToEnd > _approachWindow || _net.Degree(node) < 3)
+            {
+                _signal = Indicator.None;
+                return; // not near a junction worth signalling for
+            }
+
+            if (_plannedNode != node)
+            {
+                _plannedEdge = _net.NextEdge(node, _edge);
+                _plannedNode = node;
+            }
+            if (_plannedEdge < 0) { _signal = Indicator.None; return; }
+
+            // Heading as we arrive at the node vs. the heading the chosen exit leaves on.
+            var inPts = e.Points;
+            Vector2 incoming = inPts[inPts.Length - 1] - inPts[inPts.Length - 2];
+            var outPts = _net.GetEdge(_plannedEdge).Points;
+            Vector2 outgoing = outPts[1] - outPts[0];
+            if (incoming.sqrMagnitude < 1e-6f || outgoing.sqrMagnitude < 1e-6f)
+            {
+                _signal = Indicator.None;
+                return;
+            }
+            incoming.Normalize();
+            outgoing.Normalize();
+
+            float dot = Mathf.Clamp(Vector2.Dot(incoming, outgoing), -1f, 1f);
+            if (Mathf.Acos(dot) * Mathf.Rad2Deg < TurnSignalAngle)
+            {
+                _signal = Indicator.None; // close to straight through
+                return;
+            }
+            // 2-D cross (perp-dot): with +X right and +Z forward, a left turn is positive.
+            float cross = incoming.x * outgoing.y - incoming.y * outgoing.x;
+            _signal = cross > 0f ? Indicator.Left : Indicator.Right;
         }
 
         // Free-road cruise on this edge: wider roads drive faster, scaled by this car's mild
@@ -222,6 +299,7 @@ namespace SFMap.Pipeline
             }
             if (target < 0f) target = 0f;                                  // never reverse
 
+            _desiredSpeed = target; // remembered for the brake-light test in Update
             float rate = target > _speed ? _accel : _decel;
             _speed = Mathf.MoveTowards(_speed, target, rate * Time.deltaTime);
         }
@@ -265,9 +343,10 @@ namespace SFMap.Pipeline
 
             // Waiting our turn: ease to a halt at the stop line, set back from the node centre.
             float toStopLine = remaining - _stopSetback;
-            if (toStopLine <= 0f) return 0f; // at/over the line — hold
+            if (toStopLine <= 0f) { _intersectionHold = true; return 0f; } // at/over the line — hold
             float throttle = Mathf.Clamp01(toStopLine / BrakeDistance); // linear slow-down
-            return Mathf.Min(desired * throttle, toStopLine);            // never overshoot the line
+            if (throttle < 1f) _intersectionHold = true;                // within braking range of the line
+            return Mathf.Min(desired * throttle, toStopLine);           // never overshoot the line
         }
 
         // Remaining XZ distance from the current position to the end (ToNode) of this edge.
@@ -336,7 +415,14 @@ namespace SFMap.Pipeline
             int crossed = e.ToNode;
             if (_crossNode == crossed) ReleaseReservation();
 
-            int next = _net.NextEdge(crossed, _edge);
+            // Take the exit we pre-chose (and signalled) on the approach, so the indicator
+            // never lies; otherwise pick fresh. Clear the plan + signal once consumed.
+            int next = _plannedNode == crossed && _plannedEdge >= 0
+                ? _plannedEdge
+                : _net.NextEdge(crossed, _edge);
+            _plannedNode = -1;
+            _plannedEdge = -1;
+            _signal = Indicator.None;
             if (next < 0) { Done = true; return false; }
 
             _edge = next;
