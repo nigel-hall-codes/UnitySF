@@ -12,6 +12,12 @@ namespace SFMap.Pipeline
     /// manager naturally waits for <see cref="ChunkStreamer"/> to bring a chunk in
     /// before populating it — no car is ever dropped onto ground that isn't there.
     ///
+    /// Spawning and culling are view-aware so traffic never pops in or vanishes at the
+    /// streaming seam: candidate spawn spots inside the camera frustum are rejected (cars
+    /// appear out of sight — behind, beside, or beyond view distance), and a car past the
+    /// soft despawn radius is retired only once it is off-screen, with a hard radius as an
+    /// absolute cap. Distance-only fallback applies when there is no camera.
+    ///
     /// Add via <b>SFMap ▸ Add Traffic System</b> (auto-wires the car prefabs), or drop
     /// this component on an empty GameObject and assign <see cref="carPrefabs"/> by hand.
     /// </summary>
@@ -39,9 +45,14 @@ namespace SFMap.Pipeline
         [Tooltip("Cars spawn no further than this from the target (metres).")]
         [Min(1f)] public float spawnOuter = 180f;
 
-        [Tooltip("Cars beyond this distance from the target are recycled (metres). Keep it " +
-                 "above spawnOuter so freshly spawned cars aren't culled immediately.")]
+        [Tooltip("Soft recycle distance (metres). Cars past this are retired only once they're " +
+                 "off-screen, so the player never sees one vanish. Keep above spawnOuter so " +
+                 "freshly spawned cars aren't culled immediately (despawn-vs-spawn hysteresis).")]
         [Min(1f)] public float despawnRadius = 260f;
+
+        [Tooltip("Hard recycle distance (metres). Cars past this are retired even if still on " +
+                 "screen — an absolute cap so cars can't leak. Keep above despawnRadius.")]
+        [Min(1f)] public float despawnHardRadius = 360f;
 
         [Header("Motion")]
         [Tooltip("Cruise speed on the narrowest drivable road (m/s). Wider roads scale up " +
@@ -115,7 +126,16 @@ namespace SFMap.Pipeline
         [Tooltip("Max cars to spawn per evaluation (spreads instantiate cost over frames).")]
         [Min(1)] public int maxSpawnsPerTick = 3;
 
+        // Spawn placement guards against pop-in. Candidate roads inside the view frustum are
+        // rejected, so each tick may burn a few tries finding an out-of-sight spot.
+        const int MaxSpawnAttempts = 8;
+        static readonly Vector3 CarBoxSize = new(4f, 4f, 4f); // AABB tested against the frustum
+
         readonly List<TrafficCar> _cars = new();
+
+        // Camera frustum planes, recomputed once per population tick (reused — no per-tick alloc)
+        // to keep spawns out of view and to spare on-screen cars from culling.
+        readonly Plane[] _frustumPlanes = new Plane[6];
 
         // Per-frame edge → cars index, used by FindLeader so a car looks at only the handful
         // of cars sharing its edge instead of the whole population. Rebuilt at most once per
@@ -152,9 +172,21 @@ namespace SFMap.Pipeline
             var net = RoadNetwork.Instance;
             if (net == null || !net.IsReady) return;
 
-            Cull(t.position);
-            Refill(net, t.position);
+            // Resolve the rendering camera so we can keep spawns out of frame and spare
+            // on-screen cars from culling. Null (e.g. before a camera exists) → fall back to
+            // pure distance behaviour, the same as before this guard existed.
+            var cam = Camera.main;
+            bool frustumValid = cam != null;
+            if (frustumValid) GeometryUtility.CalculateFrustumPlanes(cam, _frustumPlanes);
+
+            Cull(t.position, frustumValid);
+            Refill(net, t.position, frustumValid);
         }
+
+        // True if a small car-sized box at <paramref name="p"/> lies within the cached view
+        // frustum. Caller must have set _frustumPlanes this tick (frustumValid). Bounds is a
+        // struct and TestPlanesAABB takes the array by reference, so this allocates nothing.
+        bool InView(Vector3 p) => GeometryUtility.TestPlanesAABB(_frustumPlanes, new Bounds(p, CarBoxSize));
 
         Transform ResolveTarget()
         {
@@ -164,15 +196,35 @@ namespace SFMap.Pipeline
             return Camera.main != null ? Camera.main.transform : null;
         }
 
-        void Cull(Vector3 center)
+        void Cull(Vector3 center, bool frustumValid)
         {
-            float maxSq = despawnRadius * despawnRadius;
+            float softSq = despawnRadius * despawnRadius;
+            float hardSq = Mathf.Max(despawnHardRadius, despawnRadius) * Mathf.Max(despawnHardRadius, despawnRadius);
             for (int i = _cars.Count - 1; i >= 0; i--)
             {
                 var car = _cars[i];
                 if (car == null) { _cars.RemoveAt(i); continue; }
 
-                if (car.Done || SqXZ(car.transform.position, center) > maxSq)
+                bool recycle;
+                if (car.Done)
+                {
+                    // Ran off the streamed area (its road unloaded far behind) or hit a dead-end —
+                    // already out of sight, so retire it.
+                    recycle = true;
+                }
+                else
+                {
+                    float d2 = SqXZ(car.transform.position, center);
+                    if (d2 > hardSq)
+                        recycle = true;                       // absolute cap: never leak cars
+                    else if (d2 > softSq)
+                        // Past the soft ring: only retire once the player can't watch it vanish.
+                        recycle = !frustumValid || !InView(car.transform.position);
+                    else
+                        recycle = false;                      // comfortably in range — keep
+                }
+
+                if (recycle)
                 {
                     // Backstop: free any junction reservation before the car vanishes, else a
                     // car culled mid-crossing would wedge that junction for everyone (#245).
@@ -183,7 +235,7 @@ namespace SFMap.Pipeline
             }
         }
 
-        void Refill(RoadNetwork net, Vector3 center)
+        void Refill(RoadNetwork net, Vector3 center, bool frustumValid)
         {
             if (carPrefabs == null || carPrefabs.Length == 0)
             {
@@ -198,25 +250,40 @@ namespace SFMap.Pipeline
             int spawns = 0;
             while (_cars.Count < targetCount && spawns < maxSpawnsPerTick)
             {
-                if (!TrySpawn(net, center)) break; // no valid spot streamed in this tick
+                if (!TrySpawn(net, center, frustumValid)) break; // no out-of-view spot streamed in this tick
                 spawns++;
             }
         }
 
-        bool TrySpawn(RoadNetwork net, Vector3 center)
+        bool TrySpawn(RoadNetwork net, Vector3 center, bool frustumValid)
         {
-            int edge = net.RandomEdgeNear(center, spawnInner, spawnOuter);
-            if (edge < 0) return false;
+            // Try a few ring positions until one is both streamed in and out of the player's
+            // view, so cars are never seen materialising. Out-of-frustum naturally includes
+            // "ahead but beyond view distance", so the road ahead still fills as we approach it.
+            for (int attempt = 0; attempt < MaxSpawnAttempts; attempt++)
+            {
+                int edge = net.RandomEdgeNear(center, spawnInner, spawnOuter);
+                if (edge < 0) return false; // nothing in the ring this tick
 
-            Vector2 start = net.GetEdge(edge).Points[0];
-            var origin = new Vector3(start.x, 1000f, start.y);
-            if (!Physics.Raycast(origin, Vector3.down, out var hit, 2000f, _mask, QueryTriggerInteraction.Ignore))
-                return false; // the chunk holding this road hasn't streamed in yet
+                Vector2 start = net.GetEdge(edge).Points[0];
+                var origin = new Vector3(start.x, 1000f, start.y);
+                if (!Physics.Raycast(origin, Vector3.down, out var hit, 2000f, _mask, QueryTriggerInteraction.Ignore))
+                    continue; // the chunk holding this road hasn't streamed in yet — try elsewhere
 
+                Vector3 surface = hit.point + Vector3.up * rideHeight;
+                if (frustumValid && InView(surface))
+                    continue; // would pop into view — pick another spot
+
+                return SpawnAt(net, edge, surface);
+            }
+            return false; // every candidate this tick was unstreamed or in view
+        }
+
+        bool SpawnAt(RoadNetwork net, int edge, Vector3 surface)
+        {
             var prefab = carPrefabs[Random.Range(0, carPrefabs.Length)];
             if (prefab == null) return false;
 
-            Vector3 surface = hit.point + Vector3.up * rideHeight;
             var go = Instantiate(prefab, surface, Quaternion.identity, transform);
             go.name = $"TrafficCar_{prefab.name}";
             go.transform.localScale *= carScale;
