@@ -54,9 +54,13 @@ _ROAD_SEARCH_M = 30.0
 # Skip segments shorter than one car — nothing useful fits.
 _MIN_SEG_LEN = _CAR_LENGTH
 # Two cars closer than this (XZ, metres) are treated as a stack and one is dropped.
-# Below the ~2.25 m min spacing in a row and the road-width gap between opposite
-# kerbs, so only genuine overlaps (CSV vs fallback, or roads meeting) are removed.
-_DEDUPE_DIST_M = 1.3
+# CSV and sidewalk-fallback rows share the same kerb seat but are phased independently
+# (separate RNG seeds), so they interleave; with the old 1.3 m threshold the interleaved
+# cars (~half a slot, ~1.9 m apart) survived and clipped into one another (#241). The
+# threshold must therefore exceed a car length so no two *surviving* cars can overlap,
+# yet stay below the genuine minimum in-row spacing (slot - jitter = 3.0 m) and the
+# road-width gap between opposite kerbs, so a legitimately-spaced row is never thinned.
+_DEDUPE_DIST_M = 2.5
 
 # REGULATION values (CSV) that mean "never park here" — used as keep-out zones.
 # Compared after lowercasing and stripping all whitespace, so case/spacing variants
