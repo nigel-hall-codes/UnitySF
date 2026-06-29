@@ -119,6 +119,14 @@ namespace SFMap.Pipeline
                  "0.15 = ±15%.")]
         [Range(0f, 0.5f)] public float speedVariation = 0.15f;
 
+        [Header("Density")]
+        [Tooltip("How strongly traffic favours higher-class roads. The bake encodes road class " +
+                 "as width (arterials wide, residential narrow), so this biases spawn-edge " +
+                 "selection toward wider roads: the widest arterial is (1 + bias)× as likely to " +
+                 "be chosen as the narrowest street. 0 = uniform (every road equally busy). This " +
+                 "redistributes where cars are within the global targetCount — it doesn't add cars.")]
+        [Range(0f, 4f)] public float densityClassBias = 1.5f;
+
         [Header("Pacing")]
         [Tooltip("Seconds between population evaluations.")]
         [Min(0.05f)] public float updateInterval = 0.4f;
@@ -262,7 +270,11 @@ namespace SFMap.Pipeline
             // "ahead but beyond view distance", so the road ahead still fills as we approach it.
             for (int attempt = 0; attempt < MaxSpawnAttempts; attempt++)
             {
-                int edge = net.RandomEdgeNear(center, spawnInner, spawnOuter);
+                // Weighted by road class (width proxy) so arterials draw more traffic than
+                // residential streets (#249). Each retry re-samples, so a wider road simply has
+                // a higher chance of being offered — the streamed-in and in-view checks below
+                // still gate it, and rejection just rolls another weighted pick next attempt.
+                int edge = net.RandomEdgeNear(center, spawnInner, spawnOuter, densityClassBias);
                 if (edge < 0) return false; // nothing in the ring this tick
 
                 Vector2 start = net.GetEdge(edge).Points[0];
