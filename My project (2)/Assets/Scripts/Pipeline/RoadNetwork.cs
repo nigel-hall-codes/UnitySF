@@ -114,6 +114,16 @@ namespace SFMap.Pipeline
 
         void Load()
         {
+            // The road graph must come from the SAME preset the ChunkStreamer streams, but
+            // ChunkStreamer only sets GeneratedAssets.ActivePreset from its async OnEnable —
+            // which races (and loses) against this Awake. So read the streamer's serialized
+            // preset directly (available synchronously at Awake) and pin ActivePreset to it,
+            // otherwise we'd load the wrong/default map's graph and no car could spawn on the
+            // visible roads. Falls back to the existing ActivePreset when there's no streamer.
+            var streamer = FindFirstObjectByType<ChunkStreamer>();
+            if (streamer != null && !string.IsNullOrEmpty(streamer.preset))
+                GeneratedAssets.ActivePreset = streamer.preset;
+
             var manifest = Resources.Load<ChunkManifest>(GeneratedAssets.RuntimeChunkManifest());
             if (manifest == null || manifest.chunks == null)
             {

@@ -18,7 +18,13 @@ namespace SFMap.Pipeline
 
     public static class GeneratedAssets
     {
-        public static string ActivePreset = "test";
+        // Which baked map is live. Intentionally empty so nothing resolves to a real
+        // preset by accident: it MUST be set explicitly by whoever owns the map —
+        // ChunkStreamer (from its serialized `preset`) at runtime, or the importer
+        // windows in the Editor. A stray read before that resolves to a non-existent
+        // "Generated//..." path and fails loudly (null manifest) instead of silently
+        // loading the wrong map's data.
+        public static string ActivePreset = "";
 
         public static string Root          => $"Assets/Generated/{ActivePreset}";
         public static string ResourcesRoot => $"Assets/Resources/Generated/{ActivePreset}";
