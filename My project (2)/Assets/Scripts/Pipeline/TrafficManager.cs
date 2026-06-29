@@ -44,7 +44,11 @@ namespace SFMap.Pipeline
         [Min(1f)] public float despawnRadius = 260f;
 
         [Header("Motion")]
+        [Tooltip("Cruise speed on the narrowest drivable road (m/s). Wider roads scale up " +
+                 "toward maxSpeed; each car gets mild variation around this.")]
         [Min(0f)] public float minSpeed = 6f;
+
+        [Tooltip("Cruise speed on the widest (arterial) road (m/s).")]
         [Min(0f)] public float maxSpeed = 12f;
 
         [Tooltip("Height the car body rides above the road surface (metres).")]
@@ -84,6 +88,26 @@ namespace SFMap.Pipeline
         [Tooltip("How far back from the junction centre (metres) cars hold at the stop line.")]
         [Min(0f)] public float stopSetback = 4f;
 
+        [Header("Speed & Following")]
+        [Tooltip("How quickly cars speed up toward their cruise (m/s²).")]
+        [Min(0.1f)] public float acceleration = 4f;
+
+        [Tooltip("How quickly cars slow down (m/s²). Usually higher than acceleration — braking " +
+                 "is sharper than pulling away.")]
+        [Min(0.1f)] public float braking = 8f;
+
+        [Tooltip("Seconds of gap each car keeps to the car ahead (car-following headway). " +
+                 "Larger = more cautious, longer following distance.")]
+        [Min(0.1f)] public float timeHeadway = 1.2f;
+
+        [Tooltip("Bumper standstill gap to the car ahead (metres) — how close a stopped car " +
+                 "sits behind its leader.")]
+        [Min(0f)] public float minFollowGap = 5f;
+
+        [Tooltip("Per-car cruise variation (±fraction) so cars don't all drive identically. " +
+                 "0.15 = ±15%.")]
+        [Range(0f, 0.5f)] public float speedVariation = 0.15f;
+
         [Header("Pacing")]
         [Tooltip("Seconds between population evaluations.")]
         [Min(0.05f)] public float updateInterval = 0.4f;
@@ -92,6 +116,13 @@ namespace SFMap.Pipeline
         [Min(1)] public int maxSpawnsPerTick = 3;
 
         readonly List<TrafficCar> _cars = new();
+
+        // Per-frame edge → cars index, used by FindLeader so a car looks at only the handful
+        // of cars sharing its edge instead of the whole population. Rebuilt at most once per
+        // frame (O(cars)); see FindLeader.
+        readonly Dictionary<int, List<TrafficCar>> _byEdge = new();
+        int _bucketFrame = -1;
+
         int _mask;
         float _timer;
         bool _warnedNoPrefabs;
@@ -198,13 +229,53 @@ namespace SFMap.Pipeline
 
             var car = go.GetComponent<TrafficCar>();
             if (car == null) car = go.AddComponent<TrafficCar>();
-            car.Init(net, edge, surface, Random.Range(minSpeed, maxSpeed), _mask, modelYawOffset,
+            car.Init(net, this, edge, surface, _mask, modelYawOffset,
                      rideHeight, multiLaneMinWidth, laneWidth,
                      laneChangePeriodMin, laneChangePeriodMax, laneChangeDuration,
-                     intersectionApproach, stopSetback);
+                     intersectionApproach, stopSetback,
+                     minSpeed, maxSpeed, acceleration, braking,
+                     timeHeadway, minFollowGap, speedVariation);
 
             _cars.Add(car);
             return true;
+        }
+
+        /// The nearest car ahead of <paramref name="self"/> on the same edge and lane, or null
+        /// if the road ahead is clear. Cars call this every frame for car-following.
+        ///
+        /// Cost: the edge→cars buckets are rebuilt at most once per frame (O(cars) total), and
+        /// each call scans only the cars sharing this one edge — typically a few. So the whole
+        /// system stays close to O(cars) per frame rather than the naive O(cars²) all-pairs scan,
+        /// even if targetCount is raised well past the default.
+        public TrafficCar FindLeader(TrafficCar self, int edge, int lane, float selfDistToEnd)
+        {
+            if (_bucketFrame != Time.frameCount) { RebuildBuckets(); _bucketFrame = Time.frameCount; }
+            if (!_byEdge.TryGetValue(edge, out var list)) return null;
+
+            TrafficCar best = null;
+            float bestGap = float.MaxValue;
+            for (int i = 0; i < list.Count; i++)
+            {
+                var c = list[i];
+                if (c == null || c == self || c.CurrentLane != lane) continue;
+                // A leader is further along the edge → smaller DistanceToEnd → positive gap.
+                float gap = selfDistToEnd - c.DistanceToEnd;
+                if (gap > 0f && gap < bestGap) { bestGap = gap; best = c; }
+            }
+            return best;
+        }
+
+        void RebuildBuckets()
+        {
+            foreach (var list in _byEdge.Values) list.Clear();
+            for (int i = 0; i < _cars.Count; i++)
+            {
+                var c = _cars[i];
+                if (c == null) continue;
+                int e = c.CurrentEdge;
+                if (!_byEdge.TryGetValue(e, out var list)) { list = new List<TrafficCar>(); _byEdge[e] = list; }
+                list.Add(c);
+            }
         }
 
         static float SqXZ(Vector3 a, Vector3 b)

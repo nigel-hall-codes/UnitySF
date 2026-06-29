@@ -28,11 +28,26 @@ namespace SFMap.Pipeline
         const float RayLen = 2000f;
         const float BrakeDistance = 10f; // start easing the throttle within this far of the stop line
 
+        // Road-width band that maps to the [minSpeed, maxSpeed] cruise range. A narrow
+        // residential street drives at minSpeed, an arterial at maxSpeed; widths between
+        // interpolate. Width 0 (data baked before widths were serialised) reads as mid-band.
+        const float NarrowWidth = 6f;  // single-lane-ish carriageway
+        const float WideWidth = 14f;   // multi-lane arterial
+
         RoadNetwork _net;
+        TrafficManager _manager;  // owner; queried for the car ahead (car-following)
         int _edge;          // current edge index
         int _seg;           // current segment within the edge (0 .. Points.Length-2)
         Vector2 _pos;       // current XZ position along the centerline
-        float _speed;       // metres/second
+        float _speed;       // metres/second — current speed, accel/decel-limited toward a target
+        float _minSpeed;    // cruise on the narrowest road, metres/second
+        float _maxSpeed;    // cruise on the widest road, metres/second
+        float _accel;       // how fast the car speeds up, metres/second²
+        float _decel;       // how fast the car slows down, metres/second² (usually > accel)
+        float _timeHeadway; // seconds of gap the car keeps to the leader (car-following)
+        float _minFollowGap; // bumper standstill gap to the leader, metres
+        float _speedFactor; // per-car cruise multiplier (mild variation so cars differ)
+        float _distToEnd;   // cached XZ distance from _pos to this edge's end node (this frame)
         int _mask;          // Road layer mask
         float _yawOffset;   // prefab forward-axis correction, degrees
         float _rideHeight;  // metres above the surface
@@ -57,17 +72,29 @@ namespace SFMap.Pipeline
         /// off the streamed map. The manager destroys and replaces it.
         public bool Done { get; private set; }
 
-        public void Init(RoadNetwork net, int edge, Vector3 startSurface, float speed,
+        /// Current edge index — the manager buckets cars by this for car-following lookups.
+        public int CurrentEdge => _edge;
+
+        /// Current lane index — a follower only yields to a leader sharing its lane.
+        public int CurrentLane => _laneIndex;
+
+        /// Cached XZ distance from this car to its edge's end node, refreshed each frame.
+        /// Smaller means further along the edge, so the car ahead has the smaller value.
+        public float DistanceToEnd => _distToEnd;
+
+        public void Init(RoadNetwork net, TrafficManager manager, int edge, Vector3 startSurface,
                          int roadMask, float yawOffset, float rideHeight,
                          float multiLaneMinWidth, float laneWidth,
                          float laneChangePeriodMin, float laneChangePeriodMax, float laneChangeDuration,
-                         float approachWindow, float stopSetback)
+                         float approachWindow, float stopSetback,
+                         float minSpeed, float maxSpeed, float accel, float decel,
+                         float timeHeadway, float minFollowGap, float speedVariation)
         {
             _net = net;
+            _manager = manager;
             _edge = edge;
             _seg = 0;
             _pos = net.GetEdge(edge).Points[0];
-            _speed = speed;
             _mask = roadMask;
             _yawOffset = yawOffset;
             _rideHeight = rideHeight;
@@ -85,6 +112,14 @@ namespace SFMap.Pipeline
             Done = false;
             _firstConform = true;
 
+            _minSpeed = minSpeed;
+            _maxSpeed = maxSpeed;
+            _accel = Mathf.Max(0.1f, accel);
+            _decel = Mathf.Max(0.1f, decel);
+            _timeHeadway = Mathf.Max(0.1f, timeHeadway); // guard div-by-zero in the gap controller
+            _minFollowGap = Mathf.Max(0f, minFollowGap);
+            _speedFactor = 1f + Random.Range(-speedVariation, speedVariation);
+
             // Pick a random starting lane based on how many fit in this road's half-width.
             var startEdge = net.GetEdge(edge);
             int numLanes = startEdge.Width >= multiLaneMinWidth
@@ -94,6 +129,9 @@ namespace SFMap.Pipeline
             _targetLaneIndex = _laneIndex;
             // Stagger first change check so cars don't all decide simultaneously.
             _laneChangeTimer = Random.Range(laneChangePeriodMin, laneChangePeriodMax);
+
+            // Start already rolling at the starting road's cruise so cars don't crawl up from 0.
+            _speed = CruiseSpeed(startEdge);
 
             _ready = true;
             transform.position = startSurface;
@@ -141,9 +179,51 @@ namespace SFMap.Pipeline
                 }
             }
 
-            Advance(IntersectionGovernedStep(_speed * Time.deltaTime));
+            // Speed pipeline, all composed as a single min():
+            //   1. accel/decel-limit _speed toward the free-road cruise capped by car-following,
+            //   2. let the intersection governor cap THIS frame's step at the stop line,
+            //   3. reflect any intersection braking back into _speed so the resume is smooth.
+            // The net per-frame speed is therefore min(cruise, car-following, intersection).
+            _distToEnd = DistanceToEdgeEnd();
+            UpdateSpeed();
+
+            float dt = Time.deltaTime;
+            float governed = IntersectionGovernedStep(_speed * dt);
+            if (dt > 1e-5f && governed < _speed * dt) _speed = governed / dt; // braked at the line
+            Advance(governed);
             if (Done) return; // reached a dead-end; manager will cull
             Conform();
+        }
+
+        // Free-road cruise on this edge: wider roads drive faster, scaled by this car's mild
+        // per-car variation. Width 0 (unserialised) reads as mid-band so old data still moves.
+        float CruiseSpeed(in RoadNetwork.Edge e)
+        {
+            float t = e.Width <= 0f
+                ? 0.5f
+                : Mathf.Clamp01((e.Width - NarrowWidth) / (WideWidth - NarrowWidth));
+            return Mathf.Lerp(_minSpeed, _maxSpeed, t) * _speedFactor;
+        }
+
+        // Eases _speed toward the target this frame under bounded accel/decel. The target is the
+        // free-road cruise, lowered to a car-following cap whenever there is a slower car ahead on
+        // the same edge and lane — a constant-time-headway controller that holds a safe gap and
+        // smoothly reaches 0 as the gap closes, so cars never drive through the leader.
+        void UpdateSpeed()
+        {
+            float target = CruiseSpeed(_net.GetEdge(_edge));
+
+            var leader = _manager != null ? _manager.FindLeader(this, _edge, _laneIndex, _distToEnd) : null;
+            if (leader != null)
+            {
+                float gap = _distToEnd - leader.DistanceToEnd;             // centerline gap to the car ahead
+                float follow = (gap - _minFollowGap) / _timeHeadway;       // _timeHeadway guarded > 0 in Init
+                if (follow < target) target = follow;
+            }
+            if (target < 0f) target = 0f;                                  // never reverse
+
+            float rate = target > _speed ? _accel : _decel;
+            _speed = Mathf.MoveTowards(_speed, target, rate * Time.deltaTime);
         }
 
         // Shifts into an adjacent lane on multi-lane roads. No-ops if the road is too
@@ -172,7 +252,7 @@ namespace SFMap.Pipeline
             int node = e.ToNode;
             if (_net.ControlAt(node) == RoadNetwork.IntersectionControl.None) return desired;
 
-            float remaining = DistanceToEdgeEnd(); // metres from _pos to the node centre
+            float remaining = _distToEnd; // metres from _pos to the node centre (cached this frame)
             if (remaining > _approachWindow) return desired; // not close enough to care yet
 
             // Already cleared to cross this node (we are its occupant) — drive straight through.
