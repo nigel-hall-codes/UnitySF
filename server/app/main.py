@@ -139,6 +139,9 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         except KeyError:
             raise HTTPException(status_code=400, detail=f"unknown sign provider '{name}'")
         png, thumb = provider.generate(req)
+        # signId is derived from text + businessType ONLY (data-model §5: "LUCCA"+"deli" →
+        # "sign_lucca_deli"). Style/neighborhood/aspect are intentionally excluded so a
+        # business's sign is one reusable canonical asset; re-generating updates it in place.
         sign_id = f"sign_{slug(req.text)}_{slug(req.businessType)}"
         S().save_sign_png(sign_id, png, thumb)
         sign = SignDef(
