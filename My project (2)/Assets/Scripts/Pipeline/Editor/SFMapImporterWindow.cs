@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 using SFMap.Pipeline;
+using SFMap.Pipeline.Buildings;
 
 namespace SFMap.Pipeline.Editor
 {
@@ -306,6 +307,13 @@ namespace SFMap.Pipeline.Editor
             var buildingParts     = new List<Mesh>();
             Mesh combinedBuildings = null;
 
+            // Building Assembler (design #266): if this chunk has a classification sidecar AND a
+            // template library exists, buildings that match a template fork off into individual
+            // nested prefabs; everything else stays on the merged path below. Null ⇒ today's
+            // behaviour (no sidecar / no templates), so an un-templated bake is unchanged.
+            var assembler = BuildingAssembler.TryCreate(Path.GetDirectoryName(binPath), coord);
+            var templated = new List<(long osmId, Mesh mesh, BuildingFactsJson facts, BuildingTemplate tpl)>();
+
             AssetDatabase.StartAssetEditing();
             try
             {
@@ -359,7 +367,18 @@ namespace SFMap.Pipeline.Editor
                             var colors = new Color32[vertCnt];
                             for (int v = 0; v < vertCnt; v++) colors[v] = c;
                             mesh.SetColors(colors);
-                            buildingParts.Add(mesh);
+                            if (assembler != null &&
+                                assembler.TryMatch(osmId, out var bFacts, out var bTpl))
+                            {
+                                // Templated: persist the mass mesh as its own asset (the nested
+                                // prefab references it) and assemble it after the hierarchy is built.
+                                CreateOrReplaceAsset(mesh, GeneratedAssets.BuildingMesh(coord, osmId));
+                                templated.Add((osmId, mesh, bFacts, bTpl));
+                            }
+                            else
+                            {
+                                buildingParts.Add(mesh);   // fallback: merged mesh, as today
+                            }
                             break;
                     }
                 }
@@ -423,12 +442,20 @@ namespace SFMap.Pipeline.Editor
                 go.layer = roadLayer;
             }
 
-            // Buildings: one combined mesh on a single GameObject per chunk.
+            // Buildings: the un-templated buildings stay one combined mesh per chunk; templated
+            // ones become individual nested prefabs alongside it under the same parent (the
+            // parked-car nesting precedent), so ChunkStreamer streams them unchanged.
             var bldgGo = CreateChild(chunkRoot, $"Buildings {coord}");
             if (combinedBuildings != null)
             {
                 bldgGo.AddComponent<MeshFilter>().sharedMesh = combinedBuildings;
                 bldgGo.AddComponent<MeshRenderer>().sharedMaterial = bldgMat;
+            }
+            if (assembler != null)
+            {
+                foreach (var t in templated)
+                    assembler.Assemble(bldgGo.transform, t.osmId, t.mesh, t.facts, t.tpl, bldgMat);
+                assembler.LogCoverage(coord, buildingParts.Count);   // fallback = merged buildings
             }
 
             return minElevM;

@@ -3,6 +3,7 @@
     "rootNamespace": "SFMap.Pipeline.Editor",
     "references": [
         "SFMap.Pipeline",
+        "SFMap.Pipeline.Buildings",
         "RandomationVP"
     ],
     "includePlatforms": [
