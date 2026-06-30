@@ -22,6 +22,7 @@ from .models import (
     BuildingSpecificDef,
     ExportRequest,
     ExportResult,
+    FacadeCanvas,
     PaletteDef,
     PartDef,
     SignDef,
@@ -120,6 +121,24 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
     def create_override(ov: BuildingSpecificDef) -> BuildingSpecificDef:
         S().upsert_override(ov)
         return ov
+
+    # -- facade canvases (#278/#281; layered doc stays server-side, flattened on export) -
+
+    @app.post("/canvas")
+    def save_canvas(canvas: FacadeCanvas) -> FacadeCanvas:
+        S().upsert_canvas(canvas)
+        return canvas
+
+    @app.get("/canvas/{osm_id}")
+    def list_building_canvases(osm_id: int) -> List[FacadeCanvas]:
+        return S().list_canvases_for(osm_id)
+
+    @app.get("/canvas/{osm_id}/{facade}")
+    def get_canvas(osm_id: int, facade: str) -> FacadeCanvas:
+        canvas = S().get_canvas(osm_id, facade)
+        if canvas is None:
+            raise HTTPException(status_code=404, detail=f"no canvas for {osm_id}/{facade}")
+        return canvas
 
     # -- AI signs (server-mediated; the iPad never calls a provider directly) -
 

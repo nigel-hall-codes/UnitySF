@@ -13,6 +13,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .canvas import flatten_paint
 from .models import ExportResult
 from .store import Store
 
@@ -78,10 +79,10 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         _write_json(templates_dir / f"{_safe(t.id)}.template.json", t.model_dump(by_alias=True))
     for pal in palettes:
         _write_json(palettes_dir / f"{_safe(pal.neighborhood)}.palette.json", pal.model_dump(by_alias=True))
-    # Overrides are written for the building-specific consumer (#273/#278 — hash-matched at
-    # import); the #269 template importer ignores this folder. osm_id is an int, so safe.
-    for ov in overrides:
-        _write_json(overrides_dir / f"{ov.osm_id}.override.json", ov.model_dump(by_alias=True))
+    # Building-specific overrides — collected into a map (keyed by osm_id) so the facade-canvas
+    # export below can merge facadeDecals[] into the SAME per-building override file. Written
+    # after canvases. osm_id is an int, so the filename is safe.
+    override_map: dict = {ov.osm_id: ov.model_dump(by_alias=True) for ov in overrides}
 
     # Signs: the PNG + thumbnail binaries and a <signId>.sign.json record (data-model §2).
     # Consumed by the building-specific / facade-decal path (#273/#278), not #269.
@@ -98,6 +99,69 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         _write_json(signs_dir / f"{sid}.sign.json", s.model_dump(by_alias=True))
         signs_written += 1
 
+    # Facade canvases (#281, hybrid export #278): flatten each facade's freehand strokes into one
+    # paint PNG, and emit facadeDecals[] (the paint layer + any discrete placed images / AI signs)
+    # into the building's override file. The full layered document stays server-side; only the
+    # flattened-where-cheap form crosses into Unity (#280 consumes facadeDecals).
+    canvas_decals = 0
+    paint_textures = 0
+    canvases_by_building: dict = {}
+    for c in store.list_canvases():
+        canvases_by_building.setdefault(c.osm_id, []).append(c)
+
+    for osm_id, canvases in canvases_by_building.items():
+        decals = []
+        fp_hash = ""
+        for c in canvases:
+            fp_hash = fp_hash or c.footprint_hash
+            paint_layers = [layer for layer in c.layers if layer.kind == "paint"]
+            strokes = [s for layer in paint_layers for s in layer.strokes]
+            png = flatten_paint(strokes)
+            if png is not None:
+                # _safe(...).lower() is filename-only; the decal's `facade` field keeps the
+                # original case (that is what the importer keys placement off, not the filename).
+                tex_rel = f"Signs/paint_{osm_id}_{_safe(c.facade).lower()}.png"
+                (root / tex_rel).write_bytes(png)
+                paint_textures += 1
+                decals.append({
+                    "facade": c.facade,
+                    "rect": [0.0, 0.0, 1.0, 1.0],
+                    "layer": min((layer.layer for layer in paint_layers), default=0),
+                    "texture": tex_rel,
+                    "mountDepth_m": paint_layers[0].mountDepth_m if paint_layers else 0.02,
+                })
+            # Placed images / AI signs stay discrete decals (reusing existing sign PNGs). An
+            # image layer identified only by signAsset resolves to that sign's PNG (#275).
+            for layer in c.layers:
+                if layer.kind != "image":
+                    continue
+                tex = layer.texture or (f"Signs/{_safe(layer.signAsset)}.png" if layer.signAsset else "")
+                if not tex:
+                    continue
+                d = {"facade": c.facade, "rect": layer.rect, "layer": layer.layer,
+                     "texture": tex, "mountDepth_m": layer.mountDepth_m}
+                if layer.signAsset:
+                    d["signAsset"] = layer.signAsset
+                decals.append(d)
+
+        if not decals:
+            continue
+        canvas_decals += len(decals)
+        ov = override_map.get(osm_id)
+        if ov is None:
+            ov = {"osm_id": osm_id, "footprint_hash": fp_hash,
+                  "placements": [], "suppress": [], "version": 2}
+            override_map[osm_id] = ov
+        # Keep the override's existing footprint_hash if it has one; else adopt the canvas's.
+        if not ov.get("footprint_hash"):
+            ov["footprint_hash"] = fp_hash
+        # Sort by (layer, mountDepth_m) to match the importer contract (design.md §decal importer).
+        ov["facadeDecals"] = sorted(decals, key=lambda d: (d["layer"], d["mountDepth_m"]))
+        ov["version"] = 2   # bump: facadeDecals added
+
+    for osm_id, ov in override_map.items():
+        _write_json(overrides_dir / f"{osm_id}.override.json", ov)
+
     manifest = {
         "version": 1,
         "exportedAt": now_iso or datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -111,9 +175,11 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         parts=len(parts),
         templates=len(templates),
         palettes=len(palettes),
-        overrides=len(overrides),
+        overrides=len(override_map),
         glbsCopied=glbs_copied,
         signs=signs_written,
+        facadeDecals=canvas_decals,
+        paintTextures=paint_textures,
     )
 
 
