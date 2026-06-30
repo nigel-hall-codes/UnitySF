@@ -41,6 +41,17 @@ namespace SFMap.Pipeline.Buildings.Editor
 
             int parts = 0, palettes = 0, templates = 0, warnings = 0;
 
+            // Manifest is informational — report what the export claims so a version/neighborhood
+            // mismatch is visible in the log.
+            string manifestPath = Path.Combine(absRoot, "library.json");
+            if (File.Exists(manifestPath))
+            {
+                var manifest = TryParse<LibraryManifestJson>(manifestPath, ref warnings);
+                if (manifest != null)
+                    Debug.Log($"[SFBuildingTemplates] library.json v{manifest.version}, " +
+                              $"{(manifest.neighborhoods != null ? manifest.neighborhoods.Length : 0)} neighborhood(s).");
+            }
+
             // Pass 1 — parts (templates resolve roof-part references against these).
             var partsById = new Dictionary<string, BuildingPart>(StringComparer.Ordinal);
             foreach (string file in EnumerateJson(absRoot, "*.part.json"))
@@ -84,6 +95,8 @@ namespace SFMap.Pipeline.Buildings.Editor
             so.id = def.id;
             so.category = ParseEnum(def.category, PartCategory.Window, ref warnings, $"part '{def.id}' category");
             so.sizeMeters = new Vector3(def.size_m.w, def.size_m.h, def.size_m.d);
+            so.anchor = def.anchor;
+            so.mountDepthMeters = def.mountDepth_m;
             so.isSign = so.category == PartCategory.Sign;
 
             so.submeshRoles = BuildSubmeshRoles(def, ref warnings);
@@ -95,9 +108,12 @@ namespace SFMap.Pipeline.Buildings.Editor
                 so.prefab = AssetDatabase.LoadAssetAtPath<GameObject>(glbPath);
                 if (so.prefab == null)
                 {
-                    warnings++;
-                    Debug.LogWarning($"[SFBuildingTemplates] Part '{def.id}': GLB '{glbPath}' did not " +
-                                     "load as a GameObject (is glTFast installed? see README). Prefab left null.");
+                    // A null prefab is an expected authoring state, not an error: the GLB may not
+                    // be authored yet, or glTFast (which makes a GLB load as a GameObject) may not
+                    // be installed. Inform, but don't count it as a warning — so a library whose
+                    // geometry isn't in yet still imports cleanly (see README).
+                    Debug.Log($"[SFBuildingTemplates] Part '{def.id}': GLB '{glbPath}' not loaded as a " +
+                              "GameObject yet (author the GLB / install glTFast — see README). Prefab left null.");
                 }
             }
 
@@ -110,7 +126,10 @@ namespace SFMap.Pipeline.Buildings.Editor
             if (def.roleSubmeshes == null || def.roleSubmeshes.Length == 0)
                 return Array.Empty<MaterialRole>();
 
-            // Place each role at its declared submesh index; gaps default to Base.
+            // Place each role at its declared submesh index; gaps default to Base. The array is
+            // sized to the highest declared index (+1), not the prefab's submesh count — the
+            // assembler treats a missing trailing entry as Base. Authoring should declare a role
+            // per real submesh.
             int max = -1;
             foreach (var rs in def.roleSubmeshes) if (rs.submesh > max) max = rs.submesh;
             var roles = new MaterialRole[max + 1];
