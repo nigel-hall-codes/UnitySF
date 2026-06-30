@@ -384,10 +384,12 @@ def rank_street_facades(
     the edge runs to that road). The best-scoring road per edge is kept; entries are
     then deduped to the strongest edge **per street** (so one wall split into several
     collinear OSM segments yields a single facade, while a corner building facing two
-    streets yields two) and sorted by descending score. ``edge_index`` refers to the
-    footprint ring with its closing vertex dropped, in OSM vertex order — the same
-    order the mass mesh is built from. ``roads`` is ``(osm_way_id, centerline)`` per
-    candidate road, already projected to world XZ.
+    streets yields two) and sorted by descending score. ``edge_index`` and the emitted
+    ``edge`` endpoints both refer to the footprint ring with its closing vertex dropped,
+    in OSM vertex order (the mass mesh rewinds CW rings to CCW, so this may differ from
+    the mass's traversal for a CW footprint — immaterial, since the decal importer
+    anchors off the endpoints directly, not via ``edge_index`` into the gone mass).
+    ``roads`` is ``(osm_way_id, centerline)`` per candidate road, projected to world XZ.
     """
     pts = _drop_closing(ring)
     n = len(pts)
