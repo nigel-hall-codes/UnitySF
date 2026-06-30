@@ -65,6 +65,11 @@ namespace SFMap.Pipeline.Editor
         readonly List<BuildingTemplate> _templates;
         readonly Dictionary<string, BuildingPart> _partsById;
 
+        // Exact placement positions of the building currently being assembled, keyed by
+        // (facade edge_index, floor) → normalized x's, so procedural rules with avoidExact can
+        // skip slots that land on an Exact part. Reset per building in Assemble.
+        readonly Dictionary<long, List<float>> _exactMarks = new Dictionary<long, List<float>>();
+
         int _templated;
 
         public int Templated => _templated;
@@ -149,6 +154,8 @@ namespace SFMap.Pipeline.Editor
             massGo.AddComponent<MeshFilter>().sharedMesh = massMesh;
             massGo.AddComponent<MeshRenderer>().sharedMaterial = massMaterial;
 
+            // Exact first (it also records marks the procedural avoidExact constraint reads).
+            _exactMarks.Clear();
             if (template.exact != null)
                 foreach (var p in template.exact)
                     PlaceExact(root.transform, p, facts);
@@ -174,7 +181,22 @@ namespace SFMap.Pipeline.Editor
         void PlaceExact(Transform parent, ExactPlacement p, BuildingFactsJson facts)
         {
             foreach (var f in FacadesFor(p.facade, facts))
+            {
+                long key = ExactKey(f.edge_index, p.floor);
+                if (!_exactMarks.TryGetValue(key, out var marks)) { marks = new List<float>(); _exactMarks[key] = marks; }
+                marks.Add(Mathf.Clamp01(p.x));
                 PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation);
+            }
+        }
+
+        static long ExactKey(int edgeIndex, int floor) => ((long)edgeIndex << 16) | (uint)(floor & 0xFFFF);
+
+        bool NearExactMark(int edgeIndex, int floor, float nx, float radius)
+        {
+            if (_exactMarks.TryGetValue(ExactKey(edgeIndex, floor), out var marks))
+                foreach (var ex in marks)
+                    if (Mathf.Abs(ex - nx) < radius) return true;
+            return false;
         }
 
         // The facade(s) a placement targets: Front → primary street facade; Street → every
@@ -293,24 +315,36 @@ namespace SFMap.Pipeline.Editor
                 float spanMeters = (x1 - x0) * facadeLen;
                 float spacing = Mathf.Max(rule.repeat.spacingMeters, rule.constraints.minSpacingMeters, 0.1f);
                 int count = Mathf.FloorToInt(spanMeters / spacing);
+                // countMin guarantees a minimum even on a sub-spacing facade (an intended floor on
+                // the low end); countMax caps it. Above the floor, count grows with facade width.
                 count = Mathf.Max(count, Mathf.Max(rule.repeat.countMin, 0));
                 if (rule.repeat.countMax > 0) count = Mathf.Min(count, rule.repeat.countMax);
                 if (count <= 0) continue;
+
+                // Exclusion radius (normalized) for avoidExact: keep a procedural part this far
+                // from any Exact placement on the same facade edge + floor.
+                float exclusion = Mathf.Max(rule.constraints.minSpacingMeters, spacing * 0.5f) / facadeLen;
 
                 for (int floor = floorMin; floor <= floorMax; floor++)
                 {
                     for (int i = 0; i < count; i++)
                     {
-                        var rng = new Rng(SeedFor(facts.osm_id, ruleIndex, floor * 4096 + i));
+                        // Wide stride so (floor, slot) never collide in the seed for any real count.
+                        var rng = new Rng(SeedFor(facts.osm_id, ruleIndex, floor * 65536 + i));
 
-                        if (rule.probability < 1f && rng.NextFloat() >= Mathf.Clamp01(rule.probability))
-                            continue;
+                        // probability ≤ 0 is the serialized default ("unset") → place; express "off"
+                        // by omitting the rule. Otherwise a seeded Bernoulli trial.
+                        float prob = rule.probability <= 0f ? 1f : Mathf.Clamp01(rule.probability);
+                        if (prob < 1f && rng.NextFloat() >= prob) continue;
 
                         float t = count == 1 ? 0.5f : (i + 0.5f) / count;
                         float nx = x0 + t * (x1 - x0);
                         if (rule.jitter.x != 0f)
                             nx += rng.Range(-rule.jitter.x, rule.jitter.x) / facadeLen;  // metres → normalized
                         nx = Mathf.Clamp(nx, x0, x1);
+
+                        if (rule.constraints.avoidExact && NearExactMark(f.edge_index, floor, nx, exclusion))
+                            continue;
 
                         // align-to-floor-line → sit on the floor line; else mid-floor.
                         float ny = rule.constraints.alignToFloorLine ? 0f : 0.5f;
