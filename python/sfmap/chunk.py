@@ -12,6 +12,7 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
+from . import classify
 from .elevation import HeightmapData
 from .geometry.building import build_building_meshes
 from .geometry.intersection import build_sidewalk_corner_meshes, triangulate_fan
@@ -161,6 +162,8 @@ def bake_chunk(
     parking_segments: Optional[list] = None,
     parking_fallback: bool = False,
     no_parking_roads: Optional[frozenset] = None,
+    classify_buildings: bool = False,
+    neighborhoods: Optional["object"] = None,
 ) -> ChunkData:
     """Produce the ChunkData for one chunk (col, row).
 
@@ -173,6 +176,9 @@ def bake_chunk(
     covers, so areas the CSV omits aren't left empty. no_parking_roads (normalised
     street names) plus each edge's OSM-derived allows_parking flag keep cars off
     roads we know don't allow parking.
+    classify_buildings emits a ClassificationRecord per building (facts only — the
+    chunk_CC_RR_buildings.json sidecar, design #266); neighborhoods, when supplied,
+    resolves each building's centroid to a neighborhood name via point-in-polygon.
     """
     x_min, z_min, size, _ = chunk_world_rect(col, row, chunk_size, base_x, base_z)
 
@@ -252,6 +258,25 @@ def bake_chunk(
         if verts and indices:
             meshes.append(MeshEntry(MeshType.BUILDING, osm_id, verts, [], uvs, indices))
 
+    # Building classification facts (design #266) — emitted only with --templates.
+    # Score street facades against the margin-expanded stamp_graph's roads (not the
+    # chunk-cropped graph) so a building near a seam still finds the street across it,
+    # mirroring how parked cars locate their frontage. Each building is classified by
+    # exactly one chunk (the chunk-cropped graph keeps it by centroid), so the record
+    # is produced once and a re-bake is byte-stable. footprint_hash is also stamped
+    # back onto the BuildingWay (data-model.md §6.1).
+    building_records = []
+    if classify_buildings:
+        roads = [(e.osm_way_id, e.centerline) for e in stamp_graph.edges]
+        for b in graph.buildings:
+            cx, cz = classify.building_centroid(b.footprint)
+            nbhd = neighborhoods.lookup(cx, cz) if neighborhoods is not None else ""
+            record = classify.classify_building(
+                b.osm_id, b.footprint, b.height, b.building_type, roads, neighborhood=nbhd
+            )
+            b.footprint_hash = record.footprint_hash
+            building_records.append(record)
+
     # Collect named road segments from the cropped graph for the street HUD and the
     # runtime traffic system. Multiple StreetEdge objects can share the same way_id
     # (split at intersections); emit one entry per edge so the spatial query covers
@@ -305,4 +330,5 @@ def bake_chunk(
         meshes=meshes,
         road_names=road_names,
         parked_cars=parked_cars,
+        buildings=building_records,
     )
