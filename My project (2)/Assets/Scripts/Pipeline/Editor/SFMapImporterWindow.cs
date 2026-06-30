@@ -361,23 +361,26 @@ namespace SFMap.Pipeline.Editor
                             intersectionMeshes.Add(mesh);
                             break;
                         case MeshType.Building:
-                            // Bake the building's palette colour into vertex colors so the
-                            // combined mesh keeps per-building colour with one material.
-                            Color32 c = BuildingPalette[(int)(Math.Abs(osmId) % BuildingPalette.Length)];
-                            var colors = new Color32[vertCnt];
-                            for (int v = 0; v < vertCnt; v++) colors[v] = c;
-                            mesh.SetColors(colors);
                             if (assembler != null &&
                                 assembler.TryMatch(osmId, out var bFacts, out var bTpl))
                             {
-                                // Templated: persist the mass mesh as its own asset (the nested
-                                // prefab references it) and assemble it after the hierarchy is built.
-                                CreateOrReplaceAsset(mesh, GeneratedAssets.BuildingMesh(coord, osmId));
+                                // Templated: the assembler resolves role colours, bakes them, and
+                                // saves the combined per-building mesh asset — so no fallback bake
+                                // here. Just set the mass mesh aside.
                                 templated.Add((osmId, mesh, bFacts, bTpl));
                             }
                             else
                             {
-                                buildingParts.Add(mesh);   // fallback: merged mesh, as today
+                                // Fallback (merged path, as today): bake the building's vertex
+                                // colour. Prefer the neighborhood palette (when the sidecar gives
+                                // this building a neighborhood) so templated and fallback buildings
+                                // stay coherent (#272); otherwise the legacy 7-colour pastel palette.
+                                Color32 c = (assembler != null && assembler.TryFallbackColor(osmId, out var pc))
+                                    ? pc : (Color32)BuildingPalette[(int)(Math.Abs(osmId) % BuildingPalette.Length)];
+                                var colors = new Color32[vertCnt];
+                                for (int v = 0; v < vertCnt; v++) colors[v] = c;
+                                mesh.SetColors(colors);
+                                buildingParts.Add(mesh);
                             }
                             break;
                     }
@@ -454,7 +457,7 @@ namespace SFMap.Pipeline.Editor
             if (assembler != null)
             {
                 foreach (var t in templated)
-                    assembler.Assemble(bldgGo.transform, t.osmId, t.mesh, t.facts, t.tpl, bldgMat);
+                    assembler.Assemble(bldgGo.transform, coord, t.osmId, t.mesh, t.facts, t.tpl, bldgMat);
                 assembler.LogCoverage(coord, buildingParts.Count);   // fallback = merged buildings
             }
 

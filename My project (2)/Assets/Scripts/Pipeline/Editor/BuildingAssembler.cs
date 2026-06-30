@@ -64,11 +64,17 @@ namespace SFMap.Pipeline.Editor
         readonly Dictionary<long, BuildingFactsJson> _facts;
         readonly List<BuildingTemplate> _templates;
         readonly Dictionary<string, BuildingPart> _partsById;
+        readonly Dictionary<string, NeighborhoodPalette> _palettes;
 
         // Exact placement positions of the building currently being assembled, keyed by
         // (facade edge_index, floor) → normalized x's, so procedural rules with avoidExact can
         // skip slots that land on an Exact part. Reset per building in Assemble.
         readonly Dictionary<long, List<float>> _exactMarks = new Dictionary<long, List<float>>();
+
+        // Parts placed for the current building, collected so BakeAndCombine can colour and fold
+        // the non-sign ones into one mesh. Reset per building.
+        struct Placed { public GameObject go; public BuildingPart part; }
+        readonly List<Placed> _placed = new List<Placed>();
 
         int _templated;
 
@@ -76,11 +82,13 @@ namespace SFMap.Pipeline.Editor
 
         BuildingAssembler(Dictionary<long, BuildingFactsJson> facts,
                           List<BuildingTemplate> templates,
-                          Dictionary<string, BuildingPart> partsById)
+                          Dictionary<string, BuildingPart> partsById,
+                          Dictionary<string, NeighborhoodPalette> palettes)
         {
             _facts = facts;
             _templates = templates;
             _partsById = partsById;
+            _palettes = palettes;
         }
 
         /// <summary>Load the chunk's sidecar + the template library. Returns null (so the
@@ -110,7 +118,11 @@ namespace SFMap.Pipeline.Editor
             foreach (var p in LoadAll<BuildingPart>())
                 if (!string.IsNullOrEmpty(p.id)) partsById[p.id] = p;
 
-            return new BuildingAssembler(facts, templates, partsById);
+            var palettes = new Dictionary<string, NeighborhoodPalette>(StringComparer.Ordinal);
+            foreach (var pal in LoadAll<NeighborhoodPalette>())
+                if (!string.IsNullOrEmpty(pal.neighborhood)) palettes[pal.neighborhood] = pal;
+
+            return new BuildingAssembler(facts, templates, partsById, palettes);
         }
 
         /// <summary>Does this building have classification facts AND a compatible template?
@@ -142,20 +154,16 @@ namespace SFMap.Pipeline.Editor
         /// <summary>Build the templated building as a nested child of <paramref name="buildingsParent"/>:
         /// the Python mass mesh + the template's Exact part placements resolved onto this building's
         /// real Front/Street facade. Saved into the chunk prefab by the importer.</summary>
-        public void Assemble(Transform buildingsParent, long osmId, Mesh massMesh,
+        public void Assemble(Transform buildingsParent, ChunkCoord coord, long osmId, Mesh massMesh,
                              BuildingFactsJson facts, BuildingTemplate template, Material massMaterial)
         {
             var root = new GameObject($"building_{osmId}");
             root.transform.SetParent(buildingsParent, false);
 
-            // The Python mass, as-is (already palette-vertex-coloured by the importer).
-            var massGo = new GameObject("Mass");
-            massGo.transform.SetParent(root.transform, false);
-            massGo.AddComponent<MeshFilter>().sharedMesh = massMesh;
-            massGo.AddComponent<MeshRenderer>().sharedMaterial = massMaterial;
+            _placed.Clear();
+            _exactMarks.Clear();
 
             // Exact first (it also records marks the procedural avoidExact constraint reads).
-            _exactMarks.Clear();
             if (template.exact != null)
                 foreach (var p in template.exact)
                     PlaceExact(root.transform, p, facts);
@@ -167,7 +175,130 @@ namespace SFMap.Pipeline.Editor
                 for (int r = 0; r < template.rules.Length; r++)
                     PlaceProcedural(root.transform, template.rules[r], facts, r);
 
+            // Resolve material roles → colours via the neighborhood palette and bake them into
+            // vertex colours, then mesh-combine the mass + non-sign parts into one batchable mesh
+            // (design D1: vertex colours, NOT a per-renderer MaterialPropertyBlock). Sign parts
+            // keep their own texture material and stay separate — the batching break.
+            BakeAndCombine(root, coord, osmId, massMesh, facts, massMaterial);
+
             _templated++;
+        }
+
+        // ---- role → colour + vertex-colour bake + mesh-combine (#272, design D1) ----
+
+        void BakeAndCombine(GameObject root, ChunkCoord coord, long osmId, Mesh massMesh,
+                            BuildingFactsJson facts, Material massMaterial)
+        {
+            var palette = ResolvePalette(facts.neighborhood);
+
+            var combines = new List<CombineInstance>();
+            // Mass → Base role colour (overrides the importer's fallback colour for coherence).
+            combines.Add(new CombineInstance
+            {
+                mesh = CloneSolidColor(massMesh, ResolveRoleColor(osmId, palette, MaterialRole.Base)),
+                transform = Matrix4x4.identity,   // mass verts are world-space; root sits at origin
+            });
+
+            // Non-sign parts → per-submesh role colours, folded into the combine. Signs stay.
+            foreach (var pl in _placed)
+            {
+                if (pl.part != null && pl.part.isSign) continue;   // sign → keep separate (texture)
+                bool folded = false;
+                foreach (var mf in pl.go.GetComponentsInChildren<MeshFilter>())
+                {
+                    if (mf.sharedMesh == null) continue;
+                    combines.Add(new CombineInstance
+                    {
+                        mesh = CloneRoleColored(mf.sharedMesh, pl.part, osmId, palette),
+                        transform = mf.transform.localToWorldMatrix,
+                    });
+                    folded = true;
+                }
+                if (folded) UnityEngine.Object.DestroyImmediate(pl.go);
+            }
+
+            var combined = new Mesh { name = $"building_{osmId}" };
+            combined.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+            combined.CombineMeshes(combines.ToArray(), true, true);   // computes bounds itself
+            foreach (var ci in combines) UnityEngine.Object.DestroyImmediate(ci.mesh);  // temp sources
+            // The importer's mass mesh is now folded into `combined` and referenced by nothing
+            // else (it's no longer saved as a standalone asset) — free it.
+            UnityEngine.Object.DestroyImmediate(massMesh);
+
+            SaveMeshAsset(combined, GeneratedAssets.BuildingMesh(coord, osmId));
+            root.AddComponent<MeshFilter>().sharedMesh = combined;
+            root.AddComponent<MeshRenderer>().sharedMaterial = massMaterial;
+        }
+
+        NeighborhoodPalette ResolvePalette(string neighborhood)
+            => (!string.IsNullOrEmpty(neighborhood) && _palettes.TryGetValue(neighborhood, out var p)) ? p : null;
+
+        // The building's resolved colour for a role: the neighborhood palette seeded by
+        // hash(osm_id, role) — deterministic — or a neutral per-role default when no palette.
+        static Color32 ResolveRoleColor(long osmId, NeighborhoodPalette palette, MaterialRole role)
+            => palette != null ? (Color32)palette.Resolve(role, SeedFor(osmId, (int)role, 0)) : DefaultRoleColor(role);
+
+        static Color32 DefaultRoleColor(MaterialRole role)
+        {
+            switch (role)
+            {
+                case MaterialRole.Glass: return new Color32(58, 74, 85, 255);
+                case MaterialRole.Metal: return new Color32(107, 107, 107, 255);
+                case MaterialRole.Accent1: return new Color32(182, 160, 106, 255);
+                case MaterialRole.Accent2: return new Color32(150, 130, 90, 255);
+                default: return new Color32(216, 201, 168, 255);   // Base / Sign fallback
+            }
+        }
+
+        /// <summary>The neighborhood-palette Base colour for a building, for the importer's
+        /// fallback (un-templated) path — so both paths read the same palette SO and stay
+        /// visually coherent. False when the building has no facts or no neighborhood palette.</summary>
+        public bool TryFallbackColor(long osmId, out Color32 color)
+        {
+            color = default;
+            if (!_facts.TryGetValue(osmId, out var facts)) return false;
+            var palette = ResolvePalette(facts.neighborhood);
+            if (palette == null) return false;
+            color = ResolveRoleColor(osmId, palette, MaterialRole.Base);
+            return true;
+        }
+
+        static Mesh CloneSolidColor(Mesh src, Color32 color)
+        {
+            var m = UnityEngine.Object.Instantiate(src);
+            var colors = new Color32[m.vertexCount];
+            for (int i = 0; i < colors.Length; i++) colors[i] = color;
+            m.SetColors(colors);
+            return m;
+        }
+
+        static Mesh CloneRoleColored(Mesh src, BuildingPart part, long osmId, NeighborhoodPalette palette)
+        {
+            var m = UnityEngine.Object.Instantiate(src);
+            var colors = new Color32[m.vertexCount];
+            Color32 baseCol = ResolveRoleColor(osmId, palette, MaterialRole.Base);
+            for (int i = 0; i < colors.Length; i++) colors[i] = baseCol;
+            // Override per submesh by its authored role (submeshRoles index-aligned to submeshes).
+            if (part != null && part.submeshRoles != null)
+            {
+                int subs = Mathf.Min(m.subMeshCount, part.submeshRoles.Length);
+                for (int s = 0; s < subs; s++)
+                {
+                    Color32 c = ResolveRoleColor(osmId, palette, part.submeshRoles[s]);
+                    foreach (int vi in m.GetIndices(s))
+                        if (vi >= 0 && vi < colors.Length) colors[vi] = c;
+                }
+            }
+            m.SetColors(colors);
+            return m;
+        }
+
+        static void SaveMeshAsset(Mesh mesh, string path)
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+            if (AssetDatabase.LoadAssetAtPath<Mesh>(path) != null) AssetDatabase.DeleteAsset(path);
+            AssetDatabase.CreateAsset(mesh, path);
         }
 
         public void LogCoverage(ChunkCoord coord, int fallback)
@@ -269,6 +400,8 @@ namespace SFMap.Pipeline.Editor
                 baseScale = new Vector3(Mathf.Max(part.sizeMeters.x, 0.1f),
                                         Mathf.Max(part.sizeMeters.y, 0.1f), 1f);
             child.transform.localScale = baseScale * s;
+
+            _placed.Add(new Placed { go = child, part = part });
         }
 
         // ---- procedural rule engine (#271) -------------------------------------
