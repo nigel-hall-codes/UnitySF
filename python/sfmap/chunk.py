@@ -14,7 +14,7 @@ import numpy as np
 
 from . import classify
 from .elevation import HeightmapData
-from .geometry.building import build_building_meshes
+from .geometry.building import build_building_meshes, building_base_y
 from .geometry.intersection import build_sidewalk_corner_meshes, triangulate_fan
 from .geometry.parking import place_parked_cars
 from .geometry.road import build_road_meshes
@@ -271,8 +271,13 @@ def bake_chunk(
         for b in graph.buildings:
             cx, cz = classify.building_centroid(b.footprint)
             nbhd = neighborhoods.lookup(cx, cz) if neighborhoods is not None else ""
+            # Foundation Y from the same hmap the mass is built on, so a facade decal
+            # anchored at base_y lands on the wall's flat bottom (#279); None for a
+            # degenerate footprint → 0.0 (no mesh is emitted for it either).
+            base_y = building_base_y(b.footprint, hmap)
             record = classify.classify_building(
-                b.osm_id, b.footprint, b.height, b.building_type, roads, neighborhood=nbhd
+                b.osm_id, b.footprint, b.height, b.building_type, roads,
+                neighborhood=nbhd, base_y=(base_y if base_y is not None else 0.0),
             )
             b.footprint_hash = record.footprint_hash
             building_records.append(record)

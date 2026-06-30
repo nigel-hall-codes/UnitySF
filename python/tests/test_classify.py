@@ -5,6 +5,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import numpy as np
+
 from sfmap import classify
 from sfmap.classify import (
     ClassificationRecord,
@@ -15,6 +17,8 @@ from sfmap.classify import (
     rank_street_facades,
     _oriented_bbox,
 )
+from sfmap.elevation import HeightmapData
+from sfmap.geometry.building import building_base_y
 from sfmap.serialize import ChunkData, write_buildings
 
 
@@ -106,6 +110,15 @@ def test_facade_dedupes_to_strongest_edge_per_street():
     assert facades[0].street_osm_id == 42
 
 
+def test_facade_carries_world_edge_endpoints():
+    # The reported facade must carry the two world-XZ endpoints of its footprint
+    # edge (#279) so the decal importer can anchor a quad. Edge 0 = v0->v1.
+    rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    road = (42, [(-5.0, -8.0), (15.0, -8.0)])
+    f = rank_street_facades(rect, [road])[0]
+    assert (f.x0, f.z0, f.x1, f.z1) == (0.0, 0.0, 10.0, 0.0)
+
+
 def test_corner_building_faces_two_streets_ranked():
     # Two perpendicular roads → a corner building reports two facades (D2).
     sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
@@ -140,6 +153,30 @@ def test_classify_building_floor_count_and_passthrough():
     assert len(rec.footprint_hash) == 8
 
 
+def test_classify_building_sets_base_y_and_facade_height():
+    # base_y is passed through from the caller (the mass foundation Y); facade height
+    # is floor_count × 3.0 m — the canvas's facade UV height (#279).
+    rec = classify_building(
+        osm_id=9, footprint=_SQUARE, height=12.0, building_type=None,
+        roads=[], neighborhood="", base_y=42.317,
+    )
+    assert rec.base_y == 42.317
+    assert rec.floor_count == 4
+    assert rec.facade_height_m == 12.0          # 4 × 3.0
+
+
+def test_building_base_y_mirrors_mass_foundation():
+    # A flat heightmap sampling 50 m everywhere → base_y = 50 - 1.0 foundation embed.
+    hmap = HeightmapData(
+        values=np.full((2, 2), 0.5, dtype=np.float32), resolution=2,
+        min_elevation_m=0.0, max_elevation_m=100.0,
+        world_x_min=0.0, world_z_min=0.0, world_width=10.0, world_height=10.0,
+    )
+    assert round(building_base_y(_SQUARE, hmap), 3) == 49.0
+    # Degenerate (<3 vertices) → None.
+    assert building_base_y([(0.0, 0.0), (1.0, 1.0)], hmap) is None
+
+
 def test_classify_building_defaults_missing_height():
     rec = classify_building(
         osm_id=8, footprint=_SQUARE, height=0.0, building_type=None,
@@ -169,27 +206,32 @@ def test_write_buildings_schema_and_sorted(tmp_path):
         ClassificationRecord(
             osm_id=20, neighborhood="Sunset", building_type="house",
             footprint_shape="rect", width_m=8.1, depth_m=12.4, height_m=9.0,
-            floor_count=3, street_facades=[StreetFacade(1, 90.0, 555, 0.8)],
-            footprint_hash="abcd1234",
+            floor_count=3,
+            street_facades=[StreetFacade(1, 90.0, 555, 0.8, x0=10.0, z0=20.0, x1=15.0, z1=20.0)],
+            footprint_hash="abcd1234", base_y=42.5, facade_height_m=9.0,
         ),
         ClassificationRecord(
             osm_id=10, neighborhood="", building_type="",
             footprint_shape="irregular", width_m=5.0, depth_m=5.0, height_m=10.0,
             floor_count=3, street_facades=[], footprint_hash="0011aabb",
+            base_y=0.0, facade_height_m=9.0,
         ),
     ]
     out = write_buildings(_chunk_with(recs), str(tmp_path))
     assert out is not None
     assert out.name == "chunk_03_04_buildings.json"
     data = json.loads(out.read_text(encoding="utf-8"))
-    assert data["version"] == 1
+    assert data["version"] == 2
     ids = [b["osm_id"] for b in data["buildings"]]
     assert ids == [10, 20]                 # ascending osm_id (deterministic)
     b20 = data["buildings"][1]
     assert b20["neighborhood"] == "Sunset"
     assert b20["footprint_hash"] == "abcd1234"
+    assert b20["base_y"] == 42.5
+    assert b20["facade_height_m"] == 9.0
     f = b20["street_facades"][0]
-    assert f == {"edge_index": 1, "bearing_deg": 90.0, "street_osm_id": 555, "score": 0.8}
+    assert f == {"edge_index": 1, "bearing_deg": 90.0, "street_osm_id": 555,
+                 "score": 0.8, "edge": [10.0, 20.0, 15.0, 20.0]}
 
 
 def test_write_buildings_none_when_empty(tmp_path):

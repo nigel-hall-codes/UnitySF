@@ -61,11 +61,21 @@ _MIN_FACADE_SCORE = 0.15
 
 @dataclass
 class StreetFacade:
-    """One street-facing footprint edge, scored for ranking (data-model.md §1)."""
+    """One street-facing footprint edge, scored for ranking (data-model.md §1).
+
+    Carries the edge's world-space endpoints so the facade-decal importer (#279) can
+    anchor a quad on this wall without the per-building mass (destroyed at mesh-combine).
+    The wall's vertical extent is building-wide — ``ClassificationRecord.base_y`` (the
+    flat foundation Y) and ``facade_height_m`` — so it is not duplicated per facade.
+    """
     edge_index: int          # index into the footprint ring (closing vertex dropped)
     bearing_deg: float       # outward normal of the edge, degrees CW from world +Z
     street_osm_id: int       # osm way id of the faced road, -1 if none
     score: float             # proximity × parallelism, higher = stronger frontage
+    x0: float = 0.0          # edge start vertex (world metres), = footprint[edge_index]
+    z0: float = 0.0
+    x1: float = 0.0          # edge end vertex (world metres), = footprint[edge_index+1]
+    z1: float = 0.0
 
 
 @dataclass
@@ -81,6 +91,8 @@ class ClassificationRecord:
     floor_count: int
     street_facades: List[StreetFacade] = field(default_factory=list)
     footprint_hash: str = ""
+    base_y: float = 0.0              # foundation Y (mass wall flat bottom); facade decal anchor (#279)
+    facade_height_m: float = 0.0     # floor_count × floor height — the canvas's facade UV height (#279)
 
 
 # ---------------------------------------------------------------------------
@@ -408,6 +420,8 @@ def rank_street_facades(
                     bearing_deg=round(_outward_bearing((ax, az), (bx, bz), ccw), 1),
                     street_osm_id=way_id,
                     score=score,
+                    x0=round(ax, 3), z0=round(az, 3),
+                    x1=round(bx, 3), z1=round(bz, 3),
                 )
         best_per_edge.append(best)
 
@@ -439,6 +453,7 @@ def classify_building(
     building_type: Optional[str],
     roads: Sequence[Tuple[int, Sequence[Point]]],
     neighborhood: str = "",
+    base_y: float = 0.0,
 ) -> ClassificationRecord:
     """Assemble the full ClassificationRecord for one building (facts only).
 
@@ -446,10 +461,13 @@ def classify_building(
     absent → the default storey-stack height, matching the built mass); ``roads`` is
     the candidate ``(osm_way_id, centerline)`` set for street-facade scoring;
     ``neighborhood`` is resolved by the caller from the centroid (``""`` if outside
-    every polygon). Pure function of these inputs.
+    every polygon); ``base_y`` is the mass foundation Y from the heightmap (the caller
+    supplies it via ``geometry.building.building_base_y`` — the facade-decal anchor,
+    #279). Pure function of these inputs.
     """
     eff_height = height if height > 0.0 else _DEFAULT_HEIGHT_M
     long_m, short_m = _oriented_bbox(_drop_closing(footprint))
+    floor_count = max(1, round(eff_height / _FLOOR_HEIGHT_M))
     return ClassificationRecord(
         osm_id=osm_id,
         neighborhood=neighborhood,
@@ -458,9 +476,11 @@ def classify_building(
         width_m=round(long_m, 1),
         depth_m=round(short_m, 1),
         height_m=round(eff_height, 1),
-        floor_count=max(1, round(eff_height / _FLOOR_HEIGHT_M)),
+        floor_count=floor_count,
         street_facades=rank_street_facades(footprint, roads),
         footprint_hash=footprint_hash(footprint),
+        base_y=round(base_y, 3),
+        facade_height_m=round(floor_count * _FLOOR_HEIGHT_M, 3),
     )
 
 
