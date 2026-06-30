@@ -210,6 +210,11 @@ namespace SFMap.Pipeline.Editor
                         StopOp(ref _timings.parkedCarsMs);
                     }
 
+                    // Facade decals (#280): alpha-textured quads from building-specific overrides,
+                    // nested like parked cars so they bake into the chunk prefab. No-op without a
+                    // sidecar or facadeDecals.
+                    BuildingDecalImporter.Import(chunkDir, coord, chunkRootGo);
+
                     StartOp();
                     PrefabUtility.SaveAsPrefabAsset(chunkRootGo,
                         GeneratedAssets.ChunkPrefabPath(coord));

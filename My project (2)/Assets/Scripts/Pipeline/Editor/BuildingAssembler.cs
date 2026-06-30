@@ -53,7 +53,19 @@ namespace SFMap.Pipeline.Editor
         public string baseTemplate;
         public OverridePlacementJson[] placements;
         public OverridePlacementJson[] suppress;
+        public FacadeDecalJson[] facadeDecals;  // NEW (#280/#281): canvas paint + placed images
         public int version;
+    }
+
+    [Serializable]
+    public sealed class FacadeDecalJson
+    {
+        public string facade;                  // Front | Street | … (which facade to dress)
+        public float[] rect;                   // normalized [x0, y0, x1, y1] on that facade
+        public int layer;                      // z-order within the facade
+        public string texture;                 // library-relative PNG, e.g. Signs/paint_<id>_front.png
+        public float mountDepth_m;             // protrude proud of the wall (D4 stuck-on)
+        public string signAsset;               // optional link to a #275 sign asset
     }
 
     [Serializable]
