@@ -56,12 +56,17 @@ class ChunkData:
     # Parked-car placements (sfmap.geometry.parking.ParkedCar), or [] when no
     # parking source was supplied. Serialised to a JSON sidecar, not the .bin.
     parked_cars: List = None
+    # Building classification records (sfmap.classify.ClassificationRecord), or []
+    # unless the bake ran with --templates. Serialised to chunk_CC_RR_buildings.json.
+    buildings: List = None
 
     def __post_init__(self):
         if self.road_names is None:
             self.road_names = []
         if self.parked_cars is None:
             self.parked_cars = []
+        if self.buildings is None:
+            self.buildings = []
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +196,58 @@ def write_parked_cars(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_parked.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps({"cars": cars}, ensure_ascii=False), encoding="utf-8")
+    return out_path
+
+
+def write_buildings(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
+    """Write chunk_CC_RR_buildings.json — the per-building classification sidecar.
+
+    JSON schema (data-model.md §1, Unity reads this as a TextAsset at import time):
+      {"version":1,"buildings":[
+        {"osm_id":65307880,"neighborhood":"Mission","building_type":"retail",
+         "footprint_shape":"corner","width_m":11.4,"depth_m":18.2,"height_m":12.0,
+         "floor_count":4,
+         "street_facades":[{"edge_index":2,"bearing_deg":117.0,"street_osm_id":8412731,"score":0.94}],
+         "footprint_hash":"a3f1c9d2"}]}
+
+    These are classification *facts* only — Unity chooses templates. Records are
+    emitted in ascending ``osm_id`` order so a re-bake of the same inputs produces a
+    byte-identical file (the determinism contract, data-model.md §6). Returns None
+    and writes nothing when the chunk has no classified buildings (e.g. --templates
+    off, or a chunk with no buildings).
+    """
+    if not chunk.buildings:
+        return None
+
+    buildings = []
+    for b in sorted(chunk.buildings, key=lambda r: r.osm_id):
+        buildings.append({
+            "osm_id": b.osm_id,
+            "neighborhood": b.neighborhood,
+            "building_type": b.building_type,
+            "footprint_shape": b.footprint_shape,
+            "width_m": round(b.width_m, 1),
+            "depth_m": round(b.depth_m, 1),
+            "height_m": round(b.height_m, 1),
+            "floor_count": b.floor_count,
+            "street_facades": [
+                {
+                    "edge_index": f.edge_index,
+                    "bearing_deg": round(f.bearing_deg, 1),
+                    "street_osm_id": f.street_osm_id,
+                    "score": round(f.score, 2),
+                }
+                for f in b.street_facades
+            ],
+            "footprint_hash": b.footprint_hash,
+        })
+
+    out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_buildings.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(
+        json.dumps({"version": 1, "buildings": buildings}, ensure_ascii=False),
+        encoding="utf-8",
+    )
     return out_path
 
 

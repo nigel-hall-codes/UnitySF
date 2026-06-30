@@ -48,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--neighborhoods", default=None, metavar="FILE",
                    help="SF Analysis Neighborhoods GeoJSON (e.g. data/sf_analysis_neighborhoods.geojson); "
                         "loaded as a point-in-polygon lookup for building neighborhood classification")
+    p.add_argument("--templates", action="store_true",
+                   help="Emit the per-chunk building classification sidecar "
+                        "chunk_CC_RR_buildings.json (design #266; facts only: neighborhood, "
+                        "footprint shape/size, floor count, ranked street facades, footprint hash). "
+                        "Off = legacy bake, no sidecar.")
     p.add_argument("--no-parking-roads", default=None, metavar="FILE",
                    help="JSON list of street names that never allow parked cars (manual override; "
                         "freeways/trunks and OSM parking:*=no tags are excluded automatically)")
@@ -180,13 +185,17 @@ def main() -> int:
             parking_segments=parking_segments,
             parking_fallback=parking_fallback,
             no_parking_roads=no_parking_roads,
+            classify_buildings=args.templates,
+            neighborhoods=neighborhoods,
         )
         serialize.write_chunk(chunk, args.out)
         serialize.write_road_names(chunk, args.out)
         serialize.write_parked_cars(chunk, args.out)
+        serialize.write_buildings(chunk, args.out)
         chunk_origins.append((col, row, chunk.world_x, chunk.world_z))
+        cls = f", {len(chunk.buildings)} classified" if args.templates else ""
         print(f"[sfmap_bake] chunk {i + 1}/{len(chunks)} ({col},{row}): "
-              f"{len(chunk.meshes)} meshes — {time.perf_counter() - t_chunk:.2f}s")
+              f"{len(chunk.meshes)} meshes{cls} — {time.perf_counter() - t_chunk:.2f}s")
 
     # --- Manifest ----------------------------------------------------------
     bounds = full_graph.source_bounds

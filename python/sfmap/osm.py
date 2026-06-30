@@ -194,6 +194,7 @@ class BuildingWay:
     footprint: List[Tuple[float, float]]
     height: float
     building_type: Optional[str] = None   # OSM building=* value (residential, apartments, …)
+    footprint_hash: str = ""              # set in chunk.py after classification (data-model.md §6.1)
 
 
 @dataclass
