@@ -12,7 +12,7 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-from .models import BuildingSpecificDef, PaletteDef, PartDef, SignDef, TemplateDef
+from .models import BuildingSpecificDef, FacadeCanvas, PaletteDef, PartDef, SignDef, TemplateDef
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS parts     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS palettes  (neighborhood TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS overrides (osm_id INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS signs     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS canvases  (key TEXT PRIMARY KEY, json TEXT NOT NULL);
 """
 
 
@@ -97,6 +98,25 @@ class Store:
     def sign_thumb_path(self, sign_id: str) -> Optional[Path]:
         path = self.assets_dir / "signs" / f"{sign_id}.thumb.png"
         return path if path.exists() else None
+
+    # -- facade canvases (keyed by osm_id:facade) ---------------------------
+
+    @staticmethod
+    def _canvas_key(osm_id: int, facade: str) -> str:
+        return f"{osm_id}:{facade}"
+
+    def upsert_canvas(self, canvas: FacadeCanvas) -> None:
+        self._upsert("canvases", "key", self._canvas_key(canvas.osm_id, canvas.facade), canvas)
+
+    def list_canvases(self) -> List[FacadeCanvas]:
+        return [FacadeCanvas.model_validate_json(j) for j in self._all("canvases")]
+
+    def list_canvases_for(self, osm_id: int) -> List[FacadeCanvas]:
+        return [c for c in self.list_canvases() if c.osm_id == osm_id]
+
+    def get_canvas(self, osm_id: int, facade: str) -> Optional[FacadeCanvas]:
+        row = self._one("canvases", "key", self._canvas_key(osm_id, facade))
+        return FacadeCanvas.model_validate_json(row) if row else None
 
     # -- GLB binaries -------------------------------------------------------
 

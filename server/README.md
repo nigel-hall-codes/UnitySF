@@ -27,6 +27,7 @@ SFSERVER_DB=sfserver.db SFSERVER_ASSETS=assets SFSERVER_EXPORT_DIR="../My projec
 | `GET  /palettes` · `POST /palettes` | list / author neighborhood palettes |
 | `POST /building-specific` | store an override (osm_id + footprint_hash) |
 | `POST /ai/signs/generate` · `GET /signs` | server-mediated AI sign gen (swappable provider) → PNG+thumb+metadata |
+| `POST /canvas` · `GET /canvas/{osm_id}[/{facade}]` | facade canvas CRUD (#278); strokes flatten to a paint PNG + facadeDecals on export |
 | `POST /export/unity` | materialise `Assets/SFBuildingTemplates/` (the seam) |
 
 `POST /ai/signs/generate` is server-mediated (the iPad never calls a provider directly): a `SignProvider` is selected by name from a registry, so the backend (ChatGPT image gen / Nano Banana / future) is swappable. A built-in `local-stub` provider renders a deterministic placeholder PNG with no external calls/deps, so the store+export path runs offline.

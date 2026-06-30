@@ -186,6 +186,35 @@ class SignDef(BaseModel):
     stylePreset: str = ""
 
 
+# --- Facade canvas (design #278; stored server-side, flattened on export) --
+
+class Stroke(BaseModel):
+    points: List[List[float]] = Field(default_factory=list)  # [[x,y],...] normalized facade UV
+    color: str = "#000000"
+    width: float = 0.01                                      # normalized stroke width
+
+
+class CanvasLayer(BaseModel):
+    kind: str = "paint"              # "paint" (freehand strokes) | "image" (placed sign/AI image)
+    layer: int = 0                   # z-order within the facade (paint usually lowest)
+    mountDepth_m: float = 0.02
+    # paint layers:
+    strokes: List[Stroke] = Field(default_factory=list)
+    # image layers (a placed image / AI sign — stays a discrete decal):
+    rect: List[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0, 1.0])
+    texture: str = ""                # existing PNG ref, e.g. Signs/<id>.png
+    signAsset: str = ""              # optional link to a #275 sign asset
+
+
+class FacadeCanvas(BaseModel):
+    """The layered canvas document for one building facade — the authoring source of truth."""
+    osm_id: int
+    facade: str = "Front"
+    footprint_hash: str = ""         # carried onto the override's guard at export
+    layers: List[CanvasLayer] = Field(default_factory=list)
+    version: int = 1
+
+
 # --- Export request / response ---------------------------------------------
 
 class ExportRequest(BaseModel):
@@ -202,3 +231,5 @@ class ExportResult(BaseModel):
     overrides: int
     glbsCopied: int
     signs: int = 0
+    facadeDecals: int = 0
+    paintTextures: int = 0
