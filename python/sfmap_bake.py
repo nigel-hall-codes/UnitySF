@@ -45,6 +45,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-sidewalks", action="store_true", help="Skip sidewalk geometry")
     p.add_argument("--parking", default=None, metavar="FILE",
                    help="SF parking-regulations CSV; places parked cars along regulated kerbs")
+    p.add_argument("--neighborhoods", default=None, metavar="FILE",
+                   help="SF Analysis Neighborhoods GeoJSON (e.g. data/sf_analysis_neighborhoods.geojson); "
+                        "loaded as a point-in-polygon lookup for building neighborhood classification")
     p.add_argument("--no-parking-roads", default=None, metavar="FILE",
                    help="JSON list of street names that never allow parked cars (manual override; "
                         "freeways/trunks and OSM parking:*=no tags are excluded automatically)")
@@ -130,6 +133,17 @@ def main() -> int:
         print(f"[sfmap_bake] parsed parking: {len(parking_segments)} kerb segment(s) "
               f"from {args.parking}"
               f"{' (+ sidewalk fallback for uncovered streets)' if parking_fallback else ''}")
+
+    # --- Neighborhood boundaries (optional) — project polygons once --------
+    # Loads the lookup so a building's neighborhood can be resolved from its
+    # centroid. The sidecar that consumes it lands with #266; here we just prove
+    # the input loads (acceptance: "sfmap_bake can load it via --neighborhoods").
+    neighborhoods = None
+    if args.neighborhoods:
+        from sfmap.geometry import neighborhood
+        neighborhoods = neighborhood.load_neighborhoods(args.neighborhoods, full_graph.origin)
+        print(f"[sfmap_bake] parsed neighborhoods: {len(neighborhoods)} polygon(s) "
+              f"from {args.neighborhoods}")
 
     # Manual no-parking road list (optional) — OSM already excludes freeways/trunks
     # and explicitly-tagged kerbs; this covers roads we know locally that OSM hasn't.
