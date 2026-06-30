@@ -50,6 +50,19 @@ def test_export_includes_overrides(client, tmp_path):
     assert ov["osm_id"] == 65307880 and ov["footprint_hash"] == "a3f1c9d2"
 
 
+def test_export_syncs_glb_path_when_part_declared_none(client, tmp_path):
+    # Part authored without a `glb` field, then a binary uploaded → export must point the
+    # part's `glb` at where it copied the binary (else the importer can't find the mesh).
+    p = {"id": "doorless", "category": "Door"}   # no glb field
+    client.post("/parts", json=p)
+    client.put("/parts/doorless/glb", files={"file": ("d.glb", b"GLB", "model/gltf-binary")})
+    out = tmp_path / "drop3"
+    assert client.post("/export/unity", json={"outDir": str(out)}).json()["glbsCopied"] == 1
+    part = json.loads((out / "Parts" / "doorless.part.json").read_text(encoding="utf-8"))
+    assert part["glb"] == "Parts/doorless.glb"
+    assert (out / "Parts" / "doorless.glb").read_bytes() == b"GLB"
+
+
 def test_export_default_dir_used_when_omitted(client, tmp_path):
     # create_app was given default_export_dir = tmp_path/"export"; an empty outDir uses it.
     client.post("/palettes", json=_palette("Mission"))

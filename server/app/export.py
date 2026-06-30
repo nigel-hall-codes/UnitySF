@@ -8,12 +8,29 @@ importer's DTOs exactly (notably ``from``/``to`` role pairs and the array-of-pai
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .models import ExportResult
 from .store import Store
+
+# Authored ids / neighborhood names become filenames; neutralise anything that could
+# escape the target dir (path separators, "..") so a crafted id can't write elsewhere.
+_UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
+
+
+def _safe(name: str) -> str:
+    return _UNSAFE.sub("_", name) or "_"
+
+
+def _within(root: Path, path: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> ExportResult:
@@ -38,20 +55,29 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
 
     glbs_copied = 0
     for p in parts:
-        _write_json(parts_dir / f"{p.id}.part.json", p.model_dump(by_alias=True))
+        data = p.model_dump(by_alias=True)
         src = store.glb_path(p.id)
         if src is not None:
-            # Mirror the GLB to the path the part's `glb` field points at (default Parts/<id>.glb).
-            rel = p.glb or f"Parts/{p.id}.glb"
+            # Copy the uploaded binary and make the part's declared `glb` agree with where it
+            # landed (default Parts/<id>.glb), so the importer can always locate the mesh even
+            # when the author left `glb` empty. Refuse a path that escapes the drop.
+            rel = p.glb or f"Parts/{_safe(p.id)}.glb"
             dst = root / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
-            glbs_copied += 1
+            if _within(root, dst):
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(src, dst)
+                data["glb"] = rel
+                glbs_copied += 1
+            else:
+                data["glb"] = ""
+        _write_json(parts_dir / f"{_safe(p.id)}.part.json", data)
 
     for t in templates:
-        _write_json(templates_dir / f"{t.id}.template.json", t.model_dump(by_alias=True))
+        _write_json(templates_dir / f"{_safe(t.id)}.template.json", t.model_dump(by_alias=True))
     for pal in palettes:
-        _write_json(palettes_dir / f"{pal.neighborhood}.palette.json", pal.model_dump(by_alias=True))
+        _write_json(palettes_dir / f"{_safe(pal.neighborhood)}.palette.json", pal.model_dump(by_alias=True))
+    # Overrides are written for the building-specific consumer (#273/#278 — hash-matched at
+    # import); the #269 template importer ignores this folder. osm_id is an int, so safe.
     for ov in overrides:
         _write_json(overrides_dir / f"{ov.osm_id}.override.json", ov.model_dump(by_alias=True))
 
