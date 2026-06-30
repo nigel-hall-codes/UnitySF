@@ -219,9 +219,11 @@ namespace SFMap.Pipeline.Editor
 
             var combined = new Mesh { name = $"building_{osmId}" };
             combined.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-            combined.CombineMeshes(combines.ToArray(), true, true);
-            combined.RecalculateBounds();
+            combined.CombineMeshes(combines.ToArray(), true, true);   // computes bounds itself
             foreach (var ci in combines) UnityEngine.Object.DestroyImmediate(ci.mesh);  // temp sources
+            // The importer's mass mesh is now folded into `combined` and referenced by nothing
+            // else (it's no longer saved as a standalone asset) — free it.
+            UnityEngine.Object.DestroyImmediate(massMesh);
 
             SaveMeshAsset(combined, GeneratedAssets.BuildingMesh(coord, osmId));
             root.AddComponent<MeshFilter>().sharedMesh = combined;
