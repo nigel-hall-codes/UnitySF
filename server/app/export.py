@@ -118,6 +118,8 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
             strokes = [s for layer in paint_layers for s in layer.strokes]
             png = flatten_paint(strokes)
             if png is not None:
+                # _safe(...).lower() is filename-only; the decal's `facade` field keeps the
+                # original case (that is what the importer keys placement off, not the filename).
                 tex_rel = f"Signs/paint_{osm_id}_{_safe(c.facade).lower()}.png"
                 (root / tex_rel).write_bytes(png)
                 paint_textures += 1
@@ -128,12 +130,16 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
                     "texture": tex_rel,
                     "mountDepth_m": paint_layers[0].mountDepth_m if paint_layers else 0.02,
                 })
-            # Placed images / AI signs stay discrete decals (reusing existing sign PNGs).
+            # Placed images / AI signs stay discrete decals (reusing existing sign PNGs). An
+            # image layer identified only by signAsset resolves to that sign's PNG (#275).
             for layer in c.layers:
-                if layer.kind != "image" or not layer.texture:
+                if layer.kind != "image":
+                    continue
+                tex = layer.texture or (f"Signs/{_safe(layer.signAsset)}.png" if layer.signAsset else "")
+                if not tex:
                     continue
                 d = {"facade": c.facade, "rect": layer.rect, "layer": layer.layer,
-                     "texture": layer.texture, "mountDepth_m": layer.mountDepth_m}
+                     "texture": tex, "mountDepth_m": layer.mountDepth_m}
                 if layer.signAsset:
                     d["signAsset"] = layer.signAsset
                 decals.append(d)
@@ -149,7 +155,8 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         # Keep the override's existing footprint_hash if it has one; else adopt the canvas's.
         if not ov.get("footprint_hash"):
             ov["footprint_hash"] = fp_hash
-        ov["facadeDecals"] = sorted(decals, key=lambda d: d["layer"])
+        # Sort by (layer, mountDepth_m) to match the importer contract (design.md §decal importer).
+        ov["facadeDecals"] = sorted(decals, key=lambda d: (d["layer"], d["mountDepth_m"]))
         ov["version"] = 2   # bump: facadeDecals added
 
     for osm_id, ov in override_map.items():
