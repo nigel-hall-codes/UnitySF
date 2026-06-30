@@ -206,41 +206,53 @@ namespace SFMap.Pipeline.Editor
             // (floor band + within-floor offset), both scaled to this building's real frame.
             Vector3 pos = a + along * (Mathf.Clamp01(p.x) * len);
             pos.y = facts.base_y + (p.floor + Mathf.Clamp01(p.y)) * FloorHeightMeters;
+            // Don't let a too-high floor index float the part above the roof: clamp to the
+            // building's real facade height (the #279 facade_height_m fact).
+            float facadeTop = facts.base_y + Mathf.Max(facts.facade_height_m, FloorHeightMeters);
+            pos.y = Mathf.Min(pos.y, facadeTop);
 
             BuildingPart part = ResolvePart(p.part);
             float mountDepth = part != null ? part.mountDepthMeters : 0f;
-            pos += outward * mountDepth;
+            pos += outward * mountDepth;   // outward is horizontal, so this leaves pos.y intact
 
-            var child = InstantiatePart(part, p.part);
+            var child = InstantiatePart(part, p.part, out bool isPlaceholder);
             child.transform.SetParent(parent, false);
             child.transform.position = pos;
-            // Face outward; apply the placement's roll about the outward normal.
+            // A real GLB part authors its front as +Z, so point +Z outward. The placeholder
+            // Quad's visible face is -Z, so face *that* to the street (else it's back-face-culled
+            // from outside). Either way apply the placement's roll about the outward normal.
+            Vector3 facing = isPlaceholder ? -outward : outward;
             child.transform.rotation = Quaternion.AngleAxis(p.rotation, outward) *
-                                       Quaternion.LookRotation(outward, Vector3.up);
+                                       Quaternion.LookRotation(facing, Vector3.up);
+            // Scale = the placement scale, applied on top of the placeholder's authored size
+            // (a real prefab carries its own size, so its base is unit).
             float s = p.scale <= 0f ? 1f : p.scale;
-            child.transform.localScale = new Vector3(s, s, s);
+            Vector3 baseScale = Vector3.one;
+            if (isPlaceholder && part != null && part.sizeMeters != Vector3.zero)
+                baseScale = new Vector3(Mathf.Max(part.sizeMeters.x, 0.1f),
+                                        Mathf.Max(part.sizeMeters.y, 0.1f), 1f);
+            child.transform.localScale = baseScale * s;
         }
 
-        GameObject InstantiatePart(BuildingPart part, string partId)
+        GameObject InstantiatePart(BuildingPart part, string partId, out bool isPlaceholder)
         {
             if (part != null && part.prefab != null)
             {
+                isPlaceholder = false;
                 var go = (GameObject)PrefabUtility.InstantiatePrefab(part.prefab);
                 go.name = part.id;
                 return go;
             }
-            // No imported GLB yet: a flat placeholder quad sized to the authored part, so the
-            // placement is visible and correct even before the geometry is authored (the GLB is
-            // wired in by the #269 importer once glTFast + the .glb land).
+            // No imported GLB yet: a flat placeholder quad (sized by the caller to the authored
+            // part), so the placement is visible/correct before the geometry is authored — the
+            // GLB is wired into BuildingPart.prefab by the #269 importer once glTFast + the .glb land.
+            isPlaceholder = true;
             var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
             quad.name = $"{partId} (placeholder)";
             // CreatePrimitive adds a MeshCollider; buildings are non-interactive, so drop it
             // (it would otherwise bake a stray collider into the chunk prefab).
             var col = quad.GetComponent<Collider>();
             if (col != null) UnityEngine.Object.DestroyImmediate(col);
-            if (part != null && part.sizeMeters != Vector3.zero)
-                quad.transform.localScale = new Vector3(Mathf.Max(part.sizeMeters.x, 0.1f),
-                                                        Mathf.Max(part.sizeMeters.y, 0.1f), 1f);
             return quad;
         }
 
