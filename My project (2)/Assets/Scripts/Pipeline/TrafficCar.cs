@@ -29,6 +29,7 @@ namespace SFMap.Pipeline
         const float BrakeDistance = 10f; // start easing the throttle within this far of the stop line
         const float BrakeSpeedEps = 0.3f; // commanded slowdown bigger than this lights the brakes
         const float TurnSignalAngle = 25f; // a planned exit turning more than this signals the turn
+        const float HeadingLookAhead = 7f; // aim the heading this far along the future path (#255)
 
         /// Which way the car will turn at the junction it is approaching — drives the indicator.
         public enum Indicator { None, Left, Right }
@@ -433,13 +434,64 @@ namespace SFMap.Pipeline
             return true;
         }
 
+        // Walks a copy of the path HeadingLookAhead metres ahead of _pos and returns the XZ
+        // vector from _pos to that look-ahead point — the smoothed heading target (#255). It
+        // mirrors Advance's walk (segment hops + the node hop) but mutates only locals, and at
+        // the end node continues onto the SAME edge the car will drive: the plan it pre-chose on
+        // the approach (so the look-ahead never disagrees with StepSegment), else the same
+        // NextEdge query. A dead-end (no onward edge) or running out of path just stops the
+        // walk, leaving the heading along the remaining path; never throws.
+        Vector2 LookAheadDir()
+        {
+            int edge = _edge;
+            var pts = _net.GetEdge(edge).Points;
+            int seg = _seg;
+            Vector2 p = _pos;
+            float remaining = HeadingLookAhead;
+
+            int guard = 0;
+            while (remaining > 1e-4f && guard++ < 512)
+            {
+                Vector2 next = pts[seg + 1];
+                float segLen = Vector2.Distance(p, next);
+
+                if (segLen > 1e-4f && remaining < segLen)
+                {
+                    p = Vector2.MoveTowards(p, next, remaining); // look-ahead lands mid-segment
+                    break;
+                }
+                remaining -= segLen;                            // consume the segment (0 if degenerate)
+                p = next;
+
+                if (seg + 1 < pts.Length - 1) { seg++; continue; } // more segments on this edge
+
+                // At the edge's end node: hop onto the edge the car will actually take.
+                int node = _net.GetEdge(edge).ToNode;
+                int onward = _plannedNode == node && _plannedEdge >= 0
+                    ? _plannedEdge
+                    : _net.NextEdge(node, edge);
+                if (onward < 0) break; // dead-end — keep the heading along the path so far
+                edge = onward;
+                pts = _net.GetEdge(edge).Points;
+                seg = 0; // p already sits on the new edge's start node (pts[0])
+            }
+
+            return p - _pos;
+        }
+
         // Snaps the car onto the road surface (Y + slope) and faces it along travel,
         // shifted into its current (or transitioning) lane on multi-lane roads.
         void Conform()
         {
-            // Heading: direction toward the end of the current segment.
+            // Heading: aim at a point a fixed distance further along the FUTURE path (across
+            // the upcoming node onto the edge the car will take), not just the current
+            // segment's end. The look-ahead point crosses the junction's sharp centerline
+            // vertex and runs onto the next road, so the heading vector swings round
+            // gradually as the car nears and passes the corner — easing the turn instead of
+            // snapping to the new road direction the instant it steps onto it (#255).
             var e = _net.GetEdge(_edge);
-            Vector2 d = e.Points[_seg + 1] - _pos;
+            Vector2 d = LookAheadDir();
+            if (d.sqrMagnitude < 1e-6f) d = e.Points[_seg + 1] - _pos;
             if (d.sqrMagnitude < 1e-6f) d = e.Points[_seg + 1] - e.Points[_seg];
             Vector3 fwd = new Vector3(d.x, 0f, d.y);
             if (fwd.sqrMagnitude < 1e-6f) fwd = transform.forward;
