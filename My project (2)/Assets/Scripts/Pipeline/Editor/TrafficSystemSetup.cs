@@ -8,9 +8,9 @@ using UnityEngine.SceneManagement;
 namespace SFMap.Pipeline.Editor
 {
     /// <summary>
-    /// Menu: SFMap ▸ Add Traffic System.
-    /// Drops a configured <see cref="TrafficManager"/> into the scene and auto-wires the
-    /// low-poly car prefabs so ambient traffic works without manual setup. The runtime
+    /// Menus: SFMap ▸ Add Traffic System and SFMap ▸ Add Parked Car Streamer.
+    /// Each drops a configured component into the scene and auto-wires the low-poly car prefabs
+    /// so ambient traffic / parked cars work without manual setup. The runtime
     /// <see cref="RoadNetwork"/> bootstraps itself, so this is the only wiring needed.
     /// </summary>
     public static class TrafficSystemSetup
@@ -41,6 +41,33 @@ namespace SFMap.Pipeline.Editor
 
             Selection.activeGameObject = go;
             Undo.RegisterCreatedObjectUndo(go, "Add Traffic System");
+            EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+        }
+
+        [MenuItem("SFMap/Add Parked Car Streamer")]
+        static void AddParkedCarStreamer()
+        {
+            var existing = Object.FindFirstObjectByType<ParkedCarStreamer>();
+            if (existing != null)
+            {
+                Selection.activeGameObject = existing.gameObject;
+                Debug.Log("[ParkedCarStreamer] Scene already has a parked-car streamer — selected it.");
+                return;
+            }
+
+            var go = new GameObject("Parked Cars");
+            var streamer = go.AddComponent<ParkedCarStreamer>();
+            streamer.carPrefabs = LoadCarPrefabs();
+
+            if (streamer.carPrefabs.Length == 0)
+                Debug.LogWarning($"[ParkedCarStreamer] No car prefabs found under '{CarPrefabFolder}'. " +
+                                 "Assign some in the Inspector.", go);
+            else
+                Debug.Log($"[ParkedCarStreamer] Added with {streamer.carPrefabs.Length} car prefab(s). Press Play " +
+                          "with a ChunkStreamer in the scene (and baked _parked.json data) to see parked cars.", go);
+
+            Selection.activeGameObject = go;
+            Undo.RegisterCreatedObjectUndo(go, "Add Parked Car Streamer");
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
         }
 
