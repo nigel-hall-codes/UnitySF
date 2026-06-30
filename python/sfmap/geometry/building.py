@@ -19,6 +19,27 @@ _DEFAULT_HEIGHT = 10.0  # metres when building has no height tag
 _FOUNDATION_EMBED = 1.0
 
 
+def building_base_y(
+    footprint: List[Tuple[float, float]],
+    hmap: HeightmapData,
+) -> Optional[float]:
+    """World-space Y the building's foundation sits at, or None for a degenerate ring.
+
+    Mirrors the base computed in ``_build_single`` (``min`` terrain sample under the
+    footprint, sunk ``_FOUNDATION_EMBED`` below) so a facade decal anchored at this Y
+    lands exactly on the mass wall's flat bottom — the per-facade edge geometry the
+    building sidecar emits for the decal importer (issue #279) is consumed without the
+    per-building mass, which is destroyed at mesh-combine. ``min`` is order-independent,
+    so the closing duplicate and winding are irrelevant here.
+    """
+    fp = list(footprint)
+    if len(fp) > 1 and fp[0] == fp[-1]:
+        fp = fp[:-1]
+    if len(fp) < 3:
+        return None
+    return min(_sample_elevation(hmap, px, pz) for px, pz in fp) - _FOUNDATION_EMBED
+
+
 def build_building_meshes(
     graph: StreetGraph,
     hmap: HeightmapData,
