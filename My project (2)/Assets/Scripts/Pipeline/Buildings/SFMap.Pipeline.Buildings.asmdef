@@ -1,0 +1,14 @@
+{
+    "name": "SFMap.Pipeline.Buildings",
+    "rootNamespace": "SFMap.Pipeline.Buildings",
+    "references": [],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

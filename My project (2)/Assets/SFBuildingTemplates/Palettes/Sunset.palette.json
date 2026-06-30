@@ -1,0 +1,11 @@
+{
+  "neighborhood": "Sunset",
+  "roles": [
+    { "role": "Base",    "colors": ["#E9DFC6", "#D8C9A8", "#EFE7D2"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#B6A06A", "#9C8550"],            "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#C9B98F", "#8A7440"],            "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#3A4A55"],                       "mode": "constant" },
+    { "role": "Metal",   "colors": ["#6B6B6B"],                       "mode": "constant" }
+  ],
+  "version": 1
+}
