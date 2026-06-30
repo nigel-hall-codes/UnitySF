@@ -45,13 +45,15 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
     palettes_dir = root / "Palettes"
     templates_dir = root / "Templates"
     overrides_dir = root / "Overrides"
-    for d in (parts_dir, palettes_dir, templates_dir, overrides_dir):
+    signs_dir = root / "Signs"
+    for d in (parts_dir, palettes_dir, templates_dir, overrides_dir, signs_dir):
         d.mkdir(parents=True, exist_ok=True)
 
     parts = store.list_parts()
     templates = store.list_templates()
     palettes = store.list_palettes()
     overrides = store.list_overrides()
+    signs = store.list_signs()
 
     glbs_copied = 0
     for p in parts:
@@ -81,6 +83,21 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
     for ov in overrides:
         _write_json(overrides_dir / f"{ov.osm_id}.override.json", ov.model_dump(by_alias=True))
 
+    # Signs: the PNG + thumbnail binaries and a <signId>.sign.json record (data-model §2).
+    # Consumed by the building-specific / facade-decal path (#273/#278), not #269.
+    signs_written = 0
+    for s in signs:
+        sid = _safe(s.signId)
+        png = store.sign_png_path(s.signId)
+        thumb = store.sign_thumb_path(s.signId)
+        if png is None:
+            continue  # metadata with no rendered bytes — skip, nothing to dress with
+        shutil.copyfile(png, signs_dir / f"{sid}.png")
+        if thumb is not None:
+            shutil.copyfile(thumb, signs_dir / f"{sid}.thumb.png")
+        _write_json(signs_dir / f"{sid}.sign.json", s.model_dump(by_alias=True))
+        signs_written += 1
+
     manifest = {
         "version": 1,
         "exportedAt": now_iso or datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -96,6 +113,7 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         palettes=len(palettes),
         overrides=len(overrides),
         glbsCopied=glbs_copied,
+        signs=signs_written,
     )
 
 

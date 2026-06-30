@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, UploadFile
 
+from .ai_signs import DEFAULT_PROVIDER, available_providers, get_provider, slug
 from .export import export_unity
 from .models import (
     BuildingSpecificDef,
@@ -23,6 +24,8 @@ from .models import (
     ExportResult,
     PaletteDef,
     PartDef,
+    SignDef,
+    SignRequest,
     TemplateDef,
 )
 from .store import Store
@@ -37,10 +40,12 @@ BUILDING_TYPES: List[str] = [
 ]
 
 
-def create_app(store: Optional[Store] = None, default_export_dir: str = "") -> FastAPI:
+def create_app(store: Optional[Store] = None, default_export_dir: str = "",
+               sign_provider: str = "") -> FastAPI:
     """Build the app. Tests pass an explicit ``store``; the module-level app passes
     None and a startup handler builds the env-configured store then — so merely
-    importing this module never touches the filesystem."""
+    importing this module never touches the filesystem. ``sign_provider`` names the
+    default AI-sign backend (overridable per request)."""
     @asynccontextmanager
     async def lifespan(app_: FastAPI):
         # Build the env-configured store on startup when none was injected — so the
@@ -52,6 +57,7 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "") -> F
     app = FastAPI(title="SF Building Template Asset Server", version="1.0", lifespan=lifespan)
     app.state.store = store
     app.state.default_export_dir = default_export_dir
+    app.state.sign_provider = sign_provider or DEFAULT_PROVIDER
 
     def S() -> Store:
         return app.state.store
@@ -114,6 +120,44 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "") -> F
     def create_override(ov: BuildingSpecificDef) -> BuildingSpecificDef:
         S().upsert_override(ov)
         return ov
+
+    # -- AI signs (server-mediated; the iPad never calls a provider directly) -
+
+    @app.get("/signs")
+    def list_signs() -> List[SignDef]:
+        return S().list_signs()
+
+    @app.get("/ai/signs/providers")
+    def sign_providers() -> dict:
+        return {"default": app.state.sign_provider, "available": available_providers()}
+
+    @app.post("/ai/signs/generate")
+    def generate_sign(req: SignRequest) -> SignDef:
+        name = req.provider or app.state.sign_provider
+        try:
+            provider = get_provider(name)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"unknown sign provider '{name}'")
+        png, thumb = provider.generate(req)
+        # signId is derived from text + businessType ONLY (data-model §5: "LUCCA"+"deli" →
+        # "sign_lucca_deli"). Style/neighborhood/aspect are intentionally excluded so a
+        # business's sign is one reusable canonical asset; re-generating updates it in place.
+        sign_id = f"sign_{slug(req.text)}_{slug(req.businessType)}"
+        S().save_sign_png(sign_id, png, thumb)
+        sign = SignDef(
+            signId=sign_id,
+            png=f"Signs/{sign_id}.png",
+            thumb=f"Signs/{sign_id}.thumb.png",
+            provider=provider.name,
+            version=1,
+            businessType=req.businessType,
+            neighborhood=req.neighborhood,
+            text=req.text,
+            aspectRatio=req.aspectRatio,
+            stylePreset=req.stylePreset,
+        )
+        S().upsert_sign(sign)
+        return sign
 
     # -- export -------------------------------------------------------------
 
