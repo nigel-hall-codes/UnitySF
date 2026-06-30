@@ -43,6 +43,32 @@ namespace SFMap.Pipeline.Editor
         public float[] edge;            // [x0, z0, x1, z1] world metres (#279)
     }
 
+    // ---- Overrides/<osm_id>.override.json (BuildingSpecificDef, data-model.md §2) ----
+
+    [Serializable]
+    public sealed class OverrideJson
+    {
+        public long osm_id;
+        public string footprint_hash;          // MUST equal the bake's or the override is skipped
+        public string baseTemplate;
+        public OverridePlacementJson[] placements;
+        public OverridePlacementJson[] suppress;
+        public int version;
+    }
+
+    [Serializable]
+    public sealed class OverridePlacementJson
+    {
+        public string part;
+        public string facade;
+        public int floor;
+        public float x;
+        public float y;
+        public float scale;
+        public float rotation;
+        public string signAsset;               // non-empty → a sign (own texture, stays separate)
+    }
+
     /// <summary>
     /// The MVP heart of the generation loop (design #266): per building, MATCH a
     /// <see cref="BuildingTemplate"/> by the bake's classification facts, fork
@@ -65,6 +91,7 @@ namespace SFMap.Pipeline.Editor
         readonly List<BuildingTemplate> _templates;
         readonly Dictionary<string, BuildingPart> _partsById;
         readonly Dictionary<string, NeighborhoodPalette> _palettes;
+        readonly Dictionary<long, OverrideJson> _overrides;
 
         // Exact placement positions of the building currently being assembled, keyed by
         // (facade edge_index, floor) → normalized x's, so procedural rules with avoidExact can
@@ -73,7 +100,7 @@ namespace SFMap.Pipeline.Editor
 
         // Parts placed for the current building, collected so BakeAndCombine can colour and fold
         // the non-sign ones into one mesh. Reset per building.
-        struct Placed { public GameObject go; public BuildingPart part; }
+        struct Placed { public GameObject go; public BuildingPart part; public string partId; public Facade facade; public int floor; public bool isSign; }
         readonly List<Placed> _placed = new List<Placed>();
 
         int _templated;
@@ -83,12 +110,14 @@ namespace SFMap.Pipeline.Editor
         BuildingAssembler(Dictionary<long, BuildingFactsJson> facts,
                           List<BuildingTemplate> templates,
                           Dictionary<string, BuildingPart> partsById,
-                          Dictionary<string, NeighborhoodPalette> palettes)
+                          Dictionary<string, NeighborhoodPalette> palettes,
+                          Dictionary<long, OverrideJson> overrides)
         {
             _facts = facts;
             _templates = templates;
             _partsById = partsById;
             _palettes = palettes;
+            _overrides = overrides;
         }
 
         /// <summary>Load the chunk's sidecar + the template library. Returns null (so the
@@ -122,7 +151,32 @@ namespace SFMap.Pipeline.Editor
             foreach (var pal in LoadAll<NeighborhoodPalette>())
                 if (!string.IsNullOrEmpty(pal.neighborhood)) palettes[pal.neighborhood] = pal;
 
-            return new BuildingAssembler(facts, templates, partsById, palettes);
+            return new BuildingAssembler(facts, templates, partsById, palettes, LoadOverrides());
+        }
+
+        // Load Assets/SFBuildingTemplates/Overrides/*.override.json into a dict keyed by osm_id.
+        // The footprint_hash guard is checked at apply time, not here.
+        const string OverridesDir = "Assets/SFBuildingTemplates/Overrides";
+
+        static Dictionary<long, OverrideJson> LoadOverrides()
+        {
+            var map = new Dictionary<long, OverrideJson>();
+            string abs = Path.Combine(Application.dataPath, "SFBuildingTemplates/Overrides");
+            if (!Directory.Exists(abs)) return map;
+            foreach (string file in Directory.GetFiles(abs, "*.override.json", SearchOption.AllDirectories))
+            {
+                if (!file.EndsWith(".override.json", StringComparison.OrdinalIgnoreCase)) continue;  // exclude .meta
+                try
+                {
+                    var ov = JsonUtility.FromJson<OverrideJson>(File.ReadAllText(file));
+                    if (ov != null && ov.osm_id != 0) map[ov.osm_id] = ov;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[BuildingAssembler] Failed to parse override {file}: {ex.Message}");
+                }
+            }
+            return map;
         }
 
         /// <summary>Does this building have classification facts AND a compatible template?
@@ -175,6 +229,11 @@ namespace SFMap.Pipeline.Editor
                 for (int r = 0; r < template.rules.Length; r++)
                     PlaceProcedural(root.transform, template.rules[r], facts, r);
 
+            // Building-specific override applied LAST (precedence Building-Specific > Exact >
+            // Procedural): suppress conflicting template parts, then add the override's exact
+            // placements — but only when its footprint_hash matches the bake's (#273).
+            ApplyOverride(root.transform, osmId, facts);
+
             // Resolve material roles → colours via the neighborhood palette and bake them into
             // vertex colours, then mesh-combine the mass + non-sign parts into one batchable mesh
             // (design D1: vertex colours, NOT a per-renderer MaterialPropertyBlock). Sign parts
@@ -202,7 +261,7 @@ namespace SFMap.Pipeline.Editor
             // Non-sign parts → per-submesh role colours, folded into the combine. Signs stay.
             foreach (var pl in _placed)
             {
-                if (pl.part != null && pl.part.isSign) continue;   // sign → keep separate (texture)
+                if (pl.isSign || (pl.part != null && pl.part.isSign)) continue;   // sign → keep separate (texture)
                 bool folded = false;
                 foreach (var mf in pl.go.GetComponentsInChildren<MeshFilter>())
                 {
@@ -307,6 +366,60 @@ namespace SFMap.Pipeline.Editor
                       $"(merged) of {_templated + fallback} buildings.");
         }
 
+        // ---- building-specific overrides (#273, design §Placement Model) -------
+
+        void ApplyOverride(Transform parent, long osmId, BuildingFactsJson facts)
+        {
+            if (_overrides == null || !_overrides.TryGetValue(osmId, out var ov)) return;
+
+            // Hash guard — never dress the wrong building. A footprint edit changes the bake's
+            // hash; a stale override stops matching and is skipped with a warning (design D3).
+            if (!string.IsNullOrEmpty(ov.footprint_hash) &&
+                !string.Equals(ov.footprint_hash, facts.footprint_hash, StringComparison.Ordinal))
+            {
+                Debug.LogWarning($"[BuildingAssembler] override for building {osmId} skipped: " +
+                                 $"footprint_hash '{ov.footprint_hash}' != bake '{facts.footprint_hash}' " +
+                                 "(stale footprint — not applied).");
+                return;
+            }
+
+            // Suppress template parts the override replaces, matched by (part, facade, floor).
+            if (ov.suppress != null)
+                foreach (var s in ov.suppress)
+                    SuppressPlaced(s);
+
+            // Add the override's exact placements — they win over the template (applied last). A
+            // placement with a signAsset is a sign (own texture, kept out of the combine).
+            if (ov.placements != null)
+                foreach (var p in ov.placements)
+                {
+                    if (!ParseFacade(p.facade, out var facade)) continue;
+                    bool isSign = !string.IsNullOrEmpty(p.signAsset);
+                    foreach (var f in FacadesFor(facade, facts))
+                        PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, facade, isSign);
+                }
+        }
+
+        void SuppressPlaced(OverridePlacementJson s)
+        {
+            if (!ParseFacade(s.facade, out var facade)) return;
+            for (int i = _placed.Count - 1; i >= 0; i--)
+            {
+                var pl = _placed[i];
+                if (pl.partId == s.part && pl.facade == facade && pl.floor == s.floor)
+                {
+                    if (pl.go != null) UnityEngine.Object.DestroyImmediate(pl.go);
+                    _placed.RemoveAt(i);
+                }
+            }
+        }
+
+        static bool ParseFacade(string s, out Facade facade)
+        {
+            if (string.IsNullOrEmpty(s)) { facade = Facade.Front; return true; }
+            return Enum.TryParse(s, true, out facade);
+        }
+
         // ---- placement ---------------------------------------------------------
 
         void PlaceExact(Transform parent, ExactPlacement p, BuildingFactsJson facts)
@@ -316,7 +429,7 @@ namespace SFMap.Pipeline.Editor
                 long key = ExactKey(f.edge_index, p.floor);
                 if (!_exactMarks.TryGetValue(key, out var marks)) { marks = new List<float>(); _exactMarks[key] = marks; }
                 marks.Add(Mathf.Clamp01(p.x));
-                PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation);
+                PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, p.facade);
             }
         }
 
@@ -354,7 +467,8 @@ namespace SFMap.Pipeline.Editor
         // Place one part on one facade at normalized (nx, ny) on floor `floor`. Shared by the
         // Exact and Procedural paths; all the facade-frame math lives here.
         void PlacePart(Transform parent, StreetFacadeJson f, BuildingFactsJson facts,
-                       string partId, int floor, float nx, float ny, float scale, float rotationDeg)
+                       string partId, int floor, float nx, float ny, float scale, float rotationDeg,
+                       Facade facadeEnum, bool isSign = false)
         {
             if (f.edge == null || f.edge.Length < 4) return;
 
@@ -401,7 +515,7 @@ namespace SFMap.Pipeline.Editor
                                         Mathf.Max(part.sizeMeters.y, 0.1f), 1f);
             child.transform.localScale = baseScale * s;
 
-            _placed.Add(new Placed { go = child, part = part });
+            _placed.Add(new Placed { go = child, part = part, partId = partId, facade = facadeEnum, floor = floor, isSign = isSign });
         }
 
         // ---- procedural rule engine (#271) -------------------------------------
@@ -491,7 +605,7 @@ namespace SFMap.Pipeline.Editor
                         float rot = rule.jitter.rotation != 0f
                             ? rng.Range(-rule.jitter.rotation, rule.jitter.rotation) : 0f;
 
-                        PlacePart(parent, f, facts, partId, floor, nx, ny, scale, rot);
+                        PlacePart(parent, f, facts, partId, floor, nx, ny, scale, rot, rule.facade);
                     }
                 }
             }
