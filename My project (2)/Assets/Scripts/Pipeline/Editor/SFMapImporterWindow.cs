@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
@@ -72,6 +73,57 @@ namespace SFMap.Pipeline.Editor
         // match, so spacing stays dense without overlap.
         const float ParkedCarScale = 0.5f;
 
+        // --------------------------------------------------------------- timing
+        // Stage 2 had no instrumentation (#260): it logged only a chunk count, so
+        // every guess about what's slow was unverifiable. These accumulate per-op
+        // wall-clock for one import run; RunImport prints the breakdown at the end.
+        class ImportTimings
+        {
+            public int    chunks;
+            public double binParseMs;    // .bin open + header + heightmap parse
+            public double terrainMs;     // TerrainData build + SetHeights + asset
+            public double meshBuildMs;   // BuildMesh (verts/normals/RecalculateNormals)
+            public double colliderMs;    // MeshCollider cook (sharedMesh assignment)
+            public double parkedCarsMs;  // parked-car prefab instantiation
+            public double savePrefabMs;  // SaveAsPrefabAsset
+            public double finalSaveMs;   // closing SaveAssets + Refresh
+        }
+
+        ImportTimings      _timings;
+        readonly Stopwatch _opWatch = new Stopwatch();
+
+        // One shared op-watch is enough: the timed regions never overlap in time
+        // (each chunk runs parse → terrain → mesh → collider → cars → save in turn).
+        void StartOp() => _opWatch.Restart();
+        void StopOp(ref double bucketMs) => bucketMs += _opWatch.Elapsed.TotalMilliseconds;
+
+        // Per-operation breakdown so #259's profile-gated work targets the real
+        // bottleneck. "unaccounted" = total minus the timed buckets (e.g. the
+        // deferred StopAssetEditing import, per-mesh array reads, folder setup).
+        static void LogImportTimings(ImportTimings t, double totalMs)
+        {
+            int    n = Math.Max(t.chunks, 1);
+            double accounted = t.binParseMs + t.terrainMs + t.meshBuildMs + t.colliderMs +
+                               t.parkedCarsMs + t.savePrefabMs + t.finalSaveMs;
+            double unaccounted = Math.Max(totalMs - accounted, 0.0);
+
+            string Row(string label, double ms) =>
+                $"  {label,-16}: {ms,9:F1}ms  {(totalMs > 0 ? ms / totalMs * 100 : 0),5:F1}%  mean {ms / n,7:F2}ms";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"[SFMapImporter] Import timing over {t.chunks} chunk(s) — " +
+                          $"total {totalMs:F1}ms ({totalMs / n:F1}ms/chunk):");
+            sb.AppendLine(Row(".bin read+parse", t.binParseMs));
+            sb.AppendLine(Row("terrain build",   t.terrainMs));
+            sb.AppendLine(Row("mesh build",      t.meshBuildMs));
+            sb.AppendLine(Row("collider cook",   t.colliderMs));
+            sb.AppendLine(Row("parked cars",     t.parkedCarsMs));
+            sb.AppendLine(Row("save prefab",     t.savePrefabMs));
+            sb.AppendLine(Row("final save",      t.finalSaveMs));
+            sb.Append    (Row("unaccounted",     unaccounted));
+            Debug.Log(sb.ToString());
+        }
+
         [MenuItem("Window/SF Map Importer")]
         public static void Open() => GetWindow<SFMapImporterWindow>("SF Map Importer");
 
@@ -116,6 +168,9 @@ namespace SFMap.Pipeline.Editor
                 return;
             }
 
+            _timings = new ImportTimings();
+            var totalWatch = Stopwatch.StartNew();
+
             EnsureTopLevelFolders();
             EnsureMaterials();
 
@@ -148,10 +203,16 @@ namespace SFMap.Pipeline.Editor
 
                     var chunkRootGo = mapRoot.transform.Find(coord.ToString()).gameObject;
                     if (bakeParkedCars)
+                    {
+                        StartOp();
                         ImportParkedCars(chunkDir, coord, chunkRootGo);
+                        StopOp(ref _timings.parkedCarsMs);
+                    }
 
+                    StartOp();
                     PrefabUtility.SaveAsPrefabAsset(chunkRootGo,
                         GeneratedAssets.ChunkPrefabPath(coord));
+                    StopOp(ref _timings.savePrefabMs);
 
                     coordList.Add(new ChunkManifestEntry
                     {
@@ -164,9 +225,17 @@ namespace SFMap.Pipeline.Editor
 
                 if (globalMinElev == float.MaxValue) globalMinElev = 0f;
                 SaveChunkManifest(manifest, coordList, globalMinElev);
+
+                StartOp();
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
+                StopOp(ref _timings.finalSaveMs);
+
                 Debug.Log($"[SFMapImporter] Imported {coordList.Count} chunk(s) for preset '{presetName}'.");
+
+                totalWatch.Stop();
+                _timings.chunks = coordList.Count;
+                LogImportTimings(_timings, totalWatch.Elapsed.TotalMilliseconds);
             }
             catch (Exception e)
             {
@@ -182,6 +251,7 @@ namespace SFMap.Pipeline.Editor
         // Returns the chunk's min elevation (for the global ChunkManifest).
         float ImportChunk(string binPath, ChunkCoord coord, float worldX, float worldZ, GameObject mapRoot)
         {
+            StartOp();
             using var fs     = File.OpenRead(binPath);
             using var reader = new BinaryReader(fs);
 
@@ -213,6 +283,7 @@ namespace SFMap.Pipeline.Editor
             var heights2D = new float[hmapRes, hmapRes]; // [row, col]
             for (int idx = 0; idx < hmapCount; idx++)
                 heights2D[idx / hmapRes, idx % hmapRes] = heights1D[idx];
+            StopOp(ref _timings.binParseMs);
 
             EnsureChunkFolder(coord);
             var baseLayer = EnsureBaseTerrainLayer();
@@ -238,12 +309,14 @@ namespace SFMap.Pipeline.Editor
             AssetDatabase.StartAssetEditing();
             try
             {
+                StartOp();
                 terrainData = new TerrainData();
                 terrainData.heightmapResolution = hmapRes;
                 terrainData.size = new Vector3(chunkSizeM, Mathf.Max(maxElevM - minElevM, 1f), chunkSizeM);
                 terrainData.SetHeights(0, 0, heights2D);
                 terrainData.terrainLayers = new[] { baseLayer };
                 CreateOrReplaceAsset(terrainData, GeneratedAssets.TerrainAsset(coord));
+                StopOp(ref _timings.terrainMs);
 
                 // ---- Mesh entries ----
                 int meshCount = reader.ReadInt32();
@@ -261,7 +334,9 @@ namespace SFMap.Pipeline.Editor
 
                     if (vertCnt == 0 || idxCnt == 0) continue;
 
+                    StartOp();
                     var mesh = BuildMesh(MeshName(meshType, osmId), verts, normals, uvs, indices);
+                    StopOp(ref _timings.meshBuildMs);
 
                     switch (meshType)
                     {
@@ -319,7 +394,9 @@ namespace SFMap.Pipeline.Editor
             foreach (var mesh in roadMeshes)
             {
                 var go = PlaceMesh(mesh, roadParent, roadMat);
+                StartOp();
                 go.AddComponent<MeshCollider>().sharedMesh = mesh;
+                StopOp(ref _timings.colliderMs);
                 go.layer = roadLayer;
             }
 
@@ -329,7 +406,9 @@ namespace SFMap.Pipeline.Editor
             foreach (var mesh in sidewalkMeshes)
             {
                 var go = PlaceMesh(mesh, swParent, swMat);
+                StartOp();
                 go.AddComponent<MeshCollider>().sharedMesh = mesh;
+                StopOp(ref _timings.colliderMs);
             }
 
             // Intersections: one GameObject per mesh, like roads (collider + Road layer),
@@ -338,7 +417,9 @@ namespace SFMap.Pipeline.Editor
             foreach (var mesh in intersectionMeshes)
             {
                 var go = PlaceMesh(mesh, intParent, roadMat);
+                StartOp();
                 go.AddComponent<MeshCollider>().sharedMesh = mesh;
+                StopOp(ref _timings.colliderMs);
                 go.layer = roadLayer;
             }
 
