@@ -185,9 +185,18 @@ def _polygon_area(ring: Sequence[Point]) -> float:
 
 
 def _quantize(v: float) -> float:
-    """Snap a coordinate to the hash grid, normalising -0.0 to 0.0."""
-    q = round(v / _HASH_GRID_M) * _HASH_GRID_M
-    return q + 0.0  # collapse a possible -0.0 so its serialisation is stable
+    """Snap a coordinate to the 0.25 m hash grid (data-model.md §6.1 step 2).
+
+    Rounding is pinned to half-away-from-zero rather than Python's banker's
+    ``round`` so the hash is reproducible across languages: the server that authors
+    building-specific overrides must quantise identically (design D3), and it should
+    not depend on the host's default rounding mode. Exact half-cases (a coordinate
+    landing on a 0.125 m boundary) are vanishingly rare in projected float coords,
+    but the contract is byte-for-byte so the tie-break is fixed here regardless.
+    """
+    n = v / _HASH_GRID_M
+    n = math.floor(n + 0.5) if n >= 0 else math.ceil(n - 0.5)
+    return n * _HASH_GRID_M + 0.0  # +0.0 collapses a possible -0.0 for stable text
 
 
 def footprint_hash(ring: Sequence[Point]) -> str:
@@ -456,8 +465,15 @@ def classify_building(
 
 
 def building_centroid(footprint: Sequence[Point]) -> Point:
-    """Average of the footprint's distinct vertices — the point used for the
-    neighborhood point-in-polygon lookup (matches the chunk-crop centroid)."""
+    """Average of the footprint's distinct vertices — the point fed to the
+    neighborhood point-in-polygon lookup.
+
+    Drops the closing duplicate first, so for a closed OSM ring this differs
+    microscopically from crop_to_chunk's centroid (which averages the raw ring
+    including the duplicate). That only nudges the neighborhood result for a building
+    sitting exactly on a boundary; it never changes which chunk classifies the
+    building — chunk membership is decided solely by crop_to_chunk.
+    """
     pts = _drop_closing(footprint)
     n = len(pts) or 1
     return (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n)
