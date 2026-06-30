@@ -1,0 +1,13 @@
+{
+  "id": "window_sunset_2x3",
+  "category": "Window",
+  "glb": "Parts/window_sunset_2x3.glb",
+  "size_m": { "w": 1.2, "h": 1.6, "d": 0.15 },
+  "roleSubmeshes": [
+    { "submesh": 0, "role": "Base" },
+    { "submesh": 1, "role": "Glass" }
+  ],
+  "anchor": "BottomCenter",
+  "mountDepth_m": -0.08,
+  "version": 1
+}

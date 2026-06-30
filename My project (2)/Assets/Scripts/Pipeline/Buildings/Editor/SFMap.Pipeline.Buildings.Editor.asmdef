@@ -1,0 +1,18 @@
+{
+    "name": "SFMap.Pipeline.Buildings.Editor",
+    "rootNamespace": "SFMap.Pipeline.Buildings.Editor",
+    "references": [
+        "SFMap.Pipeline.Buildings"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
