@@ -14,11 +14,13 @@ namespace SFMap.Pipeline
     /// drift into an adjacent one, lerping smoothly over <see cref="TrafficManager.laneChangeDuration"/>
     /// seconds so the move looks intentional rather than a jump.
     ///
-    /// No Rigidbody/physics: cars pass through each other and the player. That keeps the
-    /// system robust (no pile-ups) and cheap. <see cref="TrafficManager"/> owns spawning
-    /// and culling; a car that runs off the streamed area — its downward ray finds no
-    /// road for <see cref="LostGrace"/> seconds — sets <see cref="Done"/> so the manager
-    /// recycles it.
+    /// The car carries only a kinematic Rigidbody + collider (wired by <see cref="TrafficManager"/>)
+    /// so the dynamic player is physically blocked by it; movement itself stays transform-driven,
+    /// so cars never push each other and the system stays robust (no pile-ups) and cheap. When the
+    /// player hits one it nudges a little toward the kerb (<see cref="OnCollisionEnter"/>) and the
+    /// shift decays away over a couple seconds. <see cref="TrafficManager"/> owns spawning and
+    /// culling; a car that runs off the streamed area — its downward ray finds no road for
+    /// <see cref="LostGrace"/> seconds — sets <see cref="Done"/> so the manager recycles it.
     /// </summary>
     [DisallowMultipleComponent]
     public class TrafficCar : MonoBehaviour
@@ -29,6 +31,14 @@ namespace SFMap.Pipeline
         const float BrakeDistance = 10f; // start easing the throttle within this far of the stop line
         const float BrakeSpeedEps = 0.3f; // commanded slowdown bigger than this lights the brakes
         const float TurnSignalAngle = 25f; // a planned exit turning more than this signals the turn
+
+        // Pull-over reaction to being hit by the player. A hit bumps a transient rightward
+        // (kerb-ward) offset that adds on top of the lane offset and decays back to zero, so
+        // the car visibly flinches aside without ever leaving its transform-driven track.
+        const float MaxPullOver = 1.2f;     // metres the offset can build to (clamped)
+        const float PullOverPerHit = 0.6f;  // metres one impact adds toward MaxPullOver
+        const float PullOverDecay = 0.5f;   // metres/second it bleeds back to centre (~2.4 s from full)
+        const float HitSpeedScrub = 0.4f;   // fraction of speed shed on a hit so the nudge reads as a reaction
 
         /// Which way the car will turn at the junction it is approaching — drives the indicator.
         public enum Indicator { None, Left, Right }
@@ -65,6 +75,7 @@ namespace SFMap.Pipeline
         float _laneChangeTimer;
         float _laneChangePeriodMin;
         float _laneChangePeriodMax;
+        float _pullOver;    // transient rightward (kerb-ward) offset from a player hit, metres; decays to 0
         float _lostTime;    // seconds without finding road under us
         bool _ready;
         bool _firstConform;
@@ -125,6 +136,7 @@ namespace SFMap.Pipeline
             _signal = Indicator.None;
             _braking = false;
             _laneChangeT = 1f; // start settled in the assigned lane
+            _pullOver = 0f;
             _lostTime = 0f;
             Done = false;
             _firstConform = true;
@@ -184,6 +196,9 @@ namespace SFMap.Pipeline
         {
             if (!_ready || _net == null) return;
 
+            // Bleed any player-hit pull-over back toward the centerline.
+            if (_pullOver > 0f) _pullOver = Mathf.MoveTowards(_pullOver, 0f, PullOverDecay * Time.deltaTime);
+
             // Advance lane-change lerp; once settled, count down to the next check.
             if (_laneChangeT < 1f)
             {
@@ -224,6 +239,17 @@ namespace SFMap.Pipeline
             Advance(governed);
             if (Done) return; // reached a dead-end; manager will cull
             Conform();
+        }
+
+        // Fired by Unity because the car's root carries a (kinematic) Rigidbody. React only to
+        // being struck by a DYNAMIC body — the player car — by nudging toward the kerb and
+        // shedding a little speed so the bump reads as a reaction. A null rigidbody is static
+        // geometry; a kinematic one is (defensively) other traffic — neither should move us.
+        void OnCollisionEnter(Collision c)
+        {
+            if (c.rigidbody == null || c.rigidbody.isKinematic) return; // not the dynamic player
+            _pullOver = Mathf.Min(MaxPullOver, _pullOver + PullOverPerHit);
+            _speed *= 1f - HitSpeedScrub;
         }
 
         // Looks one junction ahead: while the car is within the approach window of a real
@@ -449,7 +475,9 @@ namespace SFMap.Pipeline
             // The road mesh is wide enough that the offset point still lands on it, so
             // the raycast below grounds the car at its actual (offset) position.
             Vector3 flatRight = Vector3.Cross(Vector3.up, fwd); // unit: fwd is normalised
-            Vector2 drive = _pos + new Vector2(flatRight.x, flatRight.z) * LaneOffset(e);
+            // Lane offset plus any transient pull-over from a player hit — both shift the car
+            // right (toward the kerb), and the raycast below grounds it at this offset point.
+            Vector2 drive = _pos + new Vector2(flatRight.x, flatRight.z) * (LaneOffset(e) + _pullOver);
 
             var origin = new Vector3(drive.x, RayTop, drive.y);
             bool grounded = Physics.Raycast(origin, Vector3.down, out var hit, RayLen, _mask,

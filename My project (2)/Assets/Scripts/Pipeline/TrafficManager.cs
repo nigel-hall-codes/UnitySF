@@ -300,11 +300,18 @@ namespace SFMap.Pipeline
             go.name = $"TrafficCar_{prefab.name}";
             go.transform.localScale *= carScale;
 
-            // Ambient traffic is kinematic and ghost-like by design: drop any physics and
-            // colliders the prefab ships with so cars never fight the transform driver or
-            // collide with the player.
+            // Ambient traffic stays kinematic and transform-driven, but each car carries a
+            // kinematic Rigidbody on the root plus an enabled, non-trigger collider so the
+            // dynamic player car is physically blocked by it (it can't drive through). A
+            // kinematic body is never pushed by a collision, so traffic-vs-traffic and
+            // traffic-vs-static stay inert — no pile-ups, no snagging on roads or buildings,
+            // matching the existing ghost-like design. Collision callbacks route to the
+            // Rigidbody's GameObject (the root), where TrafficCar lives, so it can react.
             foreach (var rb in go.GetComponentsInChildren<Rigidbody>()) rb.isKinematic = true;
-            foreach (var col in go.GetComponentsInChildren<Collider>()) col.enabled = false;
+            var rootRb = go.GetComponent<Rigidbody>();
+            if (rootRb == null) rootRb = go.AddComponent<Rigidbody>();
+            rootRb.isKinematic = true;
+            EnsureCollider(go);
 
             var car = go.GetComponent<TrafficCar>();
             if (car == null) car = go.AddComponent<TrafficCar>();
@@ -361,6 +368,33 @@ namespace SFMap.Pipeline
                 if (!_byEdge.TryGetValue(e, out var list)) { list = new List<TrafficCar>(); _byEdge[e] = list; }
                 list.Add(c);
             }
+        }
+
+        // Guarantees the car blocks the dynamic player: keeps every collider the prefab ships
+        // with enabled and solid (non-trigger). A car that ships none gets a BoxCollider on the
+        // root, fitted to its combined visible bounds. The renderers' world bounds already
+        // include the root's localScale (applied just before this call) and worldToLocalMatrix
+        // maps them back into the root's local space, so the box is the right size and scales
+        // correctly with the car. Called at spawn while the root's rotation is still identity,
+        // so the matrix is pure translation+scale and the size maps axis-for-axis.
+        static void EnsureCollider(GameObject go)
+        {
+            var cols = go.GetComponentsInChildren<Collider>();
+            bool hasCollider = cols.Length > 0;
+            foreach (var col in cols) { col.enabled = true; col.isTrigger = false; }
+            if (hasCollider) return;
+
+            var renderers = go.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) return; // nothing visible to fit a box to
+
+            Bounds world = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++) world.Encapsulate(renderers[i].bounds);
+
+            var box = go.AddComponent<BoxCollider>();
+            var w2l = go.transform.worldToLocalMatrix;
+            box.center = w2l.MultiplyPoint3x4(world.center);
+            Vector3 size = w2l.MultiplyVector(world.size);
+            box.size = new Vector3(Mathf.Abs(size.x), Mathf.Abs(size.y), Mathf.Abs(size.z));
         }
 
         static float SqXZ(Vector3 a, Vector3 b)
