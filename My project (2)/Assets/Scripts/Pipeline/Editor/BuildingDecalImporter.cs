@@ -61,8 +61,14 @@ namespace SFMap.Pipeline.Editor
                 }
 
                 var decals = ov.facadeDecals;
-                Array.Sort(decals, (x, y) => x.layer != y.layer
-                    ? x.layer.CompareTo(y.layer) : x.mountDepth_m.CompareTo(y.mountDepth_m));
+                Array.Sort(decals, (x, y) =>
+                {
+                    int c = x.layer.CompareTo(y.layer);
+                    if (c != 0) return c;
+                    c = x.mountDepth_m.CompareTo(y.mountDepth_m);
+                    if (c != 0) return c;
+                    return string.CompareOrdinal(x.texture ?? "", y.texture ?? "");  // stable tiebreak
+                });
 
                 int index = 0;
                 foreach (var d in decals)
@@ -93,6 +99,10 @@ namespace SFMap.Pipeline.Editor
             if (facade.edge == null || facade.edge.Length < 4) return false;
             if (d.rect == null || d.rect.Length < 4) return false;
 
+            // Resolve the material first; a missing texture skips the decal (no white patch).
+            var material = DecalMaterial(d.texture, materialCache);
+            if (material == null) return false;
+
             Vector3 a = new Vector3(facade.edge[0], f.base_y, facade.edge[1]);
             Vector3 b = new Vector3(facade.edge[2], f.base_y, facade.edge[3]);
             Vector3 along = b - a;
@@ -121,7 +131,7 @@ namespace SFMap.Pipeline.Editor
 
             var go = CreateChild(parent.gameObject, $"decal_{f.osm_id}_{index}");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = DecalMaterial(d.texture, materialCache);
+            go.AddComponent<MeshRenderer>().sharedMaterial = material;
             return true;
         }
 
@@ -135,20 +145,43 @@ namespace SFMap.Pipeline.Editor
 
         // ---- material / texture -----------------------------------------------
 
+        // One material per decal texture, written to a map-wide path. Returns null (→ the decal is
+        // skipped) when the texture can't be loaded, so a missing PNG never paints a white quad.
         static Material DecalMaterial(string texturePath, Dictionary<string, Material> cache)
         {
             string key = texturePath ?? "";
-            if (cache.TryGetValue(key, out var cached)) return cached;
+            if (cache.TryGetValue(key, out var cached)) return cached;   // may be null (cached miss)
 
-            var shader = Shader.Find("SFMap/DecalUnlitTransparent");
-            var mat = new Material(shader) { name = $"decal_{Safe(key)}" };
-            if (!string.IsNullOrEmpty(texturePath))
+            Texture2D tex = string.IsNullOrEmpty(texturePath)
+                ? null : AssetDatabase.LoadAssetAtPath<Texture2D>($"{LibraryRoot}/{texturePath}");
+            if (tex == null)
             {
-                var tex = AssetDatabase.LoadAssetAtPath<Texture2D>($"{LibraryRoot}/{texturePath}");
-                if (tex != null) mat.mainTexture = tex;
-                else Debug.LogWarning($"[BuildingDecalImporter] decal texture not found: {LibraryRoot}/{texturePath}");
+                Debug.LogWarning($"[BuildingDecalImporter] decal texture not found: " +
+                                 $"{LibraryRoot}/{texturePath} — decal skipped.");
+                cache[key] = null;
+                return null;
             }
-            SaveAsset(mat, $"{GeneratedAssets.Root}/Materials/decal_{Safe(key)}.mat");
+
+            string path = $"{GeneratedAssets.Root}/Materials/decal_{Safe(key)}.mat";
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+            // REUSE an existing material asset (update it in place) rather than delete+recreate, so
+            // its GUID is stable across chunks that share a decal texture — otherwise re-minting the
+            // GUID would break an already-saved earlier chunk prefab's material reference.
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (mat == null)
+            {
+                mat = new Material(Shader.Find("SFMap/DecalUnlitTransparent")) { name = $"decal_{Safe(key)}" };
+                mat.mainTexture = tex;
+                AssetDatabase.CreateAsset(mat, path);
+            }
+            else
+            {
+                if (mat.shader == null) mat.shader = Shader.Find("SFMap/DecalUnlitTransparent");
+                mat.mainTexture = tex;
+                EditorUtility.SetDirty(mat);
+            }
             cache[key] = mat;
             return mat;
         }
