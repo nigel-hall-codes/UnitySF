@@ -12,13 +12,14 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-from .models import BuildingSpecificDef, PaletteDef, PartDef, TemplateDef
+from .models import BuildingSpecificDef, PaletteDef, PartDef, SignDef, TemplateDef
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS parts     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS palettes  (neighborhood TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS overrides (osm_id INTEGER PRIMARY KEY, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS signs     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 """
 
 
@@ -32,6 +33,7 @@ class Store:
         self._conn.commit()
         self.assets_dir = Path(assets_dir)
         (self.assets_dir / "parts").mkdir(parents=True, exist_ok=True)
+        (self.assets_dir / "signs").mkdir(parents=True, exist_ok=True)
 
     def close(self) -> None:
         self._conn.close()
@@ -71,6 +73,30 @@ class Store:
 
     def list_overrides(self) -> List[BuildingSpecificDef]:
         return [BuildingSpecificDef.model_validate_json(j) for j in self._all("overrides")]
+
+    # -- signs --------------------------------------------------------------
+
+    def upsert_sign(self, sign: SignDef) -> None:
+        self._upsert("signs", "id", sign.signId, sign)
+
+    def list_signs(self) -> List[SignDef]:
+        return [SignDef.model_validate_json(j) for j in self._all("signs")]
+
+    def get_sign(self, sign_id: str) -> Optional[SignDef]:
+        row = self._one("signs", "id", sign_id)
+        return SignDef.model_validate_json(row) if row else None
+
+    def save_sign_png(self, sign_id: str, png: bytes, thumb: bytes) -> None:
+        (self.assets_dir / "signs" / f"{sign_id}.png").write_bytes(png)
+        (self.assets_dir / "signs" / f"{sign_id}.thumb.png").write_bytes(thumb)
+
+    def sign_png_path(self, sign_id: str) -> Optional[Path]:
+        path = self.assets_dir / "signs" / f"{sign_id}.png"
+        return path if path.exists() else None
+
+    def sign_thumb_path(self, sign_id: str) -> Optional[Path]:
+        path = self.assets_dir / "signs" / f"{sign_id}.thumb.png"
+        return path if path.exists() else None
 
     # -- GLB binaries -------------------------------------------------------
 

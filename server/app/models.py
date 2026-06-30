@@ -160,6 +160,32 @@ class BuildingSpecificDef(BaseModel):
     version: int = 1
 
 
+# --- AI signs (data-model.md §5 POST /ai/signs/generate) -------------------
+
+class SignRequest(BaseModel):
+    businessType: str = ""
+    neighborhood: str = ""
+    text: str = ""
+    aspectRatio: str = "1:1"
+    stylePreset: str = ""
+    provider: str = ""        # optional override; "" → server default
+
+
+class SignDef(BaseModel):
+    """The stored, reusable sign record (and the exported <signId>.sign.json)."""
+    signId: str
+    png: str                  # library-relative, e.g. Signs/<id>.png
+    thumb: str                # library-relative, e.g. Signs/<id>.thumb.png
+    provider: str
+    version: int = 1
+    # the request that produced it, retained so a sign is reproducible / searchable
+    businessType: str = ""
+    neighborhood: str = ""
+    text: str = ""
+    aspectRatio: str = "1:1"
+    stylePreset: str = ""
+
+
 # --- Export request / response ---------------------------------------------
 
 class ExportRequest(BaseModel):
@@ -175,3 +201,4 @@ class ExportResult(BaseModel):
     palettes: int
     overrides: int
     glbsCopied: int
+    signs: int = 0
