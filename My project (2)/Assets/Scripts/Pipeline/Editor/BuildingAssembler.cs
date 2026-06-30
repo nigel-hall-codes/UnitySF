@@ -65,6 +65,11 @@ namespace SFMap.Pipeline.Editor
         readonly List<BuildingTemplate> _templates;
         readonly Dictionary<string, BuildingPart> _partsById;
 
+        // Exact placement positions of the building currently being assembled, keyed by
+        // (facade edge_index, floor) → normalized x's, so procedural rules with avoidExact can
+        // skip slots that land on an Exact part. Reset per building in Assemble.
+        readonly Dictionary<long, List<float>> _exactMarks = new Dictionary<long, List<float>>();
+
         int _templated;
 
         public int Templated => _templated;
@@ -149,9 +154,18 @@ namespace SFMap.Pipeline.Editor
             massGo.AddComponent<MeshFilter>().sharedMesh = massMesh;
             massGo.AddComponent<MeshRenderer>().sharedMaterial = massMaterial;
 
-            if (template.exact == null) { _templated++; return; }
-            foreach (var p in template.exact)
-                PlaceExact(root.transform, p, facts);
+            // Exact first (it also records marks the procedural avoidExact constraint reads).
+            _exactMarks.Clear();
+            if (template.exact != null)
+                foreach (var p in template.exact)
+                    PlaceExact(root.transform, p, facts);
+
+            // Procedural rules — the engine of believable variety (#271). The rule index is
+            // part of every per-slot seed, so a wider building deterministically gets more
+            // parts and a re-import is byte-stable.
+            if (template.rules != null)
+                for (int r = 0; r < template.rules.Length; r++)
+                    PlaceProcedural(root.transform, template.rules[r], facts, r);
 
             _templated++;
         }
@@ -166,27 +180,50 @@ namespace SFMap.Pipeline.Editor
 
         void PlaceExact(Transform parent, ExactPlacement p, BuildingFactsJson facts)
         {
-            // Resolve which facade(s) this placement targets. Front = primary street facade;
-            // Street = every ranked street facade; other faces aren't carried in the sidecar
-            // (MVP), so they're skipped with a warning.
-            if (p.facade == Facade.Front)
+            foreach (var f in FacadesFor(p.facade, facts))
+            {
+                long key = ExactKey(f.edge_index, p.floor);
+                if (!_exactMarks.TryGetValue(key, out var marks)) { marks = new List<float>(); _exactMarks[key] = marks; }
+                marks.Add(Mathf.Clamp01(p.x));
+                PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation);
+            }
+        }
+
+        static long ExactKey(int edgeIndex, int floor) => ((long)edgeIndex << 16) | (uint)(floor & 0xFFFF);
+
+        bool NearExactMark(int edgeIndex, int floor, float nx, float radius)
+        {
+            if (_exactMarks.TryGetValue(ExactKey(edgeIndex, floor), out var marks))
+                foreach (var ex in marks)
+                    if (Mathf.Abs(ex - nx) < radius) return true;
+            return false;
+        }
+
+        // The facade(s) a placement targets: Front → primary street facade; Street → every
+        // ranked street facade; other faces aren't carried in the sidecar (MVP) → warn + none.
+        IEnumerable<StreetFacadeJson> FacadesFor(Facade facade, BuildingFactsJson facts)
+        {
+            if (facade == Facade.Front)
             {
                 var f = PrimaryFacade(facts);
-                if (f != null) PlaceOnFacade(parent, p, facts, f);
+                if (f != null) yield return f;
             }
-            else if (p.facade == Facade.Street)
+            else if (facade == Facade.Street)
             {
                 if (facts.street_facades != null)
-                    foreach (var f in facts.street_facades) PlaceOnFacade(parent, p, facts, f);
+                    foreach (var f in facts.street_facades) yield return f;
             }
             else
             {
-                Debug.LogWarning($"[BuildingAssembler] building {facts.osm_id}: facade {p.facade} not " +
+                Debug.LogWarning($"[BuildingAssembler] building {facts.osm_id}: facade {facade} not " +
                                  "supported yet (only Front/Street carry sidecar geometry); skipped.");
             }
         }
 
-        void PlaceOnFacade(Transform parent, ExactPlacement p, BuildingFactsJson facts, StreetFacadeJson f)
+        // Place one part on one facade at normalized (nx, ny) on floor `floor`. Shared by the
+        // Exact and Procedural paths; all the facade-frame math lives here.
+        void PlacePart(Transform parent, StreetFacadeJson f, BuildingFactsJson facts,
+                       string partId, int floor, float nx, float ny, float scale, float rotationDeg)
         {
             if (f.edge == null || f.edge.Length < 4) return;
 
@@ -204,34 +241,141 @@ namespace SFMap.Pipeline.Editor
 
             // Normalized facade coords → world. x along the real facade width; y up the facade
             // (floor band + within-floor offset), both scaled to this building's real frame.
-            Vector3 pos = a + along * (Mathf.Clamp01(p.x) * len);
-            pos.y = facts.base_y + (p.floor + Mathf.Clamp01(p.y)) * FloorHeightMeters;
+            Vector3 pos = a + along * (Mathf.Clamp01(nx) * len);
+            pos.y = facts.base_y + (floor + Mathf.Clamp01(ny)) * FloorHeightMeters;
             // Don't let a too-high floor index float the part above the roof: clamp to the
             // building's real facade height (the #279 facade_height_m fact).
             float facadeTop = facts.base_y + Mathf.Max(facts.facade_height_m, FloorHeightMeters);
             pos.y = Mathf.Min(pos.y, facadeTop);
 
-            BuildingPart part = ResolvePart(p.part);
+            BuildingPart part = ResolvePart(partId);
             float mountDepth = part != null ? part.mountDepthMeters : 0f;
             pos += outward * mountDepth;   // outward is horizontal, so this leaves pos.y intact
 
-            var child = InstantiatePart(part, p.part, out bool isPlaceholder);
+            var child = InstantiatePart(part, partId, out bool isPlaceholder);
             child.transform.SetParent(parent, false);
             child.transform.position = pos;
             // A real GLB part authors its front as +Z, so point +Z outward. The placeholder
             // Quad's visible face is -Z, so face *that* to the street (else it's back-face-culled
             // from outside). Either way apply the placement's roll about the outward normal.
             Vector3 facing = isPlaceholder ? -outward : outward;
-            child.transform.rotation = Quaternion.AngleAxis(p.rotation, outward) *
+            child.transform.rotation = Quaternion.AngleAxis(rotationDeg, outward) *
                                        Quaternion.LookRotation(facing, Vector3.up);
             // Scale = the placement scale, applied on top of the placeholder's authored size
             // (a real prefab carries its own size, so its base is unit).
-            float s = p.scale <= 0f ? 1f : p.scale;
+            float s = scale <= 0f ? 1f : scale;
             Vector3 baseScale = Vector3.one;
             if (isPlaceholder && part != null && part.sizeMeters != Vector3.zero)
                 baseScale = new Vector3(Mathf.Max(part.sizeMeters.x, 0.1f),
                                         Mathf.Max(part.sizeMeters.y, 0.1f), 1f);
             child.transform.localScale = baseScale * s;
+        }
+
+        // ---- procedural rule engine (#271) -------------------------------------
+
+        // Deterministic per-slot draws: a tiny xorshift32 seeded by hash(osm_id, ruleIndex,
+        // slotIndex), so every random choice (count rounding, probability, jitter, variant) is
+        // reproducible — the same building always assembles identically (design §Placement Model).
+        struct Rng
+        {
+            uint _s;
+            public Rng(uint seed) { _s = seed == 0u ? 1u : seed; }
+            public uint NextUInt() { _s ^= _s << 13; _s ^= _s >> 17; _s ^= _s << 5; return _s; }
+            public float NextFloat() => (NextUInt() & 0xFFFFFFu) / 16777216f;   // [0,1)
+            public float Range(float lo, float hi) => lo + (hi - lo) * NextFloat();
+        }
+
+        void PlaceProcedural(Transform parent, ProceduralRule rule, BuildingFactsJson facts, int ruleIndex)
+        {
+            if (rule == null) return;
+            bool hasPart = !string.IsNullOrEmpty(rule.part) ||
+                           (rule.variants != null && rule.variants.Length > 0);
+            if (!hasPart) return;
+
+            float x0 = rule.span != null && rule.span.Length > 0 ? Mathf.Clamp01(rule.span[0]) : 0f;
+            float x1 = rule.span != null && rule.span.Length > 1 ? Mathf.Clamp01(rule.span[1]) : 1f;
+            float margin = Mathf.Clamp01(rule.constraints.edgeMargin);
+            x0 = Mathf.Clamp01(x0 + margin);
+            x1 = Mathf.Clamp01(x1 - margin);
+            if (x1 <= x0) return;
+
+            // Floor band, clamped to the building's real floor count (no parts above the roof).
+            int floorMin = Mathf.Max(rule.floorRange.min, 0);
+            int floorMax = Mathf.Max(rule.floorRange.max, floorMin);
+            floorMax = Mathf.Min(floorMax, Mathf.Max(facts.floor_count, 1) - 1);
+            if (floorMax < floorMin) return;
+
+            foreach (var f in FacadesFor(rule.facade, facts))
+            {
+                float facadeLen = FacadeLength(f);
+                if (facadeLen < 1e-3f) continue;
+
+                // Count from spacing across the real span, honouring min spacing as a floor and
+                // the rule's count bounds — so a wider building deterministically gets more parts.
+                float spanMeters = (x1 - x0) * facadeLen;
+                float spacing = Mathf.Max(rule.repeat.spacingMeters, rule.constraints.minSpacingMeters, 0.1f);
+                int count = Mathf.FloorToInt(spanMeters / spacing);
+                // countMin guarantees a minimum even on a sub-spacing facade (an intended floor on
+                // the low end); countMax caps it. Above the floor, count grows with facade width.
+                count = Mathf.Max(count, Mathf.Max(rule.repeat.countMin, 0));
+                if (rule.repeat.countMax > 0) count = Mathf.Min(count, rule.repeat.countMax);
+                if (count <= 0) continue;
+
+                // Exclusion radius (normalized) for avoidExact: keep a procedural part this far
+                // from any Exact placement on the same facade edge + floor.
+                float exclusion = Mathf.Max(rule.constraints.minSpacingMeters, spacing * 0.5f) / facadeLen;
+
+                for (int floor = floorMin; floor <= floorMax; floor++)
+                {
+                    for (int i = 0; i < count; i++)
+                    {
+                        // Wide stride so (floor, slot) never collide in the seed for any real count.
+                        var rng = new Rng(SeedFor(facts.osm_id, ruleIndex, floor * 65536 + i));
+
+                        // probability ≤ 0 is the serialized default ("unset") → place; express "off"
+                        // by omitting the rule. Otherwise a seeded Bernoulli trial.
+                        float prob = rule.probability <= 0f ? 1f : Mathf.Clamp01(rule.probability);
+                        if (prob < 1f && rng.NextFloat() >= prob) continue;
+
+                        float t = count == 1 ? 0.5f : (i + 0.5f) / count;
+                        float nx = x0 + t * (x1 - x0);
+                        if (rule.jitter.x != 0f)
+                            nx += rng.Range(-rule.jitter.x, rule.jitter.x) / facadeLen;  // metres → normalized
+                        nx = Mathf.Clamp(nx, x0, x1);
+
+                        if (rule.constraints.avoidExact && NearExactMark(f.edge_index, floor, nx, exclusion))
+                            continue;
+
+                        // align-to-floor-line → sit on the floor line; else mid-floor.
+                        float ny = rule.constraints.alignToFloorLine ? 0f : 0.5f;
+
+                        string partId = PickVariant(rule, ref rng);
+
+                        float scale = 1f;
+                        if (rule.jitter.scale != null && rule.jitter.scale.Length >= 2)
+                            scale = rng.Range(rule.jitter.scale[0], rule.jitter.scale[1]);
+
+                        float rot = rule.jitter.rotation != 0f
+                            ? rng.Range(-rule.jitter.rotation, rule.jitter.rotation) : 0f;
+
+                        PlacePart(parent, f, facts, partId, floor, nx, ny, scale, rot);
+                    }
+                }
+            }
+        }
+
+        static string PickVariant(ProceduralRule rule, ref Rng rng)
+        {
+            if (rule.variants != null && rule.variants.Length > 0)
+                return rule.variants[(int)(rng.NextUInt() % (uint)rule.variants.Length)];
+            return rule.part;
+        }
+
+        static float FacadeLength(StreetFacadeJson f)
+        {
+            if (f.edge == null || f.edge.Length < 4) return 0f;
+            float dx = f.edge[2] - f.edge[0], dz = f.edge[3] - f.edge[1];
+            return Mathf.Sqrt(dx * dx + dz * dz);
         }
 
         GameObject InstantiatePart(BuildingPart part, string partId, out bool isPlaceholder)
@@ -275,6 +419,22 @@ namespace SFMap.Pipeline.Editor
                 uint h = 2166136261u;
                 ulong v = (ulong)osmId;
                 for (int i = 0; i < 8; i++) { h ^= (byte)(v >> (i * 8)); h *= 16777619u; }
+                return h;
+            }
+        }
+
+        // Per-slot seed: FNV-1a of (osm_id, ruleIndex, slotIndex) — the design's
+        // hash(osm_id, ruleIndex, slotIndex), so each procedural draw is reproducible.
+        static uint SeedFor(long osmId, int ruleIndex, int slotIndex)
+        {
+            unchecked
+            {
+                uint h = 2166136261u;
+                ulong v = (ulong)osmId;
+                for (int i = 0; i < 8; i++) { h ^= (byte)(v >> (i * 8)); h *= 16777619u; }
+                uint a = (uint)ruleIndex, b = (uint)slotIndex;
+                for (int i = 0; i < 4; i++) { h ^= (byte)(a >> (i * 8)); h *= 16777619u; }
+                for (int i = 0; i < 4; i++) { h ^= (byte)(b >> (i * 8)); h *= 16777619u; }
                 return h;
             }
         }
