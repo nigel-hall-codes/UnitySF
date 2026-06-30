@@ -1,0 +1,7 @@
+# Runtime artifacts (the server creates these where it's run)
+*.db
+*.db-journal
+assets/
+__pycache__/
+*.pyc
+.pytest_cache/
