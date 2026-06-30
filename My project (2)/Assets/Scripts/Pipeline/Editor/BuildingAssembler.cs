@@ -372,14 +372,15 @@ namespace SFMap.Pipeline.Editor
         {
             if (_overrides == null || !_overrides.TryGetValue(osmId, out var ov)) return;
 
-            // Hash guard — never dress the wrong building. A footprint edit changes the bake's
-            // hash; a stale override stops matching and is skipped with a warning (design D3).
-            if (!string.IsNullOrEmpty(ov.footprint_hash) &&
+            // Hash guard — never dress the wrong building. An override MUST carry a footprint_hash
+            // that equals the bake's (design D3): a footprint edit changes the bake's hash, and a
+            // missing hash means it was never bound to this footprint. Either way → skip + warn.
+            if (string.IsNullOrEmpty(ov.footprint_hash) ||
                 !string.Equals(ov.footprint_hash, facts.footprint_hash, StringComparison.Ordinal))
             {
                 Debug.LogWarning($"[BuildingAssembler] override for building {osmId} skipped: " +
-                                 $"footprint_hash '{ov.footprint_hash}' != bake '{facts.footprint_hash}' " +
-                                 "(stale footprint — not applied).");
+                                 $"footprint_hash '{ov.footprint_hash}' does not match the bake's " +
+                                 $"'{facts.footprint_hash}' (missing or stale — not applied).");
                 return;
             }
 
@@ -394,6 +395,9 @@ namespace SFMap.Pipeline.Editor
                 foreach (var p in ov.placements)
                 {
                     if (!ParseFacade(p.facade, out var facade)) continue;
+                    // signAsset flags the placement as a sign so it stays out of the mesh-combine
+                    // (own texture). Loading the named sign PNG onto the part is deferred to the
+                    // sign-texture path (#275/#278); here it renders as a placeholder.
                     bool isSign = !string.IsNullOrEmpty(p.signAsset);
                     foreach (var f in FacadesFor(facade, facts))
                         PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, facade, isSign);
@@ -417,7 +421,8 @@ namespace SFMap.Pipeline.Editor
         static bool ParseFacade(string s, out Facade facade)
         {
             if (string.IsNullOrEmpty(s)) { facade = Facade.Front; return true; }
-            return Enum.TryParse(s, true, out facade);
+            // IsDefined rejects out-of-range numeric strings ("99") that TryParse would accept.
+            return Enum.TryParse(s, true, out facade) && Enum.IsDefined(typeof(Facade), facade);
         }
 
         // ---- placement ---------------------------------------------------------
