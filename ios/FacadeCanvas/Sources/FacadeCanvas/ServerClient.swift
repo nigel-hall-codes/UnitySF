@@ -62,6 +62,35 @@ public actor ServerClient {
         try await post("palettes", body: palette)
     }
 
+    // GET /buildings — paginated list, optionally filtered by neighborhood and type.
+    public func listBuildings(neighborhood: String? = nil, type: String? = nil,
+                               limit: Int = 50, offset: Int = 0) async throws -> BuildingPage {
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("buildings"),
+                                              resolvingAgainstBaseURL: false) else {
+            throw ServerError.emptyBody
+        }
+        var items: [URLQueryItem] = [
+            URLQueryItem(name: "limit", value: "\(limit)"),
+            URLQueryItem(name: "offset", value: "\(offset)"),
+        ]
+        if let n = neighborhood { items.append(URLQueryItem(name: "neighborhood", value: n)) }
+        if let t = type         { items.append(URLQueryItem(name: "type", value: t)) }
+        components.queryItems = items
+        guard let url = components.url else { throw ServerError.emptyBody }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        return try await send(req)
+    }
+
+    // GET /buildings/{osm_id} — full facts for one building; nil on 404.
+    public func getBuilding(osmId: Int) async throws -> BuildingFacts? {
+        do {
+            return try await get("buildings/\(osmId)") as BuildingFacts
+        } catch ServerError.http(404) {
+            return nil
+        }
+    }
+
     // --- transport ---------------------------------------------------------
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
