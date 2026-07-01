@@ -27,7 +27,7 @@ public struct BuildingBrowserView: View {
             sidebar
         } content: {
             if let building = vm.selectedBuilding {
-                BuildingDetailView(building: building, client: client)
+                BuildingDetailView(building: building, client: client, draftStore: vm.draftStore)
             } else {
                 ContentUnavailableView("Select a building",
                                        systemImage: "building.2",
@@ -81,6 +81,9 @@ public struct BuildingBrowserView: View {
         }
         .navigationTitle("Buildings")
         .toolbar {
+            ToolbarItem(placement: .navigationBarLeading) {
+                SyncStatusBadge(status: vm.syncStatus)
+            }
             ToolbarItem(placement: .navigationBarTrailing) {
                 if vm.isLoading || isPublishing {
                     ProgressView()
@@ -195,6 +198,7 @@ private struct BuildingRowView: View {
 private struct BuildingDetailView: View {
     let building: BuildingFacts
     let client: ServerClient
+    let draftStore: DraftStore
 
     var body: some View {
         List {
@@ -250,7 +254,8 @@ private struct BuildingDetailView: View {
                 osmId: building.osm_id,
                 facade: entry.serverFacadeName,
                 footprintHash: building.footprint_hash,
-                client: client
+                client: client,
+                draftStore: draftStore
             ))
             .navigationTitle(entry.name)
         }
@@ -289,6 +294,26 @@ private struct FactCell: View {
     }
 }
 
+/// Compact sync-status indicator shown in the sidebar toolbar.
+private struct SyncStatusBadge: View {
+    let status: DraftStore.SyncStatus
+    var body: some View {
+        switch status {
+        case .synced:
+            Label("Synced", systemImage: "checkmark.icloud")
+                .font(.caption).foregroundColor(.secondary)
+        case .pending(let count):
+            Label("\(count) pending", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption).foregroundColor(.orange)
+        case .syncing:
+            HStack(spacing: 4) { ProgressView().scaleEffect(0.7); Text("Syncing").font(.caption) }
+        case .error(let msg):
+            Label(msg, systemImage: "exclamationmark.icloud")
+                .font(.caption).foregroundColor(.red)
+        }
+    }
+}
+
 /// Hashable/Codable wrapper for NavigationLink values (facade entries).
 private struct FacadeEntry: Hashable {
     let name: String
@@ -308,13 +333,29 @@ final class BuildingBrowserViewModel: ObservableObject {
     @Published var isLoading = false
     @Published var errorMessage: String?
     @Published var total: Int = 0
+    @Published var syncStatus: DraftStore.SyncStatus = .synced
 
     var hasMore: Bool { buildings.count < total }
 
     private let client: ServerClient
+    let draftStore: DraftStore     // internal so BuildingDetailView can pass it to canvas VMs
     private let pageSize = 50
 
-    init(client: ServerClient) { self.client = client }
+    init(client: ServerClient, draftStore: DraftStore = DraftStore()) {
+        self.client = client
+        self.draftStore = draftStore
+        // Seed from local snapshot for offline start.
+        Task { await self.loadFromSnapshot() }
+    }
+
+    private func loadFromSnapshot() async {
+        let cached = await draftStore.buildings
+        if !cached.isEmpty {
+            buildings = cached
+            total = cached.count
+        }
+        syncStatus = await draftStore.syncStatus
+    }
 
     func load() async {
         isLoading = true
@@ -328,9 +369,16 @@ final class BuildingBrowserViewModel: ObservableObject {
             )
             buildings = page.buildings
             total = page.total
+            // Flush outbox now that we know the server is reachable.
+            await draftStore.updateBuildings(page.buildings)
+            await draftStore.flush(using: client)
         } catch {
             errorMessage = error.localizedDescription
+            // Fall back to snapshot if network is unavailable.
+            let cached = await draftStore.buildings
+            if !cached.isEmpty { buildings = cached; total = cached.count }
         }
+        syncStatus = await draftStore.syncStatus
         isLoading = false
     }
 
@@ -346,9 +394,11 @@ final class BuildingBrowserViewModel: ObservableObject {
             )
             buildings += page.buildings
             total = page.total
+            await draftStore.updateBuildings(buildings)
         } catch {
             errorMessage = error.localizedDescription
         }
+        syncStatus = await draftStore.syncStatus
         isLoading = false
     }
 }

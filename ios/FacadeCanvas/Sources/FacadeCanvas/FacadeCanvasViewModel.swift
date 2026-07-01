@@ -17,7 +17,7 @@ public final class FacadeCanvasViewModel: ObservableObject {
         }
     }
 
-    public enum Status: Equatable { case idle, loading, saving, saved, failed(String) }
+    public enum Status: Equatable { case idle, loading, saving, saved, queued, failed(String) }
 
     public let osmId: Int
     @Published public var facade: String
@@ -32,11 +32,12 @@ public final class FacadeCanvasViewModel: ObservableObject {
     @Published public private(set) var backdropData: Data?
 
     private let client: ServerClient
+    private let draftStore: DraftStore?
 
     public init(osmId: Int, facade: String = "Front", footprintHash: String = "",
-                client: ServerClient) {
+                client: ServerClient, draftStore: DraftStore? = nil) {
         self.osmId = osmId; self.facade = facade; self.footprintHash = footprintHash
-        self.client = client
+        self.client = client; self.draftStore = draftStore
     }
 
     /// Assemble the layered document: paint layer at z=0, then each placed image in their
@@ -54,13 +55,22 @@ public final class FacadeCanvasViewModel: ObservableObject {
                             footprint_hash: footprintHash, layers: layers, version: 1)
     }
 
+    /// Save to the server. On network failure, enqueues the canvas in the draft store outbox
+    /// for retry on the next successful connection (D3 pending-write outbox).
     public func save() async {
         status = .saving
+        let canvas = buildCanvas()
         do {
-            _ = try await client.saveCanvas(buildCanvas())
+            _ = try await client.saveCanvas(canvas)
+            await draftStore?.dequeue(osmId: osmId, facade: facade)
             status = .saved
         } catch {
-            status = .failed(String(describing: error))
+            if let store = draftStore {
+                await store.enqueue(canvas)
+                status = .queued
+            } else {
+                status = .failed(String(describing: error))
+            }
         }
     }
 
