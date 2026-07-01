@@ -129,6 +129,12 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
 
     @app.post("/buildings/import-sidecar")
     def import_sidecar(doc: SidecarDoc) -> dict:
+        # Fail loud on a schema drift rather than silently coercing an off-version
+        # sidecar into the v2 BuildingFacts shape (missing fields would default,
+        # extra fields would be dropped). The bake emits version 2 (serialize.py).
+        if doc.version != 2:
+            raise HTTPException(status_code=400,
+                                detail=f"unsupported sidecar version {doc.version} (expected 2)")
         # Upsert each building by osm_id — a re-import of the same chunk updates in
         # place (the bake is deterministic, so re-baking must not duplicate).
         for b in doc.buildings:

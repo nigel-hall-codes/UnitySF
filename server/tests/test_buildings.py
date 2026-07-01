@@ -31,6 +31,13 @@ def test_get_unknown_building_404(client):
     assert client.get("/buildings/999").status_code == 404
 
 
+def test_import_rejects_off_version_sidecar(client):
+    # A wrong-version sidecar must fail loud, not silently coerce into v2 shape.
+    r = client.post("/buildings/import-sidecar", json={"version": 1, "buildings": [_facts()]})
+    assert r.status_code == 400
+    assert client.get("/buildings").json()["total"] == 0
+
+
 def test_reimport_updates_in_place(client):
     client.post("/buildings/import-sidecar", json=_sidecar(_facts()))
     # Re-bake reclassifies the same building — must update, not duplicate.
