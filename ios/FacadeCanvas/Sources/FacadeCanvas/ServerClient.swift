@@ -25,7 +25,8 @@ public actor ServerClient {
 
     // GET /canvas/{osm_id}/{facade} — load a facade's canvas, or nil on 404.
     public func loadCanvas(osmId: Int, facade: String) async throws -> FacadeCanvas? {
-        let path = "canvas/\(osmId)/\(facade.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? facade)"
+        // appendingPathComponent percent-encodes as needed; don't double-encode.
+        let path = "canvas/\(osmId)/\(facade)"
         do {
             return try await get(path) as FacadeCanvas
         } catch ServerError.http(404) {

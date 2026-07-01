@@ -85,7 +85,13 @@ public struct FacadeCanvasView: View {
     }
 
     private func save() {
-        vm.paintStrokes = StrokeConversion.strokes(from: drawing, canvasSize: canvasSize)
+        let converted = StrokeConversion.strokes(from: drawing, canvasSize: canvasSize)
+        // Don't wipe strokes loaded from the server that aren't yet re-hydrated into the on-screen
+        // PKDrawing (paint reload is a follow-up): only overwrite when the user painted this session
+        // (drawing non-empty), or when there were no strokes to preserve.
+        if !converted.isEmpty || vm.paintStrokes.isEmpty {
+            vm.paintStrokes = converted
+        }
         Task { await vm.save() }
     }
 }
@@ -101,24 +107,28 @@ private struct PencilCanvas: UIViewRepresentable {
         view.isOpaque = false
         view.delegate = context.coordinator
         view.drawing = drawing
-        if let window = view.window ?? UIApplication.shared.connectedScenes
-            .compactMap({ ($0 as? UIWindowScene)?.keyWindow }).first {
-            let picker = PKToolPicker.shared(for: window)
-            picker?.setVisible(true, forFirstResponder: view)
-            picker?.addObserver(view)
-            view.becomeFirstResponder()
-        }
         return view
     }
 
     func updateUIView(_ view: PKCanvasView, context: Context) {
         if view.drawing != drawing { view.drawing = drawing }
+        // Attach the system tool picker once the view is actually in the window hierarchy —
+        // becomeFirstResponder / picker attach fail in makeUIView (view.window is still nil).
+        if !context.coordinator.pickerAttached, view.window != nil {
+            context.coordinator.pickerAttached = true
+            let picker = context.coordinator.toolPicker
+            picker.setVisible(true, forFirstResponder: view)
+            picker.addObserver(view)
+            view.becomeFirstResponder()
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, PKCanvasViewDelegate {
         let parent: PencilCanvas
+        let toolPicker = PKToolPicker()          // iOS 14+; no window needed
+        var pickerAttached = false
         init(_ parent: PencilCanvas) { self.parent = parent }
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             parent.drawing = canvasView.drawing
@@ -155,7 +165,10 @@ private struct PlacedImageView: View {
         let halfH = (image.rect[3] - image.rect[1]) / 2
         let nx = Double(point.x / canvasSize.width)
         let ny = 1 - Double(point.y / canvasSize.height)         // screen → facade bottom-up
-        image.rect = [nx - halfW, ny - halfH, nx + halfW, ny + halfH]
+        // Clamp the CENTRE so the rect keeps its size and stays on the facade [0,1].
+        let cx = min(max(nx, halfW), 1 - halfW)
+        let cy = min(max(ny, halfH), 1 - halfH)
+        image.rect = [cx - halfW, cy - halfH, cx + halfW, cy + halfH]
     }
 }
 
