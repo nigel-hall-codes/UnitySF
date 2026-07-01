@@ -192,6 +192,42 @@ public struct ExportResult: Codable, Equatable {
     }
 }
 
+// --- Part authoring (#302 — GET/POST /parts, PUT /parts/{id}/glb) ---
+
+public struct SizeM: Codable, Equatable {
+    public var w: Double; public var h: Double; public var d: Double
+    public init(w: Double = 0, h: Double = 0, d: Double = 0) {
+        self.w = w; self.h = h; self.d = d
+    }
+}
+
+public struct RoleSubmesh: Codable, Equatable {
+    public var submesh: Int; public var role: String
+    public init(submesh: Int = 0, role: String = "Base") {
+        self.submesh = submesh; self.role = role
+    }
+}
+
+public struct PartDef: Codable, Equatable, Identifiable {
+    public var id: String
+    public var category: String
+    public var glb: String
+    public var size_m: SizeM
+    public var roleSubmeshes: [RoleSubmesh]
+    public var anchor: String
+    public var mountDepth_m: Double
+    public var version: Int
+
+    public init(id: String, category: String = "", glb: String = "",
+                size_m: SizeM = SizeM(), roleSubmeshes: [RoleSubmesh] = [],
+                anchor: String = "BottomCenter", mountDepth_m: Double = 0.08,
+                version: Int = 1) {
+        self.id = id; self.category = category; self.glb = glb; self.size_m = size_m
+        self.roleSubmeshes = roleSubmeshes; self.anchor = anchor
+        self.mountDepth_m = mountDepth_m; self.version = version
+    }
+}
+
 // --- Palettes (#298 plan — POST /palettes) ---
 
 /// One material-role slot in a palette (e.g. wall, trim, window).

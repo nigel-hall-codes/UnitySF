@@ -97,6 +97,46 @@ public actor ServerClient {
         }
     }
 
+    // GET /parts — list all authored part records.
+    public func listParts() async throws -> [PartDef] {
+        try await get("parts")
+    }
+
+    // POST /parts — create or upsert a part record.
+    public func createPart(_ part: PartDef) async throws -> PartDef {
+        try await post("parts", body: part)
+    }
+
+    // GET /parts/{id}/glb — download a part's binary GLB; nil on 404.
+    public func getPartGlb(partId: String) async throws -> Data? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("parts/\(partId)/glb"))
+        req.httpMethod = "GET"
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 404 { return nil }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+        return data
+    }
+
+    // PUT /parts/{id}/glb — upload a GLB binary via multipart/form-data.
+    public func uploadPartGlb(partId: String, data glbData: Data) async throws {
+        let boundary = "Boundary-FacadeCanvas"
+        var req = URLRequest(url: baseURL.appendingPathComponent("parts/\(partId)/glb"))
+        req.httpMethod = "PUT"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        func s(_ str: String) { body.append(contentsOf: str.utf8) }
+        s("--\(boundary)\r\n")
+        s("Content-Disposition: form-data; name=\"file\"; filename=\"\(partId).glb\"\r\n")
+        s("Content-Type: model/gltf-binary\r\n\r\n")
+        body.append(glbData)
+        s("\r\n--\(boundary)--\r\n")
+        req.httpBody = body
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ServerError.emptyBody }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+    }
+
     // --- transport ---------------------------------------------------------
 
     private func get<T: Decodable>(_ path: String) async throws -> T {
