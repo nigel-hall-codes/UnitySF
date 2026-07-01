@@ -53,6 +53,34 @@ def test_canvas_crud_roundtrip(client):
     assert client.get("/canvas/65307880/Back").status_code == 404
 
 
+# --- backdrop upload/serve (#317) ------------------------------------------
+
+def test_backdrop_put_get_roundtrip_png(client):
+    png = encode_rgba_png(2, 2, bytes([1, 2, 3, 255]) * 4)
+    put = client.put("/canvas/65307880/Front/backdrop", content=png)
+    assert put.status_code == 200 and put.json()["bytes"] == len(png)
+    got = client.get("/canvas/65307880/Front/backdrop")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/png"
+    assert got.content == png
+
+
+def test_backdrop_get_404_when_absent(client):
+    assert client.get("/canvas/65307880/Back/backdrop").status_code == 404
+
+
+def test_backdrop_put_replaces_and_sniffs_jpeg(client):
+    jpeg = b"\xff\xd8\xff\xe0" + b"\x00" * 16          # JPEG magic, arbitrary tail
+    client.put("/canvas/1/Right/backdrop", content=b"\x89PNG\r\n\x1a\n old")
+    client.put("/canvas/1/Right/backdrop", content=jpeg)   # overwrite
+    got = client.get("/canvas/1/Right/backdrop")
+    assert got.content == jpeg and got.headers["content-type"] == "image/jpeg"
+
+
+def test_backdrop_put_empty_body_rejected(client):
+    assert client.put("/canvas/1/Front/backdrop", content=b"").status_code == 400
+
+
 # --- export → facadeDecals --------------------------------------------------
 
 def test_export_writes_paint_png_and_facade_decals(client, tmp_path):

@@ -186,6 +186,22 @@ class Store:
         path = self.assets_dir / "parts" / f"{part_id}.glb"
         return path if path.exists() else None
 
+    # -- facade backdrops (#317; drawing aid only, never exported to Unity) --
+
+    def _backdrop_path(self, osm_id: int, facade: str) -> Path:
+        # Mirror the canvas key on disk: assets/canvas/<osm_id>/<facade>/backdrop.jpg.
+        return self.assets_dir / "canvas" / str(osm_id) / facade / "backdrop.jpg"
+
+    def save_backdrop(self, osm_id: int, facade: str, data: bytes) -> Path:
+        path = self._backdrop_path(osm_id, facade)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def backdrop_path(self, osm_id: int, facade: str) -> Optional[Path]:
+        path = self._backdrop_path(osm_id, facade)
+        return path if path.exists() else None
+
     # -- internals ----------------------------------------------------------
 
     def _upsert(self, table: str, key_col: str, key, model) -> None:
