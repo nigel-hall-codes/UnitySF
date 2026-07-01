@@ -86,6 +86,81 @@ public struct SignDef: Codable, Equatable {
     public var stylePreset: String
 }
 
+// --- Building browser (#301 — GET /buildings, GET /buildings/{osm_id}) ---
+
+/// A ranked street facade edge from the bake sidecar; sorted by score descending.
+public struct StreetFacade: Codable, Equatable {
+    public var edge_index: Int
+    public var bearing_deg: Double
+    public var street_osm_id: Int
+    public var score: Double
+    public var edge: [Double]   // [x0, z0, x1, z1] world-XZ
+
+    public init(edge_index: Int = 0, bearing_deg: Double = 0, street_osm_id: Int = 0,
+                score: Double = 0, edge: [Double] = []) {
+        self.edge_index = edge_index; self.bearing_deg = bearing_deg
+        self.street_osm_id = street_osm_id; self.score = score; self.edge = edge
+    }
+
+    /// Human-readable cardinal label derived from bearing (N/NE/E/SE/S/SW/W/NW).
+    public var cardinalLabel: String {
+        let dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+        let idx = Int((bearing_deg + 22.5) / 45) % 8
+        return dirs[idx]
+    }
+}
+
+/// Full facts for one building — the server's GET /buildings/{osm_id} shape.
+public struct BuildingFacts: Codable, Equatable, Identifiable {
+    public var osm_id: Int
+    public var neighborhood: String
+    public var building_type: String
+    public var footprint_shape: String
+    public var width_m: Double
+    public var depth_m: Double
+    public var height_m: Double
+    public var floor_count: Int
+    public var base_y: Double
+    public var facade_height_m: Double
+    public var street_facades: [StreetFacade]
+    public var footprint_hash: String
+
+    public var id: Int { osm_id }
+
+    public init(osm_id: Int, neighborhood: String = "", building_type: String = "",
+                footprint_shape: String = "", width_m: Double = 0, depth_m: Double = 0,
+                height_m: Double = 0, floor_count: Int = 0, base_y: Double = 0,
+                facade_height_m: Double = 0, street_facades: [StreetFacade] = [],
+                footprint_hash: String = "") {
+        self.osm_id = osm_id; self.neighborhood = neighborhood
+        self.building_type = building_type; self.footprint_shape = footprint_shape
+        self.width_m = width_m; self.depth_m = depth_m; self.height_m = height_m
+        self.floor_count = floor_count; self.base_y = base_y
+        self.facade_height_m = facade_height_m; self.street_facades = street_facades
+        self.footprint_hash = footprint_hash
+    }
+
+    /// All addressable facade names in display order: street facades (ranked) then cardinal faces.
+    public var allFacadeNames: [String] {
+        let streetNames = street_facades.enumerated().map { i, sf in
+            "Street \(i + 1) (\(sf.cardinalLabel))"
+        }
+        return streetNames + ["Front", "Back", "Left", "Right"]
+    }
+}
+
+/// Paginated response from GET /buildings.
+public struct BuildingPage: Codable {
+    public var buildings: [BuildingFacts]
+    public var total: Int
+    public var limit: Int
+    public var offset: Int
+
+    public init(buildings: [BuildingFacts] = [], total: Int = 0, limit: Int = 50, offset: Int = 0) {
+        self.buildings = buildings; self.total = total; self.limit = limit; self.offset = offset
+    }
+}
+
 // --- Palettes (#298 plan — POST /palettes) ---
 
 /// One material-role slot in a palette (e.g. wall, trim, window).
