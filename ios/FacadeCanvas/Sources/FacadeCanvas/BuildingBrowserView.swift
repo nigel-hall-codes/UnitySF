@@ -213,11 +213,16 @@ private struct BuildingDetailView: View {
     }
 
     private func facadeList() -> [FacadeEntry] {
+        // The server stores one canvas per named facade slot. "Street" is the single slot for
+        // the primary (highest-scored) street facade. Secondary facades (i > 0) share this
+        // slot — the user authors the same canvas no matter which ranked entry they pick.
+        // When the server gains per-edge-index canvas storage this mapping can be updated.
         var entries: [FacadeEntry] = building.street_facades.enumerated().map { i, sf in
+            let shared = i > 0 ? " · shared canvas" : ""
             FacadeEntry(
                 name: "Street \(i + 1) (\(sf.cardinalLabel))",
                 serverFacadeName: "Street",
-                subtitle: String(format: "Score %.2f · bearing %.0f°", sf.score, sf.bearing_deg),
+                subtitle: String(format: "Score %.2f · bearing %.0f°\(shared)", sf.score, sf.bearing_deg),
                 isStreet: true
             )
         }

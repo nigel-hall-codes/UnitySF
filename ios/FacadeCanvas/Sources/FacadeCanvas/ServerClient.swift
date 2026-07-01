@@ -65,8 +65,10 @@ public actor ServerClient {
     // GET /buildings — paginated list, optionally filtered by neighborhood and type.
     public func listBuildings(neighborhood: String? = nil, type: String? = nil,
                                limit: Int = 50, offset: Int = 0) async throws -> BuildingPage {
-        var components = URLComponents(url: baseURL.appendingPathComponent("buildings"),
-                                       resolvingAgainstBaseURL: false)!
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("buildings"),
+                                              resolvingAgainstBaseURL: false) else {
+            throw ServerError.emptyBody
+        }
         var items: [URLQueryItem] = [
             URLQueryItem(name: "limit", value: "\(limit)"),
             URLQueryItem(name: "offset", value: "\(offset)"),
@@ -74,7 +76,8 @@ public actor ServerClient {
         if let n = neighborhood { items.append(URLQueryItem(name: "neighborhood", value: n)) }
         if let t = type         { items.append(URLQueryItem(name: "type", value: t)) }
         components.queryItems = items
-        var req = URLRequest(url: components.url!)
+        guard let url = components.url else { throw ServerError.emptyBody }
+        var req = URLRequest(url: url)
         req.httpMethod = "GET"
         return try await send(req)
     }
