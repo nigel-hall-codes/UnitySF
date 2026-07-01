@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from .ai_signs import DEFAULT_PROVIDER, available_providers, get_provider, slug
 from .export import export_unity
@@ -96,6 +97,16 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         S().save_glb(part_id, data)
         return {"part": part_id, "bytes": len(data)}
 
+    @app.get("/parts/{part_id}/glb")
+    def get_part_glb(part_id: str) -> FileResponse:
+        if S().get_part(part_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown part '{part_id}'")
+        path = S().glb_path(part_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"no GLB uploaded for part '{part_id}'")
+        return FileResponse(str(path), media_type="model/gltf-binary",
+                            filename=f"{part_id}.glb")
+
     # -- templates ----------------------------------------------------------
 
     @app.get("/templates")
@@ -175,6 +186,24 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         if canvas is None:
             raise HTTPException(status_code=404, detail=f"no canvas for {osm_id}/{facade}")
         return canvas
+
+    @app.get("/signs/{sign_id}/png")
+    def get_sign_png(sign_id: str) -> FileResponse:
+        if S().get_sign(sign_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown sign '{sign_id}'")
+        path = S().sign_png_path(sign_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"no PNG for sign '{sign_id}'")
+        return FileResponse(str(path), media_type="image/png")
+
+    @app.get("/signs/{sign_id}/thumb")
+    def get_sign_thumb(sign_id: str) -> FileResponse:
+        if S().get_sign(sign_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown sign '{sign_id}'")
+        path = S().sign_thumb_path(sign_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"no thumbnail for sign '{sign_id}'")
+        return FileResponse(str(path), media_type="image/png")
 
     # -- AI signs (server-mediated; the iPad never calls a provider directly) -
 

@@ -65,3 +65,42 @@ def test_building_specific_override_stored(client):
     ov = {"osm_id": 65307880, "footprint_hash": "a3f1c9d2",
           "placements": [{"part": "sign_lucca", "facade": "Front", "y": 0.85}]}
     assert client.post("/building-specific", json=ov).status_code == 200
+
+
+def test_part_glb_download(client):
+    pid = "window_sunset_2x3"
+    glb_bytes = b"glTFbinary"
+    # 404 before the part record exists.
+    assert client.get(f"/parts/{pid}/glb").status_code == 404
+    client.post("/parts", json=_part(pid))
+    # 404 when the file hasn't been uploaded yet.
+    assert client.get(f"/parts/{pid}/glb").status_code == 404
+    # Upload then download — bytes must round-trip intact.
+    client.put(f"/parts/{pid}/glb", files={"file": (f"{pid}.glb", glb_bytes, "model/gltf-binary")})
+    r = client.get(f"/parts/{pid}/glb")
+    assert r.status_code == 200
+    assert r.content == glb_bytes
+    assert "gltf" in r.headers["content-type"]
+
+
+def test_sign_png_and_thumb_download(client, store):
+    sign_id = "sign_test_cafe"
+    png_bytes = b"\x89PNG-fake"
+    thumb_bytes = b"\x89PNG-thumb"
+    # 404 before the sign record exists.
+    assert client.get(f"/signs/{sign_id}/png").status_code == 404
+    assert client.get(f"/signs/{sign_id}/thumb").status_code == 404
+    # Seed the store directly (avoid needing a real AI provider in tests).
+    from app.models import SignDef
+    store.upsert_sign(SignDef(signId=sign_id, png=f"Signs/{sign_id}.png",
+                              thumb=f"Signs/{sign_id}.thumb.png", provider="stub"))
+    # 404 when files haven't been written yet.
+    assert client.get(f"/signs/{sign_id}/png").status_code == 404
+    assert client.get(f"/signs/{sign_id}/thumb").status_code == 404
+    # Write binary files then verify download.
+    store.save_sign_png(sign_id, png_bytes, thumb_bytes)
+    r_png = client.get(f"/signs/{sign_id}/png")
+    assert r_png.status_code == 200 and r_png.content == png_bytes
+    r_thumb = client.get(f"/signs/{sign_id}/thumb")
+    assert r_thumb.status_code == 200 and r_thumb.content == thumb_bytes
+    assert r_png.headers["content-type"] == r_thumb.headers["content-type"] == "image/png"
