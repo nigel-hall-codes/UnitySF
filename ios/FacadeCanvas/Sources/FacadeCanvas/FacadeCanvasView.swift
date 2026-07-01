@@ -1,6 +1,7 @@
 #if canImport(SwiftUI) && canImport(PencilKit)
 import SwiftUI
 import PencilKit
+import PhotosUI
 
 /// The facade canvas authoring surface (#282, mode inside the #276 client): a Pencil paint layer
 /// plus draggable placed images / AI signs over the unit square of one building facade, saved to
@@ -12,6 +13,7 @@ public struct FacadeCanvasView: View {
     @State private var showSignSheet = false
     @State private var showPaletteSheet = false
     @State private var showLayerPanel = false
+    @State private var showBackdropPicker = false
 
     public init(viewModel: FacadeCanvasViewModel) {
         _vm = StateObject(wrappedValue: viewModel)
@@ -44,6 +46,11 @@ public struct FacadeCanvasView: View {
                 showPaletteSheet = false
             }
         }
+        .sheet(isPresented: $showBackdropPicker) {
+            BackdropPickerView { data in
+                Task { await vm.uploadBackdrop(data) }
+            }
+        }
         .task {
             await vm.load()
             await vm.loadBackdrop()
@@ -60,6 +67,9 @@ public struct FacadeCanvasView: View {
             .pickerStyle(.segmented)
             .frame(maxWidth: 360)
             Spacer()
+            Button { showBackdropPicker = true } label: {
+                Label("Backdrop", systemImage: "photo.badge.plus")
+            }
             Button("AI Sign") { showSignSheet = true }
             Button("Palette") { showPaletteSheet = true }
             Toggle(isOn: $showLayerPanel) {
@@ -353,6 +363,42 @@ private struct PaletteAuthorSheet: View {
                     }
                     .disabled(name.isEmpty || entries.isEmpty)
                 }
+            }
+        }
+    }
+}
+
+// MARK: - BackdropPickerView
+
+private struct BackdropPickerView: UIViewControllerRepresentable {
+    var onPick: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ vc: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    final class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let parent: BackdropPickerView
+        init(_ parent: BackdropPickerView) { self.parent = parent }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            parent.dismiss()
+            guard let provider = results.first?.itemProvider,
+                  provider.canLoadObject(ofClass: UIImage.self) else { return }
+            provider.loadObject(ofClass: UIImage.self) { obj, _ in
+                guard let image = obj as? UIImage,
+                      let data = image.jpegData(compressionQuality: 0.9) else { return }
+                DispatchQueue.main.async { self.parent.onPick(data) }
             }
         }
     }
