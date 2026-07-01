@@ -97,6 +97,16 @@ public actor ServerClient {
         }
     }
 
+    // GET /templates — list all authored templates.
+    public func listTemplates() async throws -> [TemplateDef] {
+        try await get("templates")
+    }
+
+    // POST /templates — create or upsert a template.
+    public func createTemplate(_ template: TemplateDef) async throws -> TemplateDef {
+        try await post("templates", body: template)
+    }
+
     // GET /parts — list all authored part records.
     public func listParts() async throws -> [PartDef] {
         try await get("parts")

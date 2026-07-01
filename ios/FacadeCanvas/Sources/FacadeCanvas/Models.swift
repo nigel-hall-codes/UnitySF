@@ -192,6 +192,128 @@ public struct ExportResult: Codable, Equatable {
     }
 }
 
+// --- Template & rule authoring (#303 — GET/POST /templates) ---
+
+public struct FloatRange: Codable, Equatable {
+    public var min: Double; public var max: Double
+    public init(min: Double = 0, max: Double = 0) { self.min = min; self.max = max }
+}
+
+public struct IntRange: Codable, Equatable {
+    public var min: Int; public var max: Int
+    public init(min: Int = 0, max: Int = 0) { self.min = min; self.max = max }
+}
+
+public struct Compatibility: Codable, Equatable {
+    public var neighborhoods: [String]
+    public var building_types: [String]
+    public var footprint_shapes: [String]
+    public var width_m: FloatRange
+    public var depth_m: FloatRange
+    public var floor_count: IntRange
+    public init(neighborhoods: [String] = [], building_types: [String] = [],
+                footprint_shapes: [String] = [],
+                width_m: FloatRange = FloatRange(min: 0, max: 1000),
+                depth_m: FloatRange = FloatRange(min: 0, max: 1000),
+                floor_count: IntRange = IntRange(min: 1, max: 100)) {
+        self.neighborhoods = neighborhoods; self.building_types = building_types
+        self.footprint_shapes = footprint_shapes; self.width_m = width_m
+        self.depth_m = depth_m; self.floor_count = floor_count
+    }
+}
+
+/// A submesh material-role remap inside a placement. JSON key "from" maps directly
+/// to Swift property `from` (not a keyword in property position).
+public struct RolePair: Codable, Equatable {
+    public var from: String
+    public var to: String
+    public init(from: String = "", to: String = "") { self.from = from; self.to = to }
+}
+
+public struct ExactPlacement: Codable, Equatable {
+    public var part: String
+    public var facade: String
+    public var floor: Int
+    public var x: Double; public var y: Double
+    public var scale: Double; public var rotation: Double
+    public var roles: [RolePair]
+    public init(part: String = "", facade: String = "Front", floor: Int = 0,
+                x: Double = 0.5, y: Double = 0.5, scale: Double = 1, rotation: Double = 0,
+                roles: [RolePair] = []) {
+        self.part = part; self.facade = facade; self.floor = floor
+        self.x = x; self.y = y; self.scale = scale; self.rotation = rotation; self.roles = roles
+    }
+}
+
+public struct Repeat: Codable, Equatable {
+    public var spacingMeters: Double; public var countMin: Int; public var countMax: Int
+    public init(spacingMeters: Double = 2, countMin: Int = 1, countMax: Int = 3) {
+        self.spacingMeters = spacingMeters; self.countMin = countMin; self.countMax = countMax
+    }
+}
+
+public struct Constraints: Codable, Equatable {
+    public var minSpacingMeters: Double; public var edgeMargin: Double
+    public var alignToFloorLine: Bool; public var avoidExact: Bool
+    public init(minSpacingMeters: Double = 0, edgeMargin: Double = 0,
+                alignToFloorLine: Bool = false, avoidExact: Bool = false) {
+        self.minSpacingMeters = minSpacingMeters; self.edgeMargin = edgeMargin
+        self.alignToFloorLine = alignToFloorLine; self.avoidExact = avoidExact
+    }
+}
+
+public struct Jitter: Codable, Equatable {
+    public var x: Double; public var scale: [Double]; public var rotation: Double
+    public init(x: Double = 0, scale: [Double] = [], rotation: Double = 0) {
+        self.x = x; self.scale = scale; self.rotation = rotation
+    }
+}
+
+public struct ProceduralRule: Codable, Equatable {
+    public var part: String
+    public var facade: String
+    public var floorRange: IntRange
+    public var span: [Double]
+    public var repeatRule: Repeat     // "repeat" is a Swift keyword; CodingKeys maps to JSON "repeat"
+    public var probability: Double
+    public var constraints: Constraints
+    public var jitter: Jitter
+    public var variants: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case part, facade, floorRange, span, probability, constraints, jitter, variants
+        case repeatRule = "repeat"
+    }
+
+    public init(part: String = "", facade: String = "Front",
+                floorRange: IntRange = IntRange(min: 0, max: 10), span: [Double] = [],
+                repeatRule: Repeat = Repeat(), probability: Double = 1,
+                constraints: Constraints = Constraints(), jitter: Jitter = Jitter(),
+                variants: [String] = []) {
+        self.part = part; self.facade = facade; self.floorRange = floorRange; self.span = span
+        self.repeatRule = repeatRule; self.probability = probability
+        self.constraints = constraints; self.jitter = jitter; self.variants = variants
+    }
+}
+
+public struct TemplateDef: Codable, Equatable, Identifiable {
+    public var id: String
+    public var displayName: String
+    public var compatibility: Compatibility
+    public var exact: [ExactPlacement]
+    public var rules: [ProceduralRule]
+    public var roofParts: [String]
+    public var version: Int
+
+    public init(id: String, displayName: String = "",
+                compatibility: Compatibility = Compatibility(),
+                exact: [ExactPlacement] = [], rules: [ProceduralRule] = [],
+                roofParts: [String] = [], version: Int = 1) {
+        self.id = id; self.displayName = displayName; self.compatibility = compatibility
+        self.exact = exact; self.rules = rules; self.roofParts = roofParts; self.version = version
+    }
+}
+
 // --- Part authoring (#302 — GET/POST /parts, PUT /parts/{id}/glb) ---
 
 public struct SizeM: Codable, Equatable {
