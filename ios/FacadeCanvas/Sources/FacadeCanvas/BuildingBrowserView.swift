@@ -90,7 +90,6 @@ public struct BuildingBrowserView: View {
                     } label: {
                         Label("Publish", systemImage: "arrow.up.to.line.circle")
                     }
-                    .disabled(isPublishing)
                 }
             }
         }
