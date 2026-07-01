@@ -22,9 +22,13 @@ namespace SFMap.Pipeline.Editor
         const float FloorHeightMeters = 3.0f;
 
         /// <summary>Build the chunk's facade decals under <paramref name="chunkRoot"/>. No-op when the
-        /// sidecar is absent or no override carries facadeDecals.</summary>
-        public static void Import(string chunkDir, ChunkCoord coord, GameObject chunkRoot)
+        /// sidecar is absent or <paramref name="decalOverrides"/> is empty. The overrides are loaded
+        /// once per import by the caller (see <see cref="LoadDecalOverrides"/>) and passed in.</summary>
+        public static void Import(string chunkDir, ChunkCoord coord, GameObject chunkRoot,
+                                  IReadOnlyList<OverrideJson> decalOverrides)
         {
+            if (decalOverrides == null || decalOverrides.Count == 0) return;
+
             string sidecarPath = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_buildings.json");
             if (!File.Exists(sidecarPath)) return;
 
@@ -40,14 +44,29 @@ namespace SFMap.Pipeline.Editor
             var facts = new Dictionary<long, BuildingFactsJson>(sidecar.buildings.Length);
             foreach (var b in sidecar.buildings) facts[b.osm_id] = b;
 
-            var overrides = LoadOverridesWithDecals();
-            if (overrides.Count == 0) return;
+            // Batch every decal mesh + material CreateAsset into a single import pass. This pass runs
+            // AFTER the importer's own StartAssetEditing/StopAssetEditing block has closed, so without
+            // this wrapper each per-decal asset imports one-by-one (the #295 perf note).
+            int placed;
+            AssetDatabase.StartAssetEditing();
+            try     { placed = BuildDecals(coord, chunkRoot, decalOverrides, facts); }
+            finally { AssetDatabase.StopAssetEditing(); }
 
+            if (placed > 0)
+                Debug.Log($"[BuildingDecalImporter] {coord}: {placed} facade decal(s).");
+        }
+
+        // Build one alpha quad per matched decal under a single "BuildingDecals {coord}" parent and
+        // return the number placed. Callers wrap this in Start/StopAssetEditing to batch the writes.
+        static int BuildDecals(ChunkCoord coord, GameObject chunkRoot,
+                               IReadOnlyList<OverrideJson> decalOverrides,
+                               Dictionary<long, BuildingFactsJson> facts)
+        {
             GameObject decalsParent = null;
             var materialCache = new Dictionary<string, Material>(StringComparer.Ordinal);
             int placed = 0;
 
-            foreach (var ov in overrides)
+            foreach (var ov in decalOverrides)
             {
                 if (!facts.TryGetValue(ov.osm_id, out var f)) continue;   // not in this chunk
 
@@ -86,8 +105,7 @@ namespace SFMap.Pipeline.Editor
                 }
             }
 
-            if (placed > 0)
-                Debug.Log($"[BuildingDecalImporter] {coord}: {placed} facade decal(s).");
+            return placed;
         }
 
         // ---- quad construction -------------------------------------------------
@@ -188,7 +206,10 @@ namespace SFMap.Pipeline.Editor
 
         // ---- override loading --------------------------------------------------
 
-        static List<OverrideJson> LoadOverridesWithDecals()
+        /// <summary>Scan <c>Assets/SFBuildingTemplates/Overrides/*.override.json</c> ONCE and return the
+        /// overrides that carry <c>facadeDecals</c>. Hoisted out of the per-chunk path so this O(overrides)
+        /// disk scan runs a single time per import, not once for every chunk (#295).</summary>
+        public static List<OverrideJson> LoadDecalOverrides()
         {
             var list = new List<OverrideJson>();
             string abs = Path.Combine(Application.dataPath, "SFBuildingTemplates/Overrides");
