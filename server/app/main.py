@@ -14,17 +14,20 @@ import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, HTTPException, Query, UploadFile
 
 from .ai_signs import DEFAULT_PROVIDER, available_providers, get_provider, slug
 from .export import export_unity
 from .models import (
+    BuildingFacts,
+    BuildingPage,
     BuildingSpecificDef,
     ExportRequest,
     ExportResult,
     FacadeCanvas,
     PaletteDef,
     PartDef,
+    SidecarDoc,
     SignDef,
     SignRequest,
     TemplateDef,
@@ -121,6 +124,39 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
     def create_override(ov: BuildingSpecificDef) -> BuildingSpecificDef:
         S().upsert_override(ov)
         return ov
+
+    # -- building facts (#299; ingested from the bake sidecar, browsed by the iPad) -
+
+    @app.post("/buildings/import-sidecar")
+    def import_sidecar(doc: SidecarDoc) -> dict:
+        # Fail loud on a schema drift rather than silently coercing an off-version
+        # sidecar into the v2 BuildingFacts shape (missing fields would default,
+        # extra fields would be dropped). The bake emits version 2 (serialize.py).
+        if doc.version != 2:
+            raise HTTPException(status_code=400,
+                                detail=f"unsupported sidecar version {doc.version} (expected 2)")
+        # Upsert each building by osm_id — a re-import of the same chunk updates in
+        # place (the bake is deterministic, so re-baking must not duplicate).
+        for b in doc.buildings:
+            S().upsert_building(b)
+        return {"imported": len(doc.buildings)}
+
+    @app.get("/buildings")
+    def list_buildings(
+        neighborhood: str = "",
+        type: str = "",
+        limit: int = Query(100, ge=1, le=1000),
+        offset: int = Query(0, ge=0),
+    ) -> BuildingPage:
+        page, total = S().list_buildings(neighborhood or None, type or None, limit, offset)
+        return BuildingPage(buildings=page, total=total, limit=limit, offset=offset)
+
+    @app.get("/buildings/{osm_id}")
+    def get_building(osm_id: int) -> BuildingFacts:
+        b = S().get_building(osm_id)
+        if b is None:
+            raise HTTPException(status_code=404, detail=f"unknown building '{osm_id}'")
+        return b
 
     # -- facade canvases (#278/#281; layered doc stays server-side, flattened on export) -
 

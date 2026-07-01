@@ -215,6 +215,50 @@ class FacadeCanvas(BaseModel):
     version: int = 1
 
 
+# --- Building facts (the bake's classification sidecar; #299) ---------------
+# Mirrors python/sfmap/serialize.py:write_buildings — the v2 chunk_CC_RR_buildings.json
+# schema (data-model.md §1). The server ingests these facts so the iPad can browse
+# buildings and read per-building facts without re-baking. Facts only — Unity/the iPad
+# choose templates; the server just stores and serves.
+
+class StreetFacade(BaseModel):
+    edge_index: int = 0
+    bearing_deg: float = 0.0
+    street_osm_id: int = 0
+    score: float = 0.0
+    edge: List[float] = Field(default_factory=list)   # [x0, z0, x1, z1] world-XZ
+
+
+class BuildingFacts(BaseModel):
+    osm_id: int
+    neighborhood: str = ""
+    building_type: str = ""
+    footprint_shape: str = ""
+    width_m: float = 0.0
+    depth_m: float = 0.0
+    height_m: float = 0.0
+    floor_count: int = 0
+    base_y: float = 0.0
+    facade_height_m: float = 0.0
+    street_facades: List[StreetFacade] = Field(default_factory=list)
+    footprint_hash: str = ""
+
+
+class SidecarDoc(BaseModel):
+    """One chunk's building sidecar — the POST /buildings/import-sidecar body."""
+    version: int = 2
+    buildings: List[BuildingFacts] = Field(default_factory=list)
+
+
+class BuildingPage(BaseModel):
+    """A page of the GET /buildings list. ``total`` is the full filtered count so the
+    iPad browser can paginate; ``buildings`` is this page only."""
+    buildings: List[BuildingFacts] = Field(default_factory=list)
+    total: int = 0
+    limit: int = 0
+    offset: int = 0
+
+
 # --- Export request / response ---------------------------------------------
 
 class ExportRequest(BaseModel):

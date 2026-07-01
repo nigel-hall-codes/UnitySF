@@ -12,7 +12,15 @@ import threading
 from pathlib import Path
 from typing import List, Optional
 
-from .models import BuildingSpecificDef, FacadeCanvas, PaletteDef, PartDef, SignDef, TemplateDef
+from .models import (
+    BuildingFacts,
+    BuildingSpecificDef,
+    FacadeCanvas,
+    PaletteDef,
+    PartDef,
+    SignDef,
+    TemplateDef,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS parts     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
@@ -21,6 +29,13 @@ CREATE TABLE IF NOT EXISTS palettes  (neighborhood TEXT PRIMARY KEY, json TEXT N
 CREATE TABLE IF NOT EXISTS overrides (osm_id INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS signs     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS canvases  (key TEXT PRIMARY KEY, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS buildings (
+    osm_id        INTEGER PRIMARY KEY,
+    neighborhood  TEXT NOT NULL DEFAULT '',
+    building_type TEXT NOT NULL DEFAULT '',
+    json          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_buildings_filter ON buildings (neighborhood, building_type);
 """
 
 
@@ -117,6 +132,48 @@ class Store:
     def get_canvas(self, osm_id: int, facade: str) -> Optional[FacadeCanvas]:
         row = self._one("canvases", "key", self._canvas_key(osm_id, facade))
         return FacadeCanvas.model_validate_json(row) if row else None
+
+    # -- building facts (#299; filterable by neighborhood/type) -------------
+
+    def upsert_building(self, b: BuildingFacts) -> None:
+        payload = b.model_dump_json(by_alias=True)
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO buildings (osm_id, neighborhood, building_type, json) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT(osm_id) DO UPDATE SET "
+                "neighborhood = excluded.neighborhood, "
+                "building_type = excluded.building_type, json = excluded.json",
+                (b.osm_id, b.neighborhood, b.building_type, payload),
+            )
+            self._conn.commit()
+
+    def get_building(self, osm_id: int) -> Optional[BuildingFacts]:
+        row = self._one("buildings", "osm_id", osm_id)
+        return BuildingFacts.model_validate_json(row) if row else None
+
+    def list_buildings(self, neighborhood: Optional[str] = None,
+                       building_type: Optional[str] = None,
+                       limit: int = 100, offset: int = 0) -> tuple[List[BuildingFacts], int]:
+        """Return (page, total) — total is the full filtered count, page honors
+        limit/offset. Ordered by osm_id for stable pagination across requests."""
+        where, params = [], []
+        if neighborhood:
+            where.append("neighborhood = ?")
+            params.append(neighborhood)
+        if building_type:
+            where.append("building_type = ?")
+            params.append(building_type)
+        clause = f" WHERE {' AND '.join(where)}" if where else ""
+        with self._lock:
+            total = self._conn.execute(
+                f"SELECT COUNT(*) FROM buildings{clause}", params
+            ).fetchone()[0]
+            cur = self._conn.execute(
+                f"SELECT json FROM buildings{clause} ORDER BY osm_id LIMIT ? OFFSET ?",
+                (*params, limit, offset),
+            )
+            page = [BuildingFacts.model_validate_json(r[0]) for r in cur.fetchall()]
+        return page, total
 
     # -- GLB binaries -------------------------------------------------------
 
