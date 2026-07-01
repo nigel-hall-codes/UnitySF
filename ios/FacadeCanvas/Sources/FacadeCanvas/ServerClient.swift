@@ -44,6 +44,24 @@ public actor ServerClient {
         try await post("ai/signs/generate", body: request)
     }
 
+    // GET /canvas/{osm_id}/{facade}/backdrop — reference render for drawing over; nil on 404.
+    // The G2 asset-binary endpoint (#300) will serve the real UV-mapped render once shipped;
+    // this returns nil gracefully until then.
+    public func fetchBackdrop(osmId: Int, facade: String) async throws -> Data? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("canvas/\(osmId)/\(facade)/backdrop"))
+        req.httpMethod = "GET"
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 404 { return nil }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+        return data
+    }
+
+    // POST /palettes — create or replace a named facade palette.
+    public func createPalette(_ palette: Palette) async throws -> Palette {
+        try await post("palettes", body: palette)
+    }
+
     // --- transport ---------------------------------------------------------
 
     private func get<T: Decodable>(_ path: String) async throws -> T {

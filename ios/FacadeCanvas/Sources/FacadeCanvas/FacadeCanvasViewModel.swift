@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// State + save/load for one building facade's canvas. Deliberately **PencilKit-free**: it holds
 /// already-converted `paintStrokes` (the view converts ink → strokes via `StrokeConversion`), so the
@@ -24,8 +27,11 @@ public final class FacadeCanvasViewModel: ObservableObject {
     public let footprintHash: String
 
     @Published public var paintStrokes: [Stroke] = []      // set by the view from the PKDrawing
+    /// Image layers in ascending z-order (index 0 = lowest above the paint layer).
     @Published public var imageLayers: [PlacedImage] = []
     @Published public private(set) var status: Status = .idle
+    /// Reference render fetched from the server for tracing over (gap G2 preview, #300).
+    @Published public private(set) var backdropImage: UIImage?
 
     private let client: ServerClient
 
@@ -35,8 +41,8 @@ public final class FacadeCanvasViewModel: ObservableObject {
         self.client = client
     }
 
-    /// Assemble the layered document: one paint layer (if any strokes) at the bottom, then each
-    /// placed image as its own layer above it — matching the server's flatten-on-export contract.
+    /// Assemble the layered document: paint layer at z=0, then each placed image in their
+    /// current array order — matching the server's flatten-on-export contract.
     public func buildCanvas() -> FacadeCanvas {
         var layers: [CanvasLayer] = []
         if !paintStrokes.isEmpty {
@@ -62,7 +68,8 @@ public final class FacadeCanvasViewModel: ObservableObject {
 
     /// Load the server's canvas for this facade. Paint strokes are re-hydrated for a future
     /// re-edit; the on-screen PKDrawing reconstruction from strokes is a follow-up, so here we
-    /// restore the image layers and keep the strokes available on the model.
+    /// restore the image layers (sorted by their server-side layer index) and keep the strokes
+    /// available on the model.
     public func load() async {
         status = .loading
         do {
@@ -72,6 +79,18 @@ public final class FacadeCanvasViewModel: ObservableObject {
             status = .idle
         } catch {
             status = .failed(String(describing: error))
+        }
+    }
+
+    /// Fetch the facade reference render for the backdrop. Returns silently if the server
+    /// doesn't have one yet (404 → backdropImage stays nil).
+    public func loadBackdrop() async {
+        do {
+            if let data = try await client.fetchBackdrop(osmId: osmId, facade: facade) {
+                backdropImage = UIImage(data: data)
+            }
+        } catch {
+            // Non-fatal: backdrop is a drawing aid only; swallow and leave nil.
         }
     }
 
@@ -89,10 +108,25 @@ public final class FacadeCanvasViewModel: ObservableObject {
         imageLayers.append(.init(rect: rect, texture: sign.png, signAsset: sign.signId))
     }
 
+    /// Reorder image layers (z-order). Called from the layer panel's onMove.
+    public func moveImageLayer(from source: IndexSet, to destination: Int) {
+        imageLayers.move(fromOffsets: source, toOffset: destination)
+    }
+
+    public func savePalette(_ palette: Palette) async -> Palette? {
+        do {
+            return try await client.createPalette(palette)
+        } catch {
+            status = .failed(String(describing: error))
+            return nil
+        }
+    }
+
     private func apply(_ canvas: FacadeCanvas) {
         paintStrokes = canvas.layers.first(where: { $0.kind == "paint" })?.strokes ?? []
         imageLayers = canvas.layers
             .filter { $0.kind == "image" }
+            .sorted { $0.layer < $1.layer }
             .map { PlacedImage(rect: $0.rect, texture: $0.texture, signAsset: $0.signAsset) }
     }
 }
