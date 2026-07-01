@@ -62,6 +62,12 @@ public actor ServerClient {
         try await post("palettes", body: palette)
     }
 
+    // POST /export/unity — materialise Assets/SFBuildingTemplates/ on the server (design D4).
+    // outDir defaults to the server's env-configured export directory.
+    public func publishToUnity(outDir: String = "") async throws -> ExportResult {
+        try await post("export/unity", body: ExportRequest(outDir: outDir))
+    }
+
     // GET /buildings — paginated list, optionally filtered by neighborhood and type.
     public func listBuildings(neighborhood: String? = nil, type: String? = nil,
                                limit: Int = 50, offset: Int = 0) async throws -> BuildingPage {

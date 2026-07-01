@@ -11,6 +11,11 @@ import UIKit
 public struct BuildingBrowserView: View {
     private let client: ServerClient
     @StateObject private var vm: BuildingBrowserViewModel
+    @State private var showPublishConfirm = false
+    @State private var publishResult: ExportResult?
+    @State private var showPublishResult = false
+    @State private var isPublishing = false
+    @State private var publishError: String?
 
     public init(client: ServerClient) {
         self.client = client
@@ -34,6 +39,37 @@ public struct BuildingBrowserView: View {
                                    systemImage: "rectangle.on.rectangle",
                                    description: Text("Select a facade from the building panel."))
         }
+        // Publish confirmation alert (D4 — deliberate operator action, not automatic on save).
+        .confirmationDialog("Publish to Unity?",
+                            isPresented: $showPublishConfirm,
+                            titleVisibility: .visible) {
+            Button("Publish", role: .destructive) { Task { await publish() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This materialises Assets/SFBuildingTemplates/ on the server. The Unity import is a separate manual step.")
+        }
+        // Publish result alert.
+        .alert("Published", isPresented: $showPublishResult, presenting: publishResult) { _ in
+            Button("OK") { }
+        } message: { result in
+            Text("Export v\(result.version) → \(result.outDir)\n\(result.parts) parts · \(result.templates) templates · \(result.signs) signs · \(result.facadeDecals) facade decals")
+        }
+        .alert("Publish failed", isPresented: Binding(get: { publishError != nil },
+                                                      set: { if !$0 { publishError = nil } })) {
+            Button("OK") { }
+        } message: { Text(publishError ?? "") }
+    }
+
+    private func publish() async {
+        isPublishing = true
+        do {
+            let result = try await client.publishToUnity()
+            publishResult = result
+            showPublishResult = true
+        } catch {
+            publishError = error.localizedDescription
+        }
+        isPublishing = false
     }
 
     // MARK: - Sidebar
@@ -46,7 +82,16 @@ public struct BuildingBrowserView: View {
         .navigationTitle("Buildings")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                if vm.isLoading { ProgressView() }
+                if vm.isLoading || isPublishing {
+                    ProgressView()
+                } else {
+                    Button {
+                        showPublishConfirm = true
+                    } label: {
+                        Label("Publish", systemImage: "arrow.up.to.line.circle")
+                    }
+                    .disabled(isPublishing)
+                }
             }
         }
         .task { await vm.load() }

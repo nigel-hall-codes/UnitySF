@@ -161,6 +161,37 @@ public struct BuildingPage: Codable {
     }
 }
 
+// --- Unity export / publish (#304 — POST /export/unity, design D4) ---
+
+/// Body for POST /export/unity — outDir defaults to the server's env-configured target.
+public struct ExportRequest: Codable {
+    public var outDir: String
+    public init(outDir: String = "") { self.outDir = outDir }
+}
+
+/// Result returned by POST /export/unity summarising what was materialised.
+public struct ExportResult: Codable, Equatable {
+    public var outDir: String
+    public var version: Int
+    public var parts: Int
+    public var templates: Int
+    public var palettes: Int
+    public var overrides: Int
+    public var glbsCopied: Int
+    public var signs: Int
+    public var facadeDecals: Int
+    public var paintTextures: Int
+
+    public init(outDir: String = "", version: Int = 0, parts: Int = 0, templates: Int = 0,
+                palettes: Int = 0, overrides: Int = 0, glbsCopied: Int = 0,
+                signs: Int = 0, facadeDecals: Int = 0, paintTextures: Int = 0) {
+        self.outDir = outDir; self.version = version; self.parts = parts
+        self.templates = templates; self.palettes = palettes; self.overrides = overrides
+        self.glbsCopied = glbsCopied; self.signs = signs; self.facadeDecals = facadeDecals
+        self.paintTextures = paintTextures
+    }
+}
+
 // --- Palettes (#298 plan — POST /palettes) ---
 
 /// One material-role slot in a palette (e.g. wall, trim, window).
