@@ -80,8 +80,9 @@ public struct FacadeCanvasView: View {
                 // in the real export; this is the authoring stand-in).
                 Rectangle().fill(Color(white: 0.9))
                 // Facade reference render for tracing over (gap G2 preview, fetched from server).
-                if let backdrop = vm.backdropImage {
-                    Image(uiImage: backdrop)
+                // The VM stores raw Data; convert here where UIKit is guaranteed available.
+                if let data = vm.backdropData, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
                         .resizable()
                         .scaledToFill()
                         .opacity(0.35)
@@ -312,23 +313,31 @@ private struct PaletteAuthorSheet: View {
                     TextField("Name", text: $name)
                 }
                 Section("Material roles") {
-                    ForEach($entries) { $entry in
-                        HStack {
-                            TextField("Role", text: $entry.role)
-                                .frame(maxWidth: 90)
-                            TextField("Color (#RRGGBB)", text: $entry.color)
-                                .font(.system(.body, design: .monospaced))
-                            Spacer()
-                            // Quick metallic/roughness nudge via steppers.
-                            Stepper("M: \(String(format: "%.1f", entry.metallic))",
-                                    value: $entry.metallic, in: 0...1, step: 0.1)
-                                .labelsHidden()
-                            Text("M:\(String(format: "%.1f", entry.metallic))")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
+                    // Use index-based ForEach to avoid requiring PaletteEntry: Identifiable.
+                    ForEach(entries.indices, id: \.self) { i in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                TextField("Role", text: $entries[i].role)
+                                    .frame(maxWidth: 90)
+                                TextField("Color (#RRGGBB)", text: $entries[i].color)
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                            HStack {
+                                Text("M").font(.caption).foregroundColor(.secondary)
+                                Stepper(value: $entries[i].metallic, in: 0...1, step: 0.1) {
+                                    Text(String(format: "%.1f", entries[i].metallic))
+                                        .font(.caption)
+                                }
+                                Spacer()
+                                Text("R").font(.caption).foregroundColor(.secondary)
+                                Stepper(value: $entries[i].roughness, in: 0...1, step: 0.1) {
+                                    Text(String(format: "%.1f", entries[i].roughness))
+                                        .font(.caption)
+                                }
+                            }
                         }
+                        .swipeActions { Button("Delete", role: .destructive) { entries.remove(at: i) } }
                     }
-                    .onDelete { entries.remove(atOffsets: $0) }
                     Button("Add role") {
                         entries.append(PaletteEntry())
                     }

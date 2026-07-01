@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// State + save/load for one building facade's canvas. Deliberately **PencilKit-free**: it holds
 /// already-converted `paintStrokes` (the view converts ink → strokes via `StrokeConversion`), so the
@@ -30,8 +27,9 @@ public final class FacadeCanvasViewModel: ObservableObject {
     /// Image layers in ascending z-order (index 0 = lowest above the paint layer).
     @Published public var imageLayers: [PlacedImage] = []
     @Published public private(set) var status: Status = .idle
-    /// Reference render fetched from the server for tracing over (gap G2 preview, #300).
-    @Published public private(set) var backdropImage: UIImage?
+    /// Raw PNG/JPEG bytes of the facade reference render (gap G2 preview, #300).
+    /// The view (UIKit-guarded) converts to UIImage; storing Data here keeps the VM platform-neutral.
+    @Published public private(set) var backdropData: Data?
 
     private let client: ServerClient
 
@@ -83,12 +81,10 @@ public final class FacadeCanvasViewModel: ObservableObject {
     }
 
     /// Fetch the facade reference render for the backdrop. Returns silently if the server
-    /// doesn't have one yet (404 → backdropImage stays nil).
+    /// doesn't have one yet (404 → backdropData stays nil).
     public func loadBackdrop() async {
         do {
-            if let data = try await client.fetchBackdrop(osmId: osmId, facade: facade) {
-                backdropImage = UIImage(data: data)
-            }
+            backdropData = try await client.fetchBackdrop(osmId: osmId, facade: facade)
         } catch {
             // Non-fatal: backdrop is a drawing aid only; swallow and leave nil.
         }
