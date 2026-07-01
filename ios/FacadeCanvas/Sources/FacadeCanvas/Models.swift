@@ -85,3 +85,29 @@ public struct SignDef: Codable, Equatable {
     public var aspectRatio: String
     public var stylePreset: String
 }
+
+// --- Palettes (#298 plan — POST /palettes) ---
+
+/// One material-role slot in a palette (e.g. wall, trim, window).
+public struct PaletteEntry: Codable, Equatable {
+    public var role: String         // semantic slot, e.g. "wall", "trim", "window"
+    public var color: String        // "#RRGGBB"
+    public var metallic: Double
+    public var roughness: Double
+
+    public init(role: String = "", color: String = "#FFFFFF",
+                metallic: Double = 0, roughness: Double = 0.8) {
+        self.role = role; self.color = color; self.metallic = metallic; self.roughness = roughness
+    }
+}
+
+/// A named palette of material-role color assignments for a building facade.
+public struct Palette: Codable, Equatable {
+    public var id: String?
+    public var name: String
+    public var entries: [PaletteEntry]
+
+    public init(id: String? = nil, name: String = "", entries: [PaletteEntry] = []) {
+        self.id = id; self.name = name; self.entries = entries
+    }
+}

@@ -10,6 +10,8 @@ public struct FacadeCanvasView: View {
     @State private var drawing = PKDrawing()
     @State private var canvasSize: CGSize = .zero
     @State private var showSignSheet = false
+    @State private var showPaletteSheet = false
+    @State private var showLayerPanel = false
 
     public init(viewModel: FacadeCanvasViewModel) {
         _vm = StateObject(wrappedValue: viewModel)
@@ -18,7 +20,14 @@ public struct FacadeCanvasView: View {
     public var body: some View {
         VStack(spacing: 0) {
             header
-            canvas
+            HStack(spacing: 0) {
+                canvas
+                if showLayerPanel {
+                    layerPanel
+                        .frame(width: 200)
+                        .transition(.move(edge: .trailing))
+                }
+            }
             statusBar
         }
         .sheet(isPresented: $showSignSheet) {
@@ -29,7 +38,17 @@ public struct FacadeCanvasView: View {
                 }
             }
         }
-        .task { await vm.load() }
+        .sheet(isPresented: $showPaletteSheet) {
+            PaletteAuthorSheet { palette in
+                Task { _ = await vm.savePalette(palette) }
+                showPaletteSheet = false
+            }
+        }
+        .task {
+            await vm.load()
+            await vm.loadBackdrop()
+        }
+        .animation(.easeInOut(duration: 0.2), value: showLayerPanel)
     }
 
     private var header: some View {
@@ -42,6 +61,11 @@ public struct FacadeCanvasView: View {
             .frame(maxWidth: 360)
             Spacer()
             Button("AI Sign") { showSignSheet = true }
+            Button("Palette") { showPaletteSheet = true }
+            Toggle(isOn: $showLayerPanel) {
+                Label("Layers", systemImage: "square.3.layers.3d")
+            }
+            .toggleStyle(.button)
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .disabled(vm.status == .saving)
@@ -52,10 +76,20 @@ public struct FacadeCanvasView: View {
     private var canvas: some View {
         GeometryReader { geo in
             ZStack {
-                // The wall backdrop (in Unity the alpha shows the real vertex-coloured wall).
+                // Static wall colour (Unity's vertex-coloured wall shows through the alpha channel
+                // in the real export; this is the authoring stand-in).
                 Rectangle().fill(Color(white: 0.9))
+                // Facade reference render for tracing over (gap G2 preview, fetched from server).
+                // The VM stores raw Data; convert here where UIKit is guaranteed available.
+                if let data = vm.backdropData, let uiImage = UIImage(data: data) {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(0.35)
+                        .clipped()
+                }
                 PencilCanvas(drawing: $drawing)
-                // Placed images / signs as draggable normalized rects.
+                // Image layers rendered in z-order (array order = ascending z).
                 ForEach($vm.imageLayers) { $img in
                     PlacedImageView(image: $img, canvasSize: geo.size)
                 }
@@ -66,6 +100,38 @@ public struct FacadeCanvasView: View {
         .aspectRatio(1, contentMode: .fit)   // the facade unit square
         .border(Color.secondary)
         .padding()
+    }
+
+    /// Side panel for reordering image layers by drag.
+    private var layerPanel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Layers")
+                .font(.caption.bold())
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.top, 8)
+            List {
+                // Paint layer is always at the bottom; shown as a non-movable separator.
+                if !vm.paintStrokes.isEmpty {
+                    Label("Paint", systemImage: "paintbrush")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+                ForEach(vm.imageLayers) { img in
+                    Label(img.signAsset.isEmpty ? "Image" : img.signAsset,
+                          systemImage: "photo")
+                        .font(.caption)
+                        .lineLimit(1)
+                }
+                .onMove { vm.moveImageLayer(from: $0, to: $1) }
+                .onDelete { vm.imageLayers.remove(atOffsets: $0) }
+            }
+            .listStyle(.plain)
+            .environment(\.editMode, .constant(.active))
+        }
+        .background(Color(uiColor: .secondarySystemBackground))
+        .border(Color.separator, width: 0.5)
     }
 
     private var statusBar: some View {
@@ -95,6 +161,8 @@ public struct FacadeCanvasView: View {
         Task { await vm.save() }
     }
 }
+
+// MARK: - PencilCanvas
 
 /// UIKit bridge for PencilKit's canvas + system tool picker.
 private struct PencilCanvas: UIViewRepresentable {
@@ -136,8 +204,10 @@ private struct PencilCanvas: UIViewRepresentable {
     }
 }
 
+// MARK: - PlacedImageView
+
 /// A placed image/sign rendered as a movable normalized rect. (Fetching the actual PNG from the
-/// server for preview needs an asset GET endpoint — design #276 gap G2 — so the MVP shows a label.)
+/// server for preview needs the G2 asset GET endpoint, #300 — so the MVP shows a label.)
 private struct PlacedImageView: View {
     @Binding var image: FacadeCanvasViewModel.PlacedImage
     let canvasSize: CGSize
@@ -172,21 +242,34 @@ private struct PlacedImageView: View {
     }
 }
 
-/// A minimal AI-sign request form; the server generates the PNG (the iPad never calls a provider).
+// MARK: - SignRequestSheet
+
+/// AI-sign request form — exposes all SignRequest fields so the server can pick a provider
+/// and apply the neighborhood style context.
 private struct SignRequestSheet: View {
     var onSubmit: (SignRequest) -> Void
     @State private var text = ""
     @State private var businessType = ""
+    @State private var neighborhood = ""
     @State private var aspect = "3:1"
+    @State private var stylePreset = ""
+    @State private var provider = ""
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Sign text", text: $text)
-                TextField("Business type", text: $businessType)
-                Picker("Aspect", selection: $aspect) {
-                    ForEach(["1:1", "3:1", "2:1", "4:1"], id: \.self) { Text($0) }
+                Section("Sign content") {
+                    TextField("Sign text", text: $text)
+                    TextField("Business type", text: $businessType)
+                    Picker("Aspect ratio", selection: $aspect) {
+                        ForEach(["1:1", "3:1", "2:1", "4:1"], id: \.self) { Text($0) }
+                    }
+                }
+                Section("Context (optional)") {
+                    TextField("Neighborhood", text: $neighborhood)
+                    TextField("Style preset", text: $stylePreset)
+                    TextField("Provider", text: $provider)
                 }
             }
             .navigationTitle("Generate AI Sign")
@@ -194,9 +277,80 @@ private struct SignRequestSheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Generate") {
-                        onSubmit(SignRequest(businessType: businessType, text: text, aspectRatio: aspect))
+                        onSubmit(SignRequest(
+                            businessType: businessType,
+                            neighborhood: neighborhood,
+                            text: text,
+                            aspectRatio: aspect,
+                            stylePreset: stylePreset,
+                            provider: provider
+                        ))
                     }
                     .disabled(text.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - PaletteAuthorSheet
+
+/// Palette authoring form — builds a named PaletteEntry list and POSTs to /palettes.
+private struct PaletteAuthorSheet: View {
+    var onSubmit: (Palette) -> Void
+    @State private var name = ""
+    @State private var entries: [PaletteEntry] = [
+        PaletteEntry(role: "wall",   color: "#C8B89A"),
+        PaletteEntry(role: "trim",   color: "#FFFFFF"),
+        PaletteEntry(role: "window", color: "#6AADE4"),
+    ]
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Palette name") {
+                    TextField("Name", text: $name)
+                }
+                Section("Material roles") {
+                    // Use index-based ForEach to avoid requiring PaletteEntry: Identifiable.
+                    ForEach(entries.indices, id: \.self) { i in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                TextField("Role", text: $entries[i].role)
+                                    .frame(maxWidth: 90)
+                                TextField("Color (#RRGGBB)", text: $entries[i].color)
+                                    .font(.system(.body, design: .monospaced))
+                            }
+                            HStack {
+                                Text("M").font(.caption).foregroundColor(.secondary)
+                                Stepper(value: $entries[i].metallic, in: 0...1, step: 0.1) {
+                                    Text(String(format: "%.1f", entries[i].metallic))
+                                        .font(.caption)
+                                }
+                                Spacer()
+                                Text("R").font(.caption).foregroundColor(.secondary)
+                                Stepper(value: $entries[i].roughness, in: 0...1, step: 0.1) {
+                                    Text(String(format: "%.1f", entries[i].roughness))
+                                        .font(.caption)
+                                }
+                            }
+                        }
+                        .swipeActions { Button("Delete", role: .destructive) { entries.remove(at: i) } }
+                    }
+                    Button("Add role") {
+                        entries.append(PaletteEntry())
+                    }
+                }
+            }
+            .navigationTitle("New Palette")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSubmit(Palette(name: name, entries: entries))
+                    }
+                    .disabled(name.isEmpty || entries.isEmpty)
                 }
             }
         }
