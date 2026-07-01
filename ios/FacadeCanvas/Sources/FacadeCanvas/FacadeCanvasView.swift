@@ -141,6 +141,7 @@ public struct FacadeCanvasView: View {
             case .loading:         ProgressView(); Text("Loading…")
             case .saving:          ProgressView(); Text("Saving…")
             case .saved:           Label("Saved", systemImage: "checkmark.circle").foregroundColor(.green)
+            case .queued:          Label("Queued (offline)", systemImage: "arrow.triangle.2.circlepath").foregroundColor(.orange)
             case .failed(let msg): Label(msg, systemImage: "exclamationmark.triangle").foregroundColor(.red)
             }
             Spacer()
