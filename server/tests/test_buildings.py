@@ -79,3 +79,49 @@ def test_list_pagination(client):
 
     p3 = client.get("/buildings?limit=2&offset=4").json()
     assert [b["osm_id"] for b in p3["buildings"]] == [5]
+
+
+# -- thumbnails (#318) --------------------------------------------------------
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"png-body"
+_JPEG = b"\xff\xd8\xff" + b"jpeg-body"
+
+
+def test_thumb_upload_requires_existing_building(client):
+    assert client.put("/buildings/999/thumb", content=_PNG).status_code == 404
+
+
+def test_thumb_upload_rejects_non_image(client):
+    client.post("/buildings/import-sidecar", json=_sidecar(_facts()))
+    r = client.put("/buildings/65307880/thumb", content=b"not-an-image")
+    assert r.status_code == 415
+
+
+def test_get_thumb_404_when_none(client):
+    client.post("/buildings/import-sidecar", json=_sidecar(_facts()))
+    assert client.get("/buildings/65307880/thumb").status_code == 404
+
+
+def test_thumb_upload_and_download_png(client):
+    client.post("/buildings/import-sidecar", json=_sidecar(_facts()))
+    r = client.put("/buildings/65307880/thumb", content=_PNG)
+    assert r.status_code == 200 and r.json() == {"building": 65307880, "bytes": len(_PNG)}
+
+    got = client.get("/buildings/65307880/thumb")
+    assert got.status_code == 200 and got.content == _PNG
+    assert got.headers["content-type"] == "image/png"
+
+
+def test_thumb_download_reports_jpeg_content_type(client):
+    client.post("/buildings/import-sidecar", json=_sidecar(_facts()))
+    client.put("/buildings/65307880/thumb", content=_JPEG)
+    got = client.get("/buildings/65307880/thumb")
+    assert got.content == _JPEG and got.headers["content-type"] == "image/jpeg"
+
+
+def test_thumb_reupload_replaces(client):
+    client.post("/buildings/import-sidecar", json=_sidecar(_facts()))
+    client.put("/buildings/65307880/thumb", content=_PNG)
+    client.put("/buildings/65307880/thumb", content=_JPEG)
+    got = client.get("/buildings/65307880/thumb")
+    assert got.content == _JPEG and got.headers["content-type"] == "image/jpeg"
