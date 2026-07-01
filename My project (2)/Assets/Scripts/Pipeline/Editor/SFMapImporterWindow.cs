@@ -175,6 +175,10 @@ namespace SFMap.Pipeline.Editor
             EnsureTopLevelFolders();
             EnsureMaterials();
 
+            // Facade-decal overrides are map-wide: load them ONCE here and reuse for every chunk,
+            // instead of re-scanning + re-parsing Overrides/*.override.json per chunk (#295).
+            var decalOverrides = BuildingDecalImporter.LoadDecalOverrides();
+
             var mapRoot    = new GameObject("SF Map");
             var coordList  = new List<ChunkManifestEntry>();
             float globalMinElev = float.MaxValue;
@@ -212,8 +216,8 @@ namespace SFMap.Pipeline.Editor
 
                     // Facade decals (#280): alpha-textured quads from building-specific overrides,
                     // nested like parked cars so they bake into the chunk prefab. No-op without a
-                    // sidecar or facadeDecals.
-                    BuildingDecalImporter.Import(chunkDir, coord, chunkRootGo);
+                    // sidecar or facadeDecals. Overrides are loaded once above and batched internally.
+                    BuildingDecalImporter.Import(chunkDir, coord, chunkRootGo, decalOverrides);
 
                     StartOp();
                     PrefabUtility.SaveAsPrefabAsset(chunkRootGo,
@@ -461,8 +465,23 @@ namespace SFMap.Pipeline.Editor
             }
             if (assembler != null)
             {
-                foreach (var t in templated)
-                    assembler.Assemble(bldgGo.transform, coord, t.osmId, t.mesh, t.facts, t.tpl, bldgMat);
+                // Batch the per-building combined-mesh CreateAsset writes into one import pass. This
+                // assemble pass runs in the post-hierarchy phase (after the chunk's own StartAssetEditing
+                // block has already closed), so without this wrapper each templated building's mesh
+                // imported one-by-one — the #295 hotspot on dense template chunks.
+                if (templated.Count > 0)
+                {
+                    AssetDatabase.StartAssetEditing();
+                    try
+                    {
+                        foreach (var t in templated)
+                            assembler.Assemble(bldgGo.transform, coord, t.osmId, t.mesh, t.facts, t.tpl, bldgMat);
+                    }
+                    finally
+                    {
+                        AssetDatabase.StopAssetEditing();
+                    }
+                }
                 assembler.LogCoverage(coord, buildingParts.Count);   // fallback = merged buildings
             }
 
