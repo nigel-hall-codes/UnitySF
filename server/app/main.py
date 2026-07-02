@@ -23,6 +23,7 @@ from .models import (
     BuildingFacts,
     BuildingPage,
     BuildingSpecificDef,
+    DistrictDef,
     ExportRequest,
     ExportResult,
     FacadeCanvas,
@@ -139,6 +140,17 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
     def create_palette(pal: PaletteDef) -> PaletteDef:
         S().upsert_palette(pal)
         return pal
+
+    # -- districts (#326 D4; config layer over the existing neighborhood key) -
+
+    @app.get("/districts")
+    def list_districts() -> List[DistrictDef]:
+        return S().list_districts()
+
+    @app.post("/districts")
+    def create_district(district: DistrictDef) -> DistrictDef:
+        S().upsert_district(district)
+        return district
 
     # -- building-specific overrides ---------------------------------------
 

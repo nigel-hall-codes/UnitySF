@@ -15,6 +15,7 @@ from typing import List, Optional
 from .models import (
     BuildingFacts,
     BuildingSpecificDef,
+    DistrictDef,
     FacadeCanvas,
     PaletteDef,
     PartDef,
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS palettes  (neighborhood TEXT PRIMARY KEY, json TEXT N
 CREATE TABLE IF NOT EXISTS overrides (osm_id INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS signs     (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS canvases  (key TEXT PRIMARY KEY, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS districts (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS buildings (
     osm_id        INTEGER PRIMARY KEY,
     neighborhood  TEXT NOT NULL DEFAULT '',
@@ -81,6 +83,18 @@ class Store:
 
     def list_palettes(self) -> List[PaletteDef]:
         return [PaletteDef.model_validate_json(j) for j in self._all("palettes")]
+
+    # -- districts (#326 D4) -------------------------------------------------
+
+    def upsert_district(self, district: DistrictDef) -> None:
+        self._upsert("districts", "id", district.id, district)
+
+    def list_districts(self) -> List[DistrictDef]:
+        return [DistrictDef.model_validate_json(j) for j in self._all("districts")]
+
+    def get_district(self, district_id: str) -> Optional[DistrictDef]:
+        row = self._one("districts", "id", district_id)
+        return DistrictDef.model_validate_json(row) if row else None
 
     # -- overrides ----------------------------------------------------------
 
