@@ -133,9 +133,17 @@ public struct BuildingBrowserView: View {
     }
 
     private var buildingList: some View {
-        List(vm.buildings, selection: $vm.selectedBuilding) { building in
-            BuildingRowView(building: building)
-                .tag(building)
+        List(selection: $vm.selectedBuilding) {
+            ForEach(vm.buildings) { building in
+                BuildingRowView(building: building)
+                    .tag(building)
+            }
+            if vm.hasMore {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 8)
+                    .onAppear { Task { await vm.loadMore() } }
+            }
         }
         .listStyle(.sidebar)
         .overlay {
@@ -143,16 +151,6 @@ public struct BuildingBrowserView: View {
                 ContentUnavailableView("No buildings",
                                        systemImage: "building.2.slash",
                                        description: Text(vm.errorMessage ?? "Try adjusting the filters."))
-            }
-        }
-        .safeAreaInset(edge: .bottom) {
-            if vm.hasMore {
-                Button("Load more (\(vm.total - vm.buildings.count) remaining)") {
-                    Task { await vm.loadMore() }
-                }
-                .padding()
-                .frame(maxWidth: .infinity)
-                .background(.ultraThinMaterial)
             }
         }
     }
