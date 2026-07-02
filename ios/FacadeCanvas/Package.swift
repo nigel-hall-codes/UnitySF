@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 import PackageDescription
 
 // The iPad facade-canvas authoring mode (#282), a mode inside the authoring client (#276).
@@ -6,7 +6,7 @@ import PackageDescription
 // directly. Open in Xcode and embed in the app target (PencilKit/SwiftUI need the iOS SDK).
 let package = Package(
     name: "FacadeCanvas",
-    platforms: [.iOS(.v16)],
+    platforms: [.iOS(.v26)],
     products: [
         .library(name: "FacadeCanvas", targets: ["FacadeCanvas"])
     ],

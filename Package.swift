@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.2
 import PackageDescription
 
 // Root manifest so external consumers (e.g. the UnitySFApp repo, design #326 D3) can add
@@ -15,7 +15,7 @@ import PackageDescription
 // dependency, or ios/FacadeCanvas directly for local standalone development.
 let package = Package(
     name: "UnitySF",
-    platforms: [.iOS(.v16)],
+    platforms: [.iOS(.v26)],
     products: [
         .library(name: "FacadeCanvas", targets: ["FacadeCanvas"])
     ],
