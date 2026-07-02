@@ -2,7 +2,9 @@
 (#269) consumes — including the array-of-pairs form for the §2 map fields."""
 import json
 
-from app.export import _neighborhood_template_weights
+import pytest
+
+from app.export import _filter_by_scope, _neighborhood_template_weights
 from app.models import DistrictDef, TemplateWeight
 from test_api import _palette, _part, _template
 
@@ -211,6 +213,13 @@ def test_export_scope_neighborhood_includes_only_matching_buildings(client, tmp_
     assert result["scope"] == "neighborhood" and result["overrides"] == 1
     assert (out / "Overrides" / "2002.override.json").exists()
     assert not (out / "Overrides" / "1001.override.json").exists()
+
+
+def test_filter_by_scope_neighborhood_without_neighborhood_raises(store):
+    # Defense in depth: main.py's endpoint already 400s before this is ever reachable via HTTP,
+    # but the helper itself must not silently fall through to an unscoped export for a second caller.
+    with pytest.raises(ValueError):
+        _filter_by_scope(store, [1001, 2002], "neighborhood", None, "")
 
 
 def test_export_scope_building_without_osm_id_400s(client, tmp_path):

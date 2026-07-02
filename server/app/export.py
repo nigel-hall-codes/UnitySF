@@ -50,7 +50,12 @@ def _filter_by_scope(store: Store, osm_ids: list[int], scope: str, osm_id, neigh
     """
     if scope == "building":
         return {osm_id} if osm_id is not None else set()
-    if scope == "neighborhood" and neighborhood:
+    if scope == "neighborhood":
+        # The HTTP layer (main.py) 400s before calling export_unity with scope="neighborhood"
+        # and no neighborhood — this guards any other caller from silently falling through to
+        # an unscoped export instead.
+        if not neighborhood:
+            raise ValueError("scope 'neighborhood' requires a neighborhood")
         kept = set()
         for oid in osm_ids:
             b = store.get_building(oid)
