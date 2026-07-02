@@ -16,6 +16,7 @@ from pathlib import Path
 from .canvas import flatten_paint
 from .models import ExportResult
 from .store import Store
+from .zones import compile_zones
 
 # Authored ids / neighborhood names become filenames; neutralise anything that could
 # escape the target dir (path separators, "..") so a crafted id can't write elsewhere.
@@ -76,7 +77,15 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         _write_json(parts_dir / f"{_safe(p.id)}.part.json", data)
 
     for t in templates:
-        _write_json(templates_dir / f"{_safe(t.id)}.template.json", t.model_dump(by_alias=True))
+        data = t.model_dump(by_alias=True)
+        # Zones are the authoring format; compile them into rules[] here so the
+        # Unity importer/BuildingAssembler never see zones[] (design #326 D1).
+        # Compiled rules append to any form-authored rules[] — zones never replace.
+        compiled = compile_zones(t.zones)
+        if compiled:
+            data["rules"] = data["rules"] + [r.model_dump(by_alias=True) for r in compiled]
+        data.pop("zones", None)
+        _write_json(templates_dir / f"{_safe(t.id)}.template.json", data)
     for pal in palettes:
         _write_json(palettes_dir / f"{_safe(pal.neighborhood)}.palette.json", pal.model_dump(by_alias=True))
     # Building-specific overrides — collected into a map (keyed by osm_id) so the facade-canvas

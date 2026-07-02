@@ -69,3 +69,34 @@ def test_export_default_dir_used_when_omitted(client, tmp_path):
     r = client.post("/export/unity", json={})
     assert r.status_code == 200
     assert (tmp_path / "export" / "Palettes" / "Mission.palette.json").exists()
+
+
+def test_export_compiles_zones_into_rules_and_strips_zones_key(client, tmp_path):
+    # Zones are the authoring format (#326 D1); Unity must only ever see the
+    # compiled rules[], never zones[] — and existing exact[] must survive untouched.
+    tpl = _template()
+    tpl["zones"] = [{
+        "id": "z1", "type": "Window", "facade": "Front",
+        "shape": {"kind": "rect", "points": [[0.2, 0.0], [0.8, 0.0], [0.8, 1.0], [0.2, 1.0]]},
+        "floorRange": {"min": 1, "max": 2},
+        "rules": {
+            "allowedParts": [{"part": "window_sunset_2x3", "weight": 1.0}],
+            "countRange": {"min": 2, "max": 2},
+        },
+    }]
+    client.post("/parts", json=_part())
+    client.post("/templates", json=tpl)
+
+    out = tmp_path / "drop_zones"
+    r = client.post("/export/unity", json={"outDir": str(out)})
+    assert r.status_code == 200
+
+    written = json.loads((out / "Templates" / f"{tpl['id']}.template.json").read_text(encoding="utf-8"))
+    assert "zones" not in written
+    assert written["exact"][0]["part"] == tpl["exact"][0]["part"]  # form-authored exact[] untouched
+    assert len(written["rules"]) == 1
+    compiled_rule = written["rules"][0]
+    assert compiled_rule["facade"] == "Front"
+    assert compiled_rule["span"] == [0.2, 0.8]
+    assert compiled_rule["floorRange"] == {"min": 1, "max": 2}
+    assert compiled_rule["variants"] == ["window_sunset_2x3"]
