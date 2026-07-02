@@ -375,3 +375,32 @@ public struct Palette: Codable, Equatable {
         self.id = id; self.name = name; self.entries = entries
     }
 }
+
+// --- Districts (#341 — GET/POST /districts; config layer over the neighborhood key) ---
+
+public struct TemplateWeight: Codable, Equatable {
+    public var template: String
+    public var weight: Double
+
+    public init(template: String = "", weight: Double = 1) {
+        self.template = template; self.weight = weight
+    }
+}
+
+public struct DistrictDef: Codable, Equatable, Identifiable {
+    public var id: String
+    public var name: String
+    public var neighborhoods: [String]
+    public var templateWeights: [TemplateWeight]
+    public var palette: String
+    public var signStyle: String
+    public var version: Int
+
+    public init(id: String, name: String = "", neighborhoods: [String] = [],
+                templateWeights: [TemplateWeight] = [], palette: String = "",
+                signStyle: String = "Modern", version: Int = 1) {
+        self.id = id; self.name = name; self.neighborhoods = neighborhoods
+        self.templateWeights = templateWeights; self.palette = palette
+        self.signStyle = signStyle; self.version = version
+    }
+}
