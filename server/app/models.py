@@ -168,6 +168,26 @@ class PaletteDef(BaseModel):
     version: int = 1
 
 
+# --- Districts (design #326 D4; config layer over the existing neighborhood key) --
+# `neighborhood` stays the geographic key the bake/palettes use; DistrictDef is an
+# authoring layer above it (template mix + sign style), consumed by export-time
+# template selection (#343) and the district preview (#342). No bake/sidecar changes.
+
+class TemplateWeight(BaseModel):
+    template: str
+    weight: float = 1.0
+
+
+class DistrictDef(BaseModel):
+    id: str
+    name: str = ""
+    neighborhoods: List[str] = Field(default_factory=list)
+    templateWeights: List[TemplateWeight] = Field(default_factory=list)
+    palette: str = ""          # PaletteDef.neighborhood ref
+    signStyle: str = "Modern"  # Modern|Vintage|Bilingual|Tourist|Mixed
+    version: int = 1
+
+
 # --- Building-specific overrides -------------------------------------------
 
 class Placement(BaseModel):
