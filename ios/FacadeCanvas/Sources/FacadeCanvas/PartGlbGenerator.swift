@@ -15,6 +15,12 @@ import Foundation
 ///   [140..143] padding   (4-byte alignment)
 public enum PartGlbGenerator {
 
+    /// Number of submeshes (glTF primitives) the generated GLB contains — today's flat
+    /// quad is a single primitive. The part-authoring UI (#328) bounds its role-picker
+    /// rows by this so a role can never be assigned to a submesh the GLB doesn't have;
+    /// bump this if a future generator (#327's traced-polygon geometry) ever emits more.
+    public static let submeshCount = 1
+
     public static func generate(width: Float, height: Float) -> Data {
         let hw = width / 2
         let hh = height
