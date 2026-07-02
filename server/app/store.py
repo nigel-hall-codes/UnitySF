@@ -74,6 +74,10 @@ class Store:
     def list_templates(self) -> List[TemplateDef]:
         return [TemplateDef.model_validate_json(j) for j in self._all("templates")]
 
+    def get_template(self, template_id: str) -> Optional[TemplateDef]:
+        row = self._one("templates", "id", template_id)
+        return TemplateDef.model_validate_json(row) if row else None
+
     # -- palettes -----------------------------------------------------------
 
     def upsert_palette(self, pal: PaletteDef) -> None:
