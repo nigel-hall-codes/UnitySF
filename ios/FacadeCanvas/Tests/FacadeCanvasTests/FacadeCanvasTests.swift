@@ -307,9 +307,10 @@ final class FacadeCanvasTests: XCTestCase {
     // MARK: - ZoneDrawingViewModel geometry (#338)
 
     // XCTAssertEqual's `accuracy:` overload is only defined for a single FloatingPoint value,
-    // not [Double] — this compares element-by-element instead.
-    private func assertRectEqual(_ a: [Double], _ b: [Double], accuracy: Double,
-                                  file: StaticString = #filePath, line: UInt = #line) {
+    // not [Double] — this compares element-by-element instead. Used for rects AND for any other
+    // [Double] comparison (e.g. weight percentages) that needs a tolerance.
+    private func assertDoublesEqual(_ a: [Double], _ b: [Double], accuracy: Double,
+                                     file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(a.count, b.count, file: file, line: line)
         for (x, y) in zip(a, b) {
             XCTAssertEqual(x, y, accuracy: accuracy, file: file, line: line)
@@ -322,7 +323,7 @@ final class FacadeCanvasTests: XCTestCase {
         // and screen-y=20 (near top) -> UV-y=0.8 (high).
         let rect = ZoneDrawingViewModel.normalizedRect(
             from: (x: 60, y: 80), to: (x: 20, y: 20), canvasWidth: 100, canvasHeight: 100)
-        assertRectEqual(rect, [0.2, 0.2, 0.6, 0.8], accuracy: 0.0001)
+        assertDoublesEqual(rect, [0.2, 0.2, 0.6, 0.8], accuracy: 0.0001)
     }
 
     func testNormalizedRectEnforcesMinimumSize() {
@@ -337,7 +338,7 @@ final class FacadeCanvasTests: XCTestCase {
         // A drag that overshoots the canvas bounds must clamp into [0,1].
         let rect = ZoneDrawingViewModel.normalizedRect(
             from: (x: -50, y: -50), to: (x: 150, y: 150), canvasWidth: 100, canvasHeight: 100)
-        assertRectEqual(rect, [0, 0, 1, 1], accuracy: 0.0001)
+        assertDoublesEqual(rect, [0, 0, 1, 1], accuracy: 0.0001)
     }
 
     func testNormalizedRectHandlesZeroCanvasSize() {
@@ -376,7 +377,7 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(vm.zones.count, 1)
         XCTAssertEqual(vm.zones[0].type, "Storefront")
         XCTAssertEqual(vm.zones[0].shape.kind, "rect")
-        assertRectEqual(ZoneDrawingViewModel.rect(of: vm.zones[0]), [0.2, 0.2, 0.6, 0.8], accuracy: 0.0001)
+        assertDoublesEqual(ZoneDrawingViewModel.rect(of: vm.zones[0]), [0.2, 0.2, 0.6, 0.8], accuracy: 0.0001)
     }
 
     @MainActor
@@ -442,5 +443,51 @@ final class FacadeCanvasTests: XCTestCase {
         let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1"), Zone(id: "z2")])
         vm.delete(id: "z1")
         XCTAssertEqual(vm.zones.map(\.id), ["z2"])
+    }
+
+    // MARK: - Properties pane (#339)
+
+    func testWeightPercentagesMatchesIssueExample() {
+        // "Victorian A 50% / B 30% / C 20%" — the issue's own worked example.
+        let parts = [WeightedPart(part: "a", weight: 50), WeightedPart(part: "b", weight: 30),
+                     WeightedPart(part: "c", weight: 20)]
+        let pct = ZoneDrawingViewModel.weightPercentages(parts)
+        assertDoublesEqual(pct, [50, 30, 20], accuracy: 0.0001)
+    }
+
+    func testWeightPercentagesNormalizesArbitraryWeights() {
+        let parts = [WeightedPart(part: "a", weight: 1), WeightedPart(part: "b", weight: 1),
+                     WeightedPart(part: "c", weight: 2)]
+        let pct = ZoneDrawingViewModel.weightPercentages(parts)
+        assertDoublesEqual(pct, [25, 25, 50], accuracy: 0.0001)
+    }
+
+    func testWeightPercentagesHandlesEmptyAndZeroTotal() {
+        XCTAssertEqual(ZoneDrawingViewModel.weightPercentages([]), [])
+        let allZero = [WeightedPart(part: "a", weight: 0), WeightedPart(part: "b", weight: 0)]
+        XCTAssertEqual(ZoneDrawingViewModel.weightPercentages(allZero), [0, 0])
+    }
+
+    func testWeightPercentagesIgnoresNegativeWeights() {
+        // max(weight, 0) clamps a negative (invalid) weight to 0 rather than skewing the total.
+        let parts = [WeightedPart(part: "a", weight: -10), WeightedPart(part: "b", weight: 40)]
+        XCTAssertEqual(ZoneDrawingViewModel.weightPercentages(parts), [0, 100])
+    }
+
+    @MainActor
+    func testUpdateZoneReplacesMatchingZoneOnly() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1", type: "Window"), Zone(id: "z2", type: "Door")])
+        var updated = vm.zones[0]
+        updated.rules.alignment = "Free"
+        vm.updateZone(updated)
+        XCTAssertEqual(vm.zones[0].rules.alignment, "Free")
+        XCTAssertEqual(vm.zones[1].type, "Door", "unrelated zone must be untouched")
+    }
+
+    @MainActor
+    func testUpdateZoneNoOpsForUnknownId() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1")])
+        vm.updateZone(Zone(id: "ghost", type: "Sign"))
+        XCTAssertEqual(vm.zones.map(\.id), ["z1"])
     }
 }

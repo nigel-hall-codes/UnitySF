@@ -153,9 +153,15 @@ public struct TemplateWorkspaceView: View {
     }
 
     private var propertiesPane: some View {
-        ContentUnavailableView("Properties", systemImage: "slider.horizontal.3",
-                               description: Text("Per-zone-type rule editing lands in #339."))
-            .navigationTitle("Properties")
+        Group {
+            if let selectedZoneId {
+                PropertiesPaneView(zoneId: selectedZoneId, vm: zoneVM)
+            } else {
+                ContentUnavailableView("No zone selected", systemImage: "slider.horizontal.3",
+                                       description: Text("Select a zone from the Layers pane or canvas to edit its rules."))
+            }
+        }
+        .navigationTitle("Properties")
     }
 }
 
