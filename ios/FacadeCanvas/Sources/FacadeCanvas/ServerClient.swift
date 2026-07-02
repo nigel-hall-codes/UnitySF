@@ -139,6 +139,14 @@ public actor ServerClient {
         try await get("districts")
     }
 
+    // POST /templates/{id}/resolve — resolve a template against real (osm_id) or synthetic
+    // (facts) building facts + a seed into a flat placement list (#336/#340).
+    public func resolveTemplate(templateId: String, osmId: Int? = nil, facts: BuildingFacts? = nil,
+                                 seed: Int = 1) async throws -> ResolvedFacade {
+        try await post("templates/\(templateId)/resolve",
+                       body: ResolveRequest(osm_id: osmId, facts: facts, seed: seed))
+    }
+
     // POST /parts — create or upsert a part record.
     public func createPart(_ part: PartDef) async throws -> PartDef {
         try await post("parts", body: part)

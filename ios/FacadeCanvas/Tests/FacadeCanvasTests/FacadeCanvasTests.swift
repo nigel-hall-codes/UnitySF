@@ -490,4 +490,71 @@ final class FacadeCanvasTests: XCTestCase {
         vm.updateZone(Zone(id: "ghost", type: "Sign"))
         XCTAssertEqual(vm.zones.map(\.id), ["z1"])
     }
+
+    // MARK: - Variation preview (#340)
+
+    func testResolveRequestEncodesFactsAndSeed() throws {
+        let facts = VariationPreviewViewModel.syntheticFacts()
+        let req = ResolveRequest(osm_id: nil, facts: facts, seed: 3)
+        let data = try JSONEncoder().encode(req)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(obj["seed"] as? Int, 3)
+        XCTAssertNil(obj["osm_id"])
+        let factsObj = try XCTUnwrap(obj["facts"] as? [String: Any])
+        XCTAssertEqual(factsObj["osm_id"] as? Int, -1)
+        XCTAssertEqual(factsObj["floor_count"] as? Int, VariationPreviewViewModel.floorCount)
+    }
+
+    func testResolvedFacadeDecodesServerShape() throws {
+        let json = Data("""
+        {"placements":[{"part":"window_a","facade":"Front","floor":1,"x":0.3,"y":0.5,
+                        "scale":1.0,"w_m":1.2,"h_m":1.6}],
+         "paletteRoles":[{"role":"Base","colors":["#E9DFC6"],"ramp":[],"mode":"pick"}]}
+        """.utf8)
+        let facade = try JSONDecoder().decode(ResolvedFacade.self, from: json)
+        XCTAssertEqual(facade.placements.count, 1)
+        XCTAssertEqual(facade.placements[0].part, "window_a")
+        XCTAssertEqual(facade.placements[0].floor, 1)
+        XCTAssertEqual(facade.paletteRoles.first?.role, "Base")
+    }
+
+    func testSyntheticFactsHasOneStreetFacadeSizedForPreview() {
+        let facts = VariationPreviewViewModel.syntheticFacts(neighborhood: "Sunset")
+        XCTAssertEqual(facts.osm_id, -1, "sentinel osm_id flags this as not a real building")
+        XCTAssertEqual(facts.neighborhood, "Sunset")
+        XCTAssertEqual(facts.floor_count, VariationPreviewViewModel.floorCount)
+        XCTAssertEqual(facts.street_facades.count, 1)
+        XCTAssertEqual(facts.street_facades[0].edge, [0, 0, VariationPreviewViewModel.facadeWidthM, 0])
+    }
+
+    func testSchematicYCombinesFloorAndWithinFloorOffset() {
+        // Floor 0, within-floor y=0.5 (mid-floor), 3 floors total -> (0+0.5)/3.
+        XCTAssertEqual(VariationPreviewViewModel.schematicY(floor: 0, y: 0.5, floorCount: 3), 0.5 / 3, accuracy: 0.0001)
+        // Top floor (2 of 0..2), mid-floor -> (2+0.5)/3.
+        XCTAssertEqual(VariationPreviewViewModel.schematicY(floor: 2, y: 0.5, floorCount: 3), 2.5 / 3, accuracy: 0.0001)
+    }
+
+    func testSchematicYClampsToUnitRange() {
+        // A floor index at/above floorCount (shouldn't happen from a well-formed resolve, but
+        // must not crash or escape [0,1] if it does) clamps rather than overflowing.
+        XCTAssertEqual(VariationPreviewViewModel.schematicY(floor: 10, y: 0.9, floorCount: 3), 1.0, accuracy: 0.0001)
+        XCTAssertEqual(VariationPreviewViewModel.schematicY(floor: 0, y: 0, floorCount: 3), 0.0, accuracy: 0.0001)
+    }
+
+    func testSchematicSizeScalesByRealDimensions() {
+        // A 1.2m-wide, 1.6m-tall part on a 10m x 9m facade.
+        let size = VariationPreviewViewModel.schematicSize(
+            wM: 1.2, hM: 1.6, facadeWidthM: 10, facadeHeightM: 9)
+        XCTAssertEqual(size.w, 0.12, accuracy: 0.0001)
+        XCTAssertEqual(size.h, 1.6 / 9, accuracy: 0.0001)
+    }
+
+    func testSchematicSizeFallsBackForZeroOrMissingDimensions() {
+        // A part with no recorded size (no PartDef loaded, w_m/h_m default to 0) still renders
+        // at a small fixed placeholder size rather than collapsing to zero/invisible.
+        let size = VariationPreviewViewModel.schematicSize(
+            wM: 0, hM: 0, facadeWidthM: 10, facadeHeightM: 9)
+        XCTAssertEqual(size.w, 0.05, accuracy: 0.0001)
+        XCTAssertEqual(size.h, 0.05, accuracy: 0.0001)
+    }
 }
