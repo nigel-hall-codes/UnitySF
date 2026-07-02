@@ -136,6 +136,17 @@ public actor ServerClient {
         try await post("parts", body: part)
     }
 
+    // GET /buildings/{osm_id}/thumb — rendered 3D preview image; nil on 404 (#318).
+    public func fetchBuildingThumb(osmId: Int) async throws -> Data? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("buildings/\(osmId)/thumb"))
+        req.httpMethod = "GET"
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 404 { return nil }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+        return data
+    }
+
     // GET /parts/{id}/glb — download a part's binary GLB; nil on 404.
     public func getPartGlb(partId: String) async throws -> Data? {
         var req = URLRequest(url: baseURL.appendingPathComponent("parts/\(partId)/glb"))

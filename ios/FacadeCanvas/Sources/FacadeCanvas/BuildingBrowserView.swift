@@ -135,7 +135,7 @@ public struct BuildingBrowserView: View {
     private var buildingList: some View {
         List(selection: $vm.selectedBuilding) {
             ForEach(vm.buildings) { building in
-                BuildingRowView(building: building)
+                BuildingRowView(building: building, client: client)
                     .tag(building)
             }
             if vm.hasMore {
@@ -160,31 +160,65 @@ public struct BuildingBrowserView: View {
 
 private struct BuildingRowView: View {
     let building: BuildingFacts
+    let client: ServerClient
+
+    @State private var thumbImage: UIImage?
+    @State private var didAttemptLoad = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text("OSM \(building.osm_id)")
-                .font(.headline)
-            HStack(spacing: 4) {
-                if !building.building_type.isEmpty {
-                    Text(building.building_type)
-                        .font(.caption)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.15))
-                        .cornerRadius(4)
+        HStack(spacing: 10) {
+            thumbnail
+            VStack(alignment: .leading, spacing: 2) {
+                Text("OSM \(building.osm_id)")
+                    .font(.headline)
+                HStack(spacing: 4) {
+                    if !building.building_type.isEmpty {
+                        Text(building.building_type)
+                            .font(.caption)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(4)
+                    }
+                    if !building.neighborhood.isEmpty {
+                        Text(building.neighborhood)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                if !building.neighborhood.isEmpty {
-                    Text(building.neighborhood)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                Text(String(format: "%.0f×%.0f m  %d fl",
+                            building.width_m, building.depth_m, building.floor_count))
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
             }
-            Text(String(format: "%.0f×%.0f m  %d fl",
-                        building.width_m, building.depth_m, building.floor_count))
-                .font(.caption2)
-                .foregroundColor(.secondary)
         }
         .padding(.vertical, 2)
+        .task {
+            // Load once per row appearance; the row's own @State is the cache — SwiftUI
+            // reuses the view (and its state) across scroll as long as `building.id` matches.
+            guard !didAttemptLoad else { return }
+            didAttemptLoad = true
+            if let data = try? await client.fetchBuildingThumb(osmId: building.osm_id) {
+                thumbImage = UIImage(data: data)
+            }
+        }
+    }
+
+    // Fixed 48×48 leading square so row height stays stable whether or not a thumb loads.
+    private var thumbnail: some View {
+        Group {
+            if let thumbImage {
+                Image(uiImage: thumbImage)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "building.2")
+                    .foregroundColor(.secondary)
+            }
+        }
+        .frame(width: 48, height: 48)
+        .background(Color(uiColor: .secondarySystemBackground))
+        .cornerRadius(6)
+        .clipped()
     }
 }
 
