@@ -235,4 +235,35 @@ final class FacadeCanvasTests: XCTestCase {
     func testCardSubtitleHandlesEmptyTemplate() {
         XCTAssertEqual(TemplateBrowserViewModel.cardSubtitle(TemplateDef(id: "empty")), "0 exact · 0 rules")
     }
+
+    // MARK: - AssetsGridViewModel (#344)
+
+    func testFallbackColorNameCoversAllKnownCategories() {
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Window"), "blue")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Door"), "brown")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Garage"), "gray")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "BayWindow"), "teal")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Storefront"), "orange")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Sign"), "red")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Roof"), "indigo")
+    }
+
+    func testFallbackColorNameDefaultsForUnknownCategory() {
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: "Balcony"), "secondary")
+        XCTAssertEqual(AssetsGridViewModel.fallbackColorName(for: ""), "secondary")
+    }
+
+    func testFallbackIconCoversAllKnownCategories() {
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Window"), "rectangle")
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "BayWindow"), "rectangle")
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Door"), "rectangle.portrait")
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Garage"), "door.garage.closed")
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Storefront"), "storefront")
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Sign"), "signpost.right")
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Roof"), "house")
+    }
+
+    func testFallbackIconDefaultsForUnknownCategory() {
+        XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Balcony"), "cube")
+    }
 }
