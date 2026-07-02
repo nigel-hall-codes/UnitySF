@@ -26,7 +26,11 @@ namespace SFMap.Pipeline.Buildings
 
         /// <summary>Weight for <paramref name="templateId"/>, or <paramref name="defaultWeight"/>
         /// when this neighborhood's district didn't author one (an unlisted compatible template
-        /// still competes, just at the default weight rather than being excluded).</summary>
+        /// still competes, just at the default weight rather than being excluded). An authored
+        /// weight of 0 (or negative) is likewise treated as "not specified" here, matching
+        /// ProceduralRule.probability's "&lt;= 0 means unset" convention elsewhere in this
+        /// pipeline (BuildingAssembler.PlaceProcedural) — there is currently no way to author a
+        /// hard exclusion via weight; that would need a distinct signal if ever needed.</summary>
         public float WeightFor(string templateId, float defaultWeight)
         {
             if (weights != null)

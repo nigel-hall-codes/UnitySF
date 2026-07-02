@@ -39,7 +39,8 @@ def _neighborhood_template_weights(districts: list[DistrictDef]) -> list[dict]:
     """Flatten district.templateWeights[] out to per-neighborhood weight tables (#343):
     a district covers neighborhoods[], so the manifest keys weights the way the assembler
     can actually look them up (by a building's neighborhood, not its district). If two
-    districts cover the same neighborhood, the later one (store order) wins per template id."""
+    districts cover the same neighborhood, the one later in store order (SQLite rowid —
+    original insertion order, NOT most-recently-edited) wins per template id."""
     by_neighborhood: dict[str, dict[str, float]] = {}
     for d in districts:
         for n in d.neighborhoods:
