@@ -19,7 +19,20 @@ namespace SFMap.Pipeline.Buildings
         public int version;
         public string exportedAt;
         public string[] neighborhoods;
+        // District template weights (#326 D4/#343), flattened to per-neighborhood weight
+        // tables server-side (server/app/export.py:_neighborhood_template_weights) — the
+        // assembler's tie-break only knows a building's neighborhood, not its district.
+        public NeighborhoodTemplateWeightsJson[] districtTemplateWeights;
     }
+
+    [Serializable]
+    public sealed class NeighborhoodTemplateWeightsJson
+    {
+        public string neighborhood;
+        public TemplateWeightJson[] weights;
+    }
+
+    [Serializable] public struct TemplateWeightJson { public string template; public float weight; }
 
     // ---- Parts ----------------------------------------------------------------
 

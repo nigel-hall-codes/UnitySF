@@ -38,18 +38,31 @@ namespace SFMap.Pipeline.Buildings.Editor
             EnsureFolder(GeneratedRoot + "/Parts");
             EnsureFolder(GeneratedRoot + "/Palettes");
             EnsureFolder(GeneratedRoot + "/Templates");
+            EnsureFolder(GeneratedRoot + "/DistrictWeights");
 
-            int parts = 0, palettes = 0, templates = 0, warnings = 0;
+            int parts = 0, palettes = 0, templates = 0, districtWeights = 0, warnings = 0;
 
-            // Manifest is informational — report what the export claims so a version/neighborhood
-            // mismatch is visible in the log.
+            // Manifest carries district template weights (#343) alongside the informational
+            // version/neighborhood report, so it's parsed unconditionally (not just logged).
             string manifestPath = Path.Combine(absRoot, "library.json");
             if (File.Exists(manifestPath))
             {
                 var manifest = TryParse<LibraryManifestJson>(manifestPath, ref warnings);
                 if (manifest != null)
+                {
                     Debug.Log($"[SFBuildingTemplates] library.json v{manifest.version}, " +
                               $"{(manifest.neighborhoods != null ? manifest.neighborhoods.Length : 0)} neighborhood(s).");
+
+                    if (manifest.districtTemplateWeights != null)
+                    {
+                        foreach (var row in manifest.districtTemplateWeights)
+                        {
+                            if (row == null || string.IsNullOrEmpty(row.neighborhood)) { warnings++; continue; }
+                            BuildDistrictWeights(row, ref warnings);
+                            districtWeights++;
+                        }
+                    }
+                }
             }
 
             // Pass 1 — parts (templates resolve roof-part references against these).
@@ -84,7 +97,8 @@ namespace SFMap.Pipeline.Buildings.Editor
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log($"[SFBuildingTemplates] Imported {parts} part(s), {palettes} palette(s), " +
-                      $"{templates} template(s) into {GeneratedRoot} — {warnings} warning(s).");
+                      $"{templates} template(s), {districtWeights} district weight table(s) into " +
+                      $"{GeneratedRoot} — {warnings} warning(s).");
         }
 
         // ---- builders ---------------------------------------------------------
@@ -166,6 +180,24 @@ namespace SFMap.Pipeline.Buildings.Editor
                 }
             }
             so.roles = roles.ToArray();
+            EditorUtility.SetDirty(so);
+        }
+
+        private static void BuildDistrictWeights(NeighborhoodTemplateWeightsJson row, ref int warnings)
+        {
+            var so = LoadOrCreate<NeighborhoodTemplateWeights>(
+                $"{GeneratedRoot}/DistrictWeights/{row.neighborhood}.asset");
+            so.neighborhood = row.neighborhood;
+
+            if (row.weights == null) { so.weights = Array.Empty<TemplateWeight>(); EditorUtility.SetDirty(so); return; }
+
+            var weights = new TemplateWeight[row.weights.Length];
+            for (int i = 0; i < row.weights.Length; i++)
+            {
+                if (string.IsNullOrEmpty(row.weights[i].template)) { warnings++; continue; }
+                weights[i] = new TemplateWeight { templateId = row.weights[i].template, weight = row.weights[i].weight };
+            }
+            so.weights = weights;
             EditorUtility.SetDirty(so);
         }
 

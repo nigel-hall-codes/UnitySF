@@ -2,6 +2,8 @@
 (#269) consumes — including the array-of-pairs form for the §2 map fields."""
 import json
 
+from app.export import _neighborhood_template_weights
+from app.models import DistrictDef, TemplateWeight
 from test_api import _palette, _part, _template
 
 
@@ -100,3 +102,56 @@ def test_export_compiles_zones_into_rules_and_strips_zones_key(client, tmp_path)
     assert compiled_rule["span"] == [0.2, 0.8]
     assert compiled_rule["floorRange"] == {"min": 1, "max": 2}
     assert compiled_rule["variants"] == ["window_sunset_2x3"]
+
+
+def test_neighborhood_template_weights_flattens_by_neighborhood():
+    districts = [
+        DistrictDef(id="mission", neighborhoods=["Mission"], templateWeights=[
+            TemplateWeight(template="victorian_a", weight=50), TemplateWeight(template="victorian_b", weight=50),
+        ]),
+        DistrictDef(id="sunset", neighborhoods=["Sunset", "Parkside"], templateWeights=[
+            TemplateWeight(template="stucco_a", weight=1),
+        ]),
+    ]
+    out = {row["neighborhood"]: row["weights"] for row in _neighborhood_template_weights(districts)}
+    assert set(out.keys()) == {"Mission", "Sunset", "Parkside"}
+    assert out["Mission"] == [{"template": "victorian_a", "weight": 50}, {"template": "victorian_b", "weight": 50}]
+    assert out["Sunset"] == out["Parkside"] == [{"template": "stucco_a", "weight": 1}]
+
+
+def test_neighborhood_template_weights_later_district_wins_on_overlap():
+    districts = [
+        DistrictDef(id="a", neighborhoods=["Mission"], templateWeights=[TemplateWeight(template="t1", weight=10)]),
+        DistrictDef(id="b", neighborhoods=["Mission"], templateWeights=[TemplateWeight(template="t1", weight=90)]),
+    ]
+    out = _neighborhood_template_weights(districts)
+    assert out == [{"neighborhood": "Mission", "weights": [{"template": "t1", "weight": 90}]}]
+
+
+def test_neighborhood_template_weights_empty_when_no_districts():
+    assert _neighborhood_template_weights([]) == []
+
+
+def test_export_manifest_includes_district_template_weights(client, tmp_path):
+    _seed(client)
+    client.post("/districts", json={
+        "id": "sunset-district", "name": "Sunset", "neighborhoods": ["Sunset"],
+        "templateWeights": [{"template": "trivial_window", "weight": 3}],
+        "palette": "Sunset", "signStyle": "Modern",
+    })
+    out = tmp_path / "drop_districts"
+    r = client.post("/export/unity", json={"outDir": str(out)})
+    assert r.status_code == 200
+
+    manifest = json.loads((out / "library.json").read_text(encoding="utf-8"))
+    assert manifest["districtTemplateWeights"] == [
+        {"neighborhood": "Sunset", "weights": [{"template": "trivial_window", "weight": 3}]},
+    ]
+
+
+def test_export_manifest_district_weights_empty_when_no_districts(client, tmp_path):
+    _seed(client)
+    out = tmp_path / "drop_no_districts"
+    client.post("/export/unity", json={"outDir": str(out)})
+    manifest = json.loads((out / "library.json").read_text(encoding="utf-8"))
+    assert manifest["districtTemplateWeights"] == []

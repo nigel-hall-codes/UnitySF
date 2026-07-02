@@ -103,6 +103,7 @@ namespace SFMap.Pipeline.Editor
         readonly List<BuildingTemplate> _templates;
         readonly Dictionary<string, BuildingPart> _partsById;
         readonly Dictionary<string, NeighborhoodPalette> _palettes;
+        readonly Dictionary<string, NeighborhoodTemplateWeights> _districtWeights;
         readonly Dictionary<long, OverrideJson> _overrides;
 
         // Exact placement positions of the building currently being assembled, keyed by
@@ -123,12 +124,14 @@ namespace SFMap.Pipeline.Editor
                           List<BuildingTemplate> templates,
                           Dictionary<string, BuildingPart> partsById,
                           Dictionary<string, NeighborhoodPalette> palettes,
+                          Dictionary<string, NeighborhoodTemplateWeights> districtWeights,
                           Dictionary<long, OverrideJson> overrides)
         {
             _facts = facts;
             _templates = templates;
             _partsById = partsById;
             _palettes = palettes;
+            _districtWeights = districtWeights;
             _overrides = overrides;
         }
 
@@ -163,7 +166,11 @@ namespace SFMap.Pipeline.Editor
             foreach (var pal in LoadAll<NeighborhoodPalette>())
                 if (!string.IsNullOrEmpty(pal.neighborhood)) palettes[pal.neighborhood] = pal;
 
-            return new BuildingAssembler(facts, templates, partsById, palettes, LoadOverrides());
+            var districtWeights = new Dictionary<string, NeighborhoodTemplateWeights>(StringComparer.Ordinal);
+            foreach (var w in LoadAll<NeighborhoodTemplateWeights>())
+                if (!string.IsNullOrEmpty(w.neighborhood)) districtWeights[w.neighborhood] = w;
+
+            return new BuildingAssembler(facts, templates, partsById, palettes, districtWeights, LoadOverrides());
         }
 
         // Load Assets/SFBuildingTemplates/Overrides/*.override.json into a dict keyed by osm_id.
@@ -192,8 +199,10 @@ namespace SFMap.Pipeline.Editor
         }
 
         /// <summary>Does this building have classification facts AND a compatible template?
-        /// Ties among compatible templates are broken deterministically by osm_id, so a
-        /// re-import is byte-stable (design §6 determinism).</summary>
+        /// Ties among compatible templates are broken deterministically by osm_id — weighted by
+        /// the building's neighborhood's district template weights (#343) when one exists,
+        /// otherwise uniform, same as before. Either way a re-import is byte-stable (design §6
+        /// determinism): the same seed always yields the same weighted draw.</summary>
         public bool TryMatch(long osmId, out BuildingFactsJson facts, out BuildingTemplate template)
         {
             template = null;
@@ -213,8 +222,45 @@ namespace SFMap.Pipeline.Editor
             }
             if (matches == null) return false;
             matches.Sort((a, b) => string.CompareOrdinal(a.id, b.id));
-            template = matches[(int)(SeedFor(osmId) % (uint)matches.Count)];
+            template = PickWeighted(matches, facts.neighborhood, SeedFor(osmId));
             return true;
+        }
+
+        /// <summary>Weighted tie-break among compatible <paramref name="matches"/> (already sorted
+        /// for determinism). Falls back to the original uniform pick when the building's
+        /// neighborhood has no authored district weights, or its total resolves to zero — an
+        /// isolated selection change (design #326 D4): no other assembly behaviour is affected.
+        /// An unlisted template still competes at weight 1, so authoring a district doesn't
+        /// silently exclude compatible templates the district's author didn't mention.</summary>
+        BuildingTemplate PickWeighted(List<BuildingTemplate> matches, string neighborhood, uint seed)
+        {
+            NeighborhoodTemplateWeights weights = null;
+            if (!string.IsNullOrEmpty(neighborhood))
+                _districtWeights.TryGetValue(neighborhood, out weights);
+            if (weights == null)
+                return matches[(int)(seed % (uint)matches.Count)];
+
+            const float DefaultWeight = 1f;
+            var w = new float[matches.Count];
+            float total = 0f;
+            for (int i = 0; i < matches.Count; i++)
+            {
+                w[i] = weights.WeightFor(matches[i].id, DefaultWeight);
+                total += w[i];
+            }
+            if (total <= 0f)
+                return matches[(int)(seed % (uint)matches.Count)];
+
+            // Same [0,1) draw as the rest of the deterministic placement model (Rng.NextFloat),
+            // scaled across the weighted total.
+            float r = ((seed & 0xFFFFFFu) / 16777216f) * total;
+            float acc = 0f;
+            for (int i = 0; i < matches.Count; i++)
+            {
+                acc += w[i];
+                if (r < acc) return matches[i];
+            }
+            return matches[matches.Count - 1];   // float rounding guard
         }
 
         /// <summary>Build the templated building as a nested child of <paramref name="buildingsParent"/>:

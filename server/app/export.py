@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .canvas import flatten_paint
-from .models import ExportResult
+from .models import DistrictDef, ExportResult
 from .store import Store
 from .zones import compile_zones
 
@@ -33,6 +33,23 @@ def _within(root: Path, path: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _neighborhood_template_weights(districts: list[DistrictDef]) -> list[dict]:
+    """Flatten district.templateWeights[] out to per-neighborhood weight tables (#343):
+    a district covers neighborhoods[], so the manifest keys weights the way the assembler
+    can actually look them up (by a building's neighborhood, not its district). If two
+    districts cover the same neighborhood, the later one (store order) wins per template id."""
+    by_neighborhood: dict[str, dict[str, float]] = {}
+    for d in districts:
+        for n in d.neighborhoods:
+            bucket = by_neighborhood.setdefault(n, {})
+            for tw in d.templateWeights:
+                bucket[tw.template] = tw.weight
+    return [
+        {"neighborhood": n, "weights": [{"template": t, "weight": w} for t, w in weights.items()]}
+        for n, weights in by_neighborhood.items()
+    ]
 
 
 def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> ExportResult:
@@ -175,6 +192,10 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         "version": 1,
         "exportedAt": now_iso or datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "neighborhoods": [pal.neighborhood for pal in palettes],
+        # District template weights (#326 D4/#343), flattened to per-neighborhood weight
+        # tables — the assembler's tie-break only knows a building's neighborhood, not its
+        # district, so this is the shape it actually needs at selection time.
+        "districtTemplateWeights": _neighborhood_template_weights(store.list_districts()),
     }
     _write_json(root / "library.json", manifest)
 
