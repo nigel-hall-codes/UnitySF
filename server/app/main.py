@@ -220,6 +220,26 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
             raise HTTPException(status_code=404, detail=f"no canvas for {osm_id}/{facade}")
         return canvas
 
+    # Facade backdrop (#317): a reference render the iPad traces over. It's a drawing
+    # aid only — stored on disk, never persisted into the canvas doc or exported to Unity.
+    @app.put("/canvas/{osm_id}/{facade}/backdrop")
+    async def upload_backdrop(osm_id: int, facade: str, request: Request) -> dict:
+        data = await request.body()
+        if not data:
+            raise HTTPException(status_code=400, detail="empty backdrop body")
+        S().save_backdrop(osm_id, facade, data)
+        return {"osm_id": osm_id, "facade": facade, "bytes": len(data)}
+
+    @app.get("/canvas/{osm_id}/{facade}/backdrop")
+    def get_backdrop(osm_id: int, facade: str) -> FileResponse:
+        path = S().backdrop_path(osm_id, facade)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"no backdrop for {osm_id}/{facade}")
+        # Sniff PNG vs JPEG from the magic bytes so the stored image serves with its true type.
+        head = path.read_bytes()[:8]
+        media = "image/png" if head.startswith(b"\x89PNG\r\n\x1a\n") else "image/jpeg"
+        return FileResponse(str(path), media_type=media)
+
     @app.get("/signs/{sign_id}/png")
     def get_sign_png(sign_id: str) -> FileResponse:
         if S().get_sign(sign_id) is None:
