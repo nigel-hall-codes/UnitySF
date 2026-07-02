@@ -41,6 +41,26 @@ def test_resolve_passes_through_exact_placements_with_part_size():
     assert (p.w_m, p.h_m) == (2.4, 3.2)  # size_m * scale
 
 
+def test_resolve_places_roof_parts_once_per_street_facade():
+    # Mirrors BuildingAssembler.PlaceRoofParts: one instance per street-facing facade,
+    # centred at the roofline (floor = facts.floor_count).
+    tpl = TemplateDef(id="t1", roofParts=["cornice_a"])
+    facts = _facts(street_facades=[
+        StreetFacade(edge_index=0, edge=[0.0, 0.0, 10.0, 0.0]),
+        StreetFacade(edge_index=1, edge=[10.0, 0.0, 10.0, 8.0]),
+    ], floor_count=4)
+    placements = resolve_template(tpl, facts, seed=1, parts_by_id={})
+    roof = [p for p in placements if p.part == "cornice_a"]
+    assert len(roof) == 2
+    assert all((p.facade, p.floor, p.x, p.y) == ("Roof", 4, 0.5, 1.0) for p in roof)
+
+
+def test_resolve_roof_parts_empty_list_yields_nothing():
+    tpl = TemplateDef(id="t1", roofParts=[])
+    placements = resolve_template(tpl, _facts(), seed=1, parts_by_id={})
+    assert placements == []
+
+
 def test_resolve_exact_with_unsupported_facade_yields_nothing():
     # Only Front/Street carry sidecar geometry today (matches BuildingAssembler.FacadesFor).
     tpl = TemplateDef(id="t1", exact=[ExactPlacement(part="window_a", facade="Back", x=0.5, y=0.5)])

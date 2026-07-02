@@ -116,6 +116,25 @@ def _place_exact(exact: List[ExactPlacement], facts: BuildingFacts,
     return placements
 
 
+def _place_roof_parts(roof_parts: List[str], facts: BuildingFacts,
+                       parts_by_id: Dict[str, PartDef]) -> List[ResolvedPlacement]:
+    # Mirrors BuildingAssembler.PlaceRoofParts: each roofPart is placed once per
+    # street-facing facade, centred (x=0.5) at the roofline (y=1.0 — PlacePart's ny=1
+    # overshoots the top floor band and gets clamped to the real facade_height_m, which
+    # this normalized-space endpoint doesn't model, so 1.0 is the closest UV equivalent).
+    placements = []
+    for part_id in roof_parts:
+        if not part_id:
+            continue
+        for _facade in _facades_for("Street", facts):
+            w_m, h_m = _part_size(parts_by_id.get(part_id), 1.0)
+            placements.append(ResolvedPlacement(
+                part=part_id, facade="Roof", floor=facts.floor_count,
+                x=0.5, y=1.0, scale=1.0, w_m=w_m, h_m=h_m,
+            ))
+    return placements
+
+
 def _exact_marks(exact: List[ExactPlacement], facts: BuildingFacts) -> Dict[Tuple[int, int], List[float]]:
     marks: Dict[Tuple[int, int], List[float]] = {}
     for p in exact:
@@ -190,6 +209,9 @@ def _place_procedural(rule: ProceduralRule, rule_index: int, facts: BuildingFact
                 scale = 1.0
                 if len(rule.jitter.scale) >= 2:
                     scale = rng.range(rule.jitter.scale[0], rule.jitter.scale[1])
+                # BuildingAssembler draws jitter.rotation last for this slot's rng; skipped
+                # here on purpose since ResolvedPlacement has no rotation field and each slot
+                # gets a fresh _Rng, so omitting this trailing draw doesn't shift any other value.
 
                 w_m, h_m = _part_size(parts_by_id.get(part_id), scale)
                 placements.append(ResolvedPlacement(
@@ -207,6 +229,7 @@ def resolve_template(template: TemplateDef, facts: BuildingFacts, seed: int,
     so a zone-only template resolves exactly like a rules-only one authored by hand.
     """
     placements = _place_exact(template.exact, facts, parts_by_id)
+    placements.extend(_place_roof_parts(template.roofParts, facts, parts_by_id))
     exact_marks = _exact_marks(template.exact, facts)
 
     rules = list(template.rules) + compile_zones(template.zones)
