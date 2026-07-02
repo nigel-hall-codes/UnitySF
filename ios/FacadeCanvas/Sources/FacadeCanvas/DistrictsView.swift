@@ -66,10 +66,13 @@ public struct DistrictsView: View {
 /// holds locally — no server round-trip needed before previewing unsaved edits.
 @available(iOS 17, *)
 private struct DistrictEditorView: View {
-    let isNew: Bool
     let client: ServerClient
     @ObservedObject var vm: DistrictEditorViewModel
 
+    // @State, not `let` — a new district's id must lock after its first successful Save (see the
+    // Save button below), otherwise a second id edit + Save creates a SEPARATE server-side record
+    // (POST /districts upserts by id) rather than renaming the first, orphaning it.
+    @State private var isNew: Bool
     @State private var id: String
     @State private var name: String
     @State private var neighborhoodsText: String
@@ -79,7 +82,7 @@ private struct DistrictEditorView: View {
     @State private var showPreview = false
 
     init(district: DistrictDef, client: ServerClient, vm: DistrictEditorViewModel) {
-        self.isNew = district.id.isEmpty
+        _isNew = State(initialValue: district.id.isEmpty)
         self.client = client
         self.vm = vm
         _id = State(initialValue: district.id)
@@ -136,7 +139,9 @@ private struct DistrictEditorView: View {
             }
             Section {
                 Button {
-                    Task { await vm.save(currentDistrict) }
+                    Task {
+                        if await vm.save(currentDistrict) { isNew = false }
+                    }
                 } label: {
                     if vm.isSaving { ProgressView() } else { Text("Save") }
                 }

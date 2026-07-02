@@ -38,10 +38,14 @@ public final class DistrictPreviewViewModel: ObservableObject {
     }
 
     /// Deterministic weighted pick over allowedParts-style weights, seeded so the same district +
-    /// seed always yields the same street (design's determinism contract) — same xorshift32 +
-    /// [0,1) draw technique already used server-side (server/app/resolve.py's _Rng) and Unity-side
-    /// (BuildingAssembler.Rng/PickWeighted), so this preview's variety "shape" is consistent with
-    /// how the real assembler behaves, even though the actual draw is independent of it.
+    /// seed always yields the same street (design's determinism contract). The xorshift32 mix
+    /// itself is bit-for-bit the same technique used server-side (server/app/resolve.py's _Rng)
+    /// and Unity-side (BuildingAssembler.Rng) for PLACEMENT randomness. This deliberately
+    /// diverges from BuildingAssembler.PickWeighted specifically, though: that method draws
+    /// straight from its (already-hashed) seed's low 24 bits with no xorshift mix, since its
+    /// seed input is a per-osm_id hash. This preview's seeds are small sequential ints (0..5),
+    /// which would produce a badly-skewed draw without the mix — so mixing first is the correct
+    /// choice for this seed shape, not a literal mirror of PickWeighted's steps.
     /// nil when there's nothing positively weighted to pick (an unauthored/all-zero district).
     nonisolated static func pickTemplate(from weights: [TemplateWeight], seed: Int) -> String? {
         let positive = weights.filter { $0.weight > 0 }
