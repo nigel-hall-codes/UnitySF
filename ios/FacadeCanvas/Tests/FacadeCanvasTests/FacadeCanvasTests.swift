@@ -557,4 +557,48 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(size.w, 0.05, accuracy: 0.0001)
         XCTAssertEqual(size.h, 0.05, accuracy: 0.0001)
     }
+
+    // MARK: - Districts (#342)
+
+    func testDistrictEditorBlankHasNoIdAndDefaultStyle() {
+        let district = DistrictEditorViewModel.blank()
+        XCTAssertEqual(district.id, "", "id must stay blank so the editor can require the user to type one")
+        XCTAssertEqual(district.templateWeights, [])
+        XCTAssertEqual(district.signStyle, "Modern")
+    }
+
+    func testPickTemplateReturnsNilForEmptyWeights() {
+        XCTAssertNil(DistrictPreviewViewModel.pickTemplate(from: [], seed: 1))
+    }
+
+    func testPickTemplateReturnsNilWhenNoWeightIsPositive() {
+        let weights = [TemplateWeight(template: "a", weight: 0), TemplateWeight(template: "b", weight: -1)]
+        XCTAssertNil(DistrictPreviewViewModel.pickTemplate(from: weights, seed: 1))
+    }
+
+    func testPickTemplateAlwaysReturnsSoleCandidateRegardlessOfSeed() {
+        // Zero/negative-weight entries are filtered out first, leaving a single positive
+        // candidate — with only one item, draw always lands in [0, total), so the pick is
+        // independent of the RNG's actual output for every seed.
+        let weights = [TemplateWeight(template: "a", weight: 0), TemplateWeight(template: "b", weight: 5)]
+        for seed in [0, 1, 2, 100, -7] {
+            XCTAssertEqual(DistrictPreviewViewModel.pickTemplate(from: weights, seed: seed), "b")
+        }
+    }
+
+    func testPickTemplateIsDeterministicForSameSeed() {
+        let weights = [TemplateWeight(template: "a", weight: 1), TemplateWeight(template: "b", weight: 1)]
+        let first = DistrictPreviewViewModel.pickTemplate(from: weights, seed: 42)
+        let second = DistrictPreviewViewModel.pickTemplate(from: weights, seed: 42)
+        XCTAssertEqual(first, second)
+    }
+
+    func testPickTemplateDistributesAcrossWeightBoundary() {
+        // Equal weights (total=2, boundary at draw=1.0) hand-traced against the same xorshift32
+        // + [0,1) draw algorithm used server-side (resolve.py's _Rng) and in BuildingAssembler:
+        // seed 31 -> draw ~0.999 (< 1.0, picks "a"); seed 32 -> draw ~1.031 (>= 1.0, picks "b").
+        let weights = [TemplateWeight(template: "a", weight: 1), TemplateWeight(template: "b", weight: 1)]
+        XCTAssertEqual(DistrictPreviewViewModel.pickTemplate(from: weights, seed: 31), "a")
+        XCTAssertEqual(DistrictPreviewViewModel.pickTemplate(from: weights, seed: 32), "b")
+    }
 }
