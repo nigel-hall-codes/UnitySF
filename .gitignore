@@ -50,3 +50,4 @@ python/.venv/
 
 # Xcode/Swift package manager
 .swiftpm/
+.build/
