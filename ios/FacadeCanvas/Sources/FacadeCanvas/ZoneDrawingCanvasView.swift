@@ -2,11 +2,23 @@
 import SwiftUI
 import UIKit
 
+// A DragGesture's default (.local) coordinate space is relative to the specific view the
+// gesture is attached to, NOT an ancestor — so a gesture attached to a small zone rect would
+// report locations relative to that rect's own small frame, not the canvas, breaking the
+// canvasWidth/canvasHeight normalization both gestures below rely on. Every DragGesture in this
+// file is pinned to this SAME named ancestor space (applied to the ZStack in
+// ZoneDrawingCanvasView.body) so `g.location` always means "canvas-relative," regardless of
+// which child view the gesture is physically attached to.
+private let zoneCanvasSpace = "ZoneDrawingCanvas"
+
 /// Zone drawing canvas (#338, UX spec "Facade Canvas"): a tool palette (8 zone types) over a
 /// unit-square drag-to-draw surface, reusing FacadeCanvasView's unit-square-UV drag/clamp
 /// convention (see ZoneDrawingViewModel — same math as PlacedImageView, generalized from
 /// move-only to draw-a-new-rect). Rect shapes only for now — polygon is a documented follow-up
-/// (issue: "rect first, polygon later").
+/// (issue: "rect first, polygon later"). Also deliberately NOT PencilKit-based, unlike
+/// FacadeCanvasView's freehand paint layer: a plain drag defines an exact rect directly, where
+/// ink capture would need a separate fit-to-rect step for no added precision at this shape kind;
+/// PencilKit-driven freeform capture is deferred to the polygon follow-up.
 @available(iOS 17, *)
 struct ZoneDrawingCanvasView: View {
     @ObservedObject var vm: ZoneDrawingViewModel
@@ -31,6 +43,7 @@ struct ZoneDrawingCanvasView: View {
                         drawingPreview(from: start, to: current)
                     }
                 }
+                .coordinateSpace(name: zoneCanvasSpace)
             }
             .aspectRatio(1, contentMode: .fit)   // the facade unit square
             .border(Color.secondary)
@@ -77,10 +90,15 @@ struct ZoneDrawingCanvasView: View {
     }
 
     private func drawGesture(canvasSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 4)
+        DragGesture(minimumDistance: 4, coordinateSpace: .named(zoneCanvasSpace))
             .onChanged { g in
                 guard vm.activeTool != nil else { return }
-                if dragStart == nil { dragStart = g.startLocation }
+                // Unconditional, not "if dragStart == nil" — g.startLocation is stable for the
+                // duration of one recognized gesture, but a PREVIOUS gesture that was cancelled
+                // rather than cleanly ended (system interruption mid-drag) would leave dragStart
+                // stale otherwise, since onEnded's reset never ran. Always taking this gesture's
+                // own startLocation keeps drawing correct regardless of how the prior one exited.
+                dragStart = g.startLocation
                 dragCurrent = g.location
             }
             .onEnded { g in
@@ -141,8 +159,12 @@ private struct ZoneOverlayView: View {
             // (attached to the Rectangle beneath these overlays) can win the gesture race for a
             // drag that starts on top of an existing zone — this forces the overlay's own drag
             // (move) to take priority over the background's (draw-new) whenever they overlap.
+            // coordinateSpace: .named(zoneCanvasSpace) — NOT the default .local, which would
+            // report g.location relative to this small zone rect's own frame rather than the
+            // canvas, breaking the canvasWidth/canvasHeight normalization moveZone expects
+            // (see the file-level comment on zoneCanvasSpace).
             .highPriorityGesture(
-                DragGesture().onChanged { g in
+                DragGesture(coordinateSpace: .named(zoneCanvasSpace)).onChanged { g in
                     vm.moveZone(id: zone.id,
                                to: (x: Double(g.location.x), y: Double(g.location.y)),
                                canvasWidth: Double(canvasSize.width), canvasHeight: Double(canvasSize.height))
