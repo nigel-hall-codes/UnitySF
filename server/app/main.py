@@ -341,7 +341,11 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         out_dir = req.outDir or app.state.default_export_dir
         if not out_dir:
             raise HTTPException(status_code=400, detail="no outDir given and no default configured")
-        return export_unity(S(), out_dir)
+        if req.scope == "building" and req.osm_id is None:
+            raise HTTPException(status_code=400, detail="scope 'building' requires osm_id")
+        if req.scope == "neighborhood" and not req.neighborhood:
+            raise HTTPException(status_code=400, detail="scope 'neighborhood' requires neighborhood")
+        return export_unity(S(), out_dir, scope=req.scope, osm_id=req.osm_id, neighborhood=req.neighborhood)
 
     return app
 

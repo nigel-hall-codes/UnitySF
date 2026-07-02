@@ -160,4 +160,64 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(DashboardViewModel.recentFrom([], limit: 5), [])
         XCTAssertEqual(DashboardViewModel.recentFrom([TemplateDef(id: "a")], limit: 0), [])
     }
+
+    // MARK: - GenerationViewModel (#346)
+
+    func testExportRequestEncodesScopeFields() throws {
+        let req = ExportRequest(outDir: "/tmp/out", scope: .building, osm_id: 1001, neighborhood: "")
+        let data = try JSONEncoder().encode(req)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(obj["scope"] as? String, "building")
+        XCTAssertEqual(obj["osm_id"] as? Int, 1001)
+    }
+
+    func testExportResultDecodesScopeField() throws {
+        let json = Data("""
+        {"outDir":"/x","version":1,"scope":"neighborhood","parts":1,"templates":1,
+         "palettes":1,"overrides":2,"glbsCopied":0,"signs":0,"facadeDecals":0,"paintTextures":0}
+        """.utf8)
+        let result = try JSONDecoder().decode(ExportResult.self, from: json)
+        XCTAssertEqual(result.scope, "neighborhood")
+        XCTAssertEqual(result.overrides, 2)
+    }
+
+    func testExportScopeDisplayNameCapitalizesRawValue() {
+        XCTAssertEqual(ExportScope.building.displayName, "Building")
+        XCTAssertEqual(ExportScope.neighborhood.displayName, "Neighborhood")
+        XCTAssertEqual(ExportScope.city.displayName, "City")
+        XCTAssertEqual(ExportScope.block.displayName, "Block")
+    }
+
+    func testParseOsmIdAcceptsDigitsRejectsGarbage() {
+        XCTAssertEqual(GenerationViewModel.parseOsmId("65307880"), 65307880)
+        XCTAssertEqual(GenerationViewModel.parseOsmId("  65307880  "), 65307880)
+        XCTAssertNil(GenerationViewModel.parseOsmId(""))
+        XCTAssertNil(GenerationViewModel.parseOsmId("not a number"))
+    }
+
+    @MainActor
+    func testCanPublishRequiresScopeSpecificInput() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = GenerationViewModel(client: client)
+
+        vm.scope = .city
+        XCTAssertTrue(vm.canPublish)
+
+        vm.scope = .block
+        XCTAssertFalse(vm.canPublish, "block is never publishable — the server can't scope to it yet")
+
+        vm.scope = .building
+        XCTAssertFalse(vm.canPublish)
+        vm.osmIdText = "not a number"
+        XCTAssertFalse(vm.canPublish)
+        vm.osmIdText = "65307880"
+        XCTAssertTrue(vm.canPublish)
+
+        vm.scope = .neighborhood
+        XCTAssertFalse(vm.canPublish)
+        vm.neighborhoodText = "   "
+        XCTAssertFalse(vm.canPublish, "whitespace-only neighborhood should not count as specified")
+        vm.neighborhoodText = "Mission"
+        XCTAssertTrue(vm.canPublish)
+    }
 }

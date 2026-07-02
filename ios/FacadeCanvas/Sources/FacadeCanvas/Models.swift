@@ -163,16 +163,34 @@ public struct BuildingPage: Codable {
 
 // --- Unity export / publish (#304 — POST /export/unity, design D4) ---
 
+/// Export scope (#346, design §3.4 Generation). "block" has no server-side meaning yet — no
+/// block-level spatial grouping exists in the schema (only neighborhood) — and is accepted but
+/// behaves like "city" on the server; kept in the picker per the UX spec with that documented gap.
+public enum ExportScope: String, Codable, CaseIterable, Identifiable, Hashable {
+    case building, block, neighborhood, city
+    public var id: String { rawValue }
+    public var displayName: String { rawValue.prefix(1).uppercased() + rawValue.dropFirst() }
+}
+
 /// Body for POST /export/unity — outDir defaults to the server's env-configured target.
+/// osm_id is required when scope == .building; neighborhood is required when scope == .neighborhood.
 public struct ExportRequest: Codable {
     public var outDir: String
-    public init(outDir: String = "") { self.outDir = outDir }
+    public var scope: ExportScope
+    public var osm_id: Int?
+    public var neighborhood: String
+
+    public init(outDir: String = "", scope: ExportScope = .city, osm_id: Int? = nil,
+                neighborhood: String = "") {
+        self.outDir = outDir; self.scope = scope; self.osm_id = osm_id; self.neighborhood = neighborhood
+    }
 }
 
 /// Result returned by POST /export/unity summarising what was materialised.
 public struct ExportResult: Codable, Equatable {
     public var outDir: String
     public var version: Int
+    public var scope: String
     public var parts: Int
     public var templates: Int
     public var palettes: Int
@@ -182,10 +200,10 @@ public struct ExportResult: Codable, Equatable {
     public var facadeDecals: Int
     public var paintTextures: Int
 
-    public init(outDir: String = "", version: Int = 0, parts: Int = 0, templates: Int = 0,
-                palettes: Int = 0, overrides: Int = 0, glbsCopied: Int = 0,
+    public init(outDir: String = "", version: Int = 0, scope: String = "city", parts: Int = 0,
+                templates: Int = 0, palettes: Int = 0, overrides: Int = 0, glbsCopied: Int = 0,
                 signs: Int = 0, facadeDecals: Int = 0, paintTextures: Int = 0) {
-        self.outDir = outDir; self.version = version; self.parts = parts
+        self.outDir = outDir; self.version = version; self.scope = scope; self.parts = parts
         self.templates = templates; self.palettes = palettes; self.overrides = overrides
         self.glbsCopied = glbsCopied; self.signs = signs; self.facadeDecals = facadeDecals
         self.paintTextures = paintTextures
