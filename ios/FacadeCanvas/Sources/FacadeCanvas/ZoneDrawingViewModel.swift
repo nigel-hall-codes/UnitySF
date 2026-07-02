@@ -116,7 +116,25 @@ public final class ZoneDrawingViewModel: ObservableObject {
         zones.removeAll { $0.id == id }
     }
 
+    /// Replace a zone wholesale, keyed by its id — the properties pane's (#339) write path for
+    /// any field (rules, floorRange, ...), since the pane always has a full, freshly-read `Zone`
+    /// value in hand (see PropertiesPaneView's `binding` helper) rather than editing one field
+    /// through the view model at a time.
+    public func updateZone(_ zone: Zone) {
+        guard let i = zones.firstIndex(where: { $0.id == zone.id }) else { return }
+        zones[i] = zone
+    }
+
     // MARK: - Helpers
+
+    /// Each part's share of the total weight, as a percentage (0-100) — the properties pane's
+    /// (#339) "A 50%/B 30%/C 20%" display. All-zero/negative weights (or an empty list) return
+    /// all zeros rather than dividing by zero.
+    nonisolated static func weightPercentages(_ parts: [WeightedPart]) -> [Double] {
+        let total = parts.reduce(0.0) { $0 + max($1.weight, 0) }
+        guard total > 0 else { return parts.map { _ in 0 } }
+        return parts.map { max($0.weight, 0) / total * 100 }
+    }
 
     nonisolated static func rect(of zone: Zone) -> [Double] {
         let xs = zone.shape.points.map { $0[0] }
