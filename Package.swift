@@ -8,6 +8,11 @@ import PackageDescription
 // can't be reached directly from a cross-repo `.package(url:)` dependency. This manifest
 // points at the same sources via explicit target paths; it does not move or duplicate
 // anything under ios/FacadeCanvas/.
+//
+// Targets share names with ios/FacadeCanvas/Package.swift on purpose (same product). Don't
+// add both this root package and ios/FacadeCanvas as dependencies of the same build graph —
+// SPM will reject the duplicate target name. Consumers pick one: this repo root for a remote
+// dependency, or ios/FacadeCanvas directly for local standalone development.
 let package = Package(
     name: "UnitySF",
     platforms: [.iOS(.v16)],
