@@ -46,6 +46,27 @@ def test_compile_zone_expands_weighted_variants_proportionally():
     assert counts["victorian_a"] > counts["victorian_b"] > counts["victorian_c"]
 
 
+def test_compile_zone_drops_zero_weight_parts():
+    zone = _zone(rules=ZoneRules(
+        allowedParts=[
+            {"part": "victorian_a", "weight": 1.0},
+            {"part": "never_placed", "weight": 0.0},
+        ],
+        countRange=IntRange(min=1, max=1),
+    ))
+    rule = compile_zone(zone)
+    assert "never_placed" not in rule.variants
+    assert rule.variants == ["victorian_a"]
+
+
+def test_compile_zone_all_zero_weights_returns_none():
+    zone = _zone(rules=ZoneRules(
+        allowedParts=[{"part": "a", "weight": 0.0}],
+        countRange=IntRange(min=1, max=1),
+    ))
+    assert compile_zone(zone) is None
+
+
 def test_compile_zone_single_part_ignores_weight():
     zone = _zone(rules=ZoneRules(
         allowedParts=[{"part": "only_one", "weight": 0.01}],
@@ -63,12 +84,14 @@ def test_compile_zone_alignment_maps_to_constraints_and_jitter():
     assert grid.constraints.alignToFloorLine is False
     assert grid.jitter.x == 0.0
 
+    # FloorLine only sets the vertical constraint — randomOffset does not leak
+    # into horizontal jitter (design #326 D1's alignment mapping is per-knob).
     floor_line = compile_zone(_zone(rules=ZoneRules(
         allowedParts=[{"part": "a", "weight": 1}], alignment="FloorLine", randomOffset=0.3,
         countRange=IntRange(min=1, max=1),
     )))
     assert floor_line.constraints.alignToFloorLine is True
-    assert floor_line.jitter.x == 0.3
+    assert floor_line.jitter.x == 0.0
 
     free = compile_zone(_zone(rules=ZoneRules(
         allowedParts=[{"part": "a", "weight": 1}], alignment="Free", randomOffset=0.15,
