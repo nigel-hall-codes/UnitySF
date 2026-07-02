@@ -139,6 +139,11 @@ public actor ServerClient {
         try await get("districts")
     }
 
+    // POST /districts — create or upsert a district (#342).
+    public func createDistrict(_ district: DistrictDef) async throws -> DistrictDef {
+        try await post("districts", body: district)
+    }
+
     // POST /templates/{id}/resolve — resolve a template against real (osm_id) or synthetic
     // (facts) building facts + a seed into a flat placement list (#336/#340).
     public func resolveTemplate(templateId: String, osmId: Int? = nil, facts: BuildingFacts? = nil,
