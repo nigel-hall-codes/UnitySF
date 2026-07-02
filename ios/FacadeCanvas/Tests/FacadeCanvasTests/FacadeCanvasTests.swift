@@ -266,4 +266,181 @@ final class FacadeCanvasTests: XCTestCase {
     func testFallbackIconDefaultsForUnknownCategory() {
         XCTAssertEqual(AssetsGridViewModel.fallbackIcon(for: "Balcony"), "cube")
     }
+
+    // MARK: - Zone Codable (#338)
+
+    func testZoneEncodesServerKeysAndExcludesEditorOnlyState() throws {
+        var zone = Zone(id: "window_1", type: "Window", facade: "Front",
+                        shape: ZoneShape(kind: "rect", points: [[0.2, 0.0], [0.8, 0.0], [0.8, 1.0], [0.2, 1.0]]),
+                        floorRange: IntRange(min: 1, max: 2))
+        zone.isHidden = true
+        zone.isLocked = true
+
+        let data = try JSONEncoder().encode(zone)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(obj["id"] as? String, "window_1")
+        XCTAssertEqual(obj["type"] as? String, "Window")
+        XCTAssertNil(obj["isHidden"], "editor-only state must never reach the wire")
+        XCTAssertNil(obj["isLocked"], "editor-only state must never reach the wire")
+        let shape = try XCTUnwrap(obj["shape"] as? [String: Any])
+        XCTAssertEqual(shape["kind"] as? String, "rect")
+
+        // Round-trips back with isHidden/isLocked reset to false (server never sent them).
+        let decoded = try JSONDecoder().decode(Zone.self, from: data)
+        XCTAssertEqual(decoded.id, "window_1")
+        XCTAssertFalse(decoded.isHidden)
+        XCTAssertFalse(decoded.isLocked)
+    }
+
+    func testZoneDecodesServerPayloadMissingOptionalFields() throws {
+        let json = Data("""
+        {"id":"z1","type":"Door"}
+        """.utf8)
+        let zone = try JSONDecoder().decode(Zone.self, from: json)
+        XCTAssertEqual(zone.id, "z1")
+        XCTAssertEqual(zone.type, "Door")
+        XCTAssertEqual(zone.facade, "Front")
+        XCTAssertEqual(zone.shape.kind, "rect")
+        XCTAssertFalse(zone.isHidden)
+    }
+
+    // MARK: - ZoneDrawingViewModel geometry (#338)
+
+    // XCTAssertEqual's `accuracy:` overload is only defined for a single FloatingPoint value,
+    // not [Double] — this compares element-by-element instead.
+    private func assertRectEqual(_ a: [Double], _ b: [Double], accuracy: Double,
+                                  file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(a.count, b.count, file: file, line: line)
+        for (x, y) in zip(a, b) {
+            XCTAssertEqual(x, y, accuracy: accuracy, file: file, line: line)
+        }
+    }
+
+    func testNormalizedRectSortsAndFlipsY() {
+        // Drag from bottom-right (60,80) to top-left (20,20) on a 100x100 canvas — screen space
+        // is top-down, facade UV is bottom-up, so screen-y=80 (near bottom) -> UV-y=0.2 (low),
+        // and screen-y=20 (near top) -> UV-y=0.8 (high).
+        let rect = ZoneDrawingViewModel.normalizedRect(
+            from: (x: 60, y: 80), to: (x: 20, y: 20), canvasWidth: 100, canvasHeight: 100)
+        assertRectEqual(rect, [0.2, 0.2, 0.6, 0.8], accuracy: 0.0001)
+    }
+
+    func testNormalizedRectEnforcesMinimumSize() {
+        // A near-zero drag must not produce a degenerate rect.
+        let rect = ZoneDrawingViewModel.normalizedRect(
+            from: (x: 50, y: 50), to: (x: 50.1, y: 50.1), canvasWidth: 100, canvasHeight: 100, minSize: 0.1)
+        XCTAssertGreaterThanOrEqual(rect[2] - rect[0], 0.1 - 0.0001)
+        XCTAssertGreaterThanOrEqual(rect[3] - rect[1], 0.1 - 0.0001)
+    }
+
+    func testNormalizedRectClampsToUnitSquare() {
+        // A drag that overshoots the canvas bounds must clamp into [0,1].
+        let rect = ZoneDrawingViewModel.normalizedRect(
+            from: (x: -50, y: -50), to: (x: 150, y: 150), canvasWidth: 100, canvasHeight: 100)
+        assertRectEqual(rect, [0, 0, 1, 1], accuracy: 0.0001)
+    }
+
+    func testNormalizedRectHandlesZeroCanvasSize() {
+        let rect = ZoneDrawingViewModel.normalizedRect(
+            from: (x: 10, y: 10), to: (x: 20, y: 20), canvasWidth: 0, canvasHeight: 0)
+        XCTAssertEqual(rect.count, 4)
+    }
+
+    func testMovedRectKeepsSizeAndClampsCenter() {
+        let rect = [0.4, 0.4, 0.6, 0.6]   // 0.2 x 0.2, centred at (0.5, 0.5)
+        // Drag the centre toward the top-left screen corner (0,0) -> UV (0, 1) -> clamp so the
+        // rect's half-size (0.1) keeps it fully inside [0,1].
+        let moved = ZoneDrawingViewModel.movedRect(
+            rect, centerTo: (x: 0, y: 0), canvasWidth: 100, canvasHeight: 100)
+        XCTAssertEqual(moved[2] - moved[0], 0.2, accuracy: 0.0001, "size must be preserved")
+        XCTAssertEqual(moved[3] - moved[1], 0.2, accuracy: 0.0001)
+        XCTAssertEqual(moved[0], 0.0, accuracy: 0.0001)
+        XCTAssertEqual(moved[3], 1.0, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testCommitNewZoneRequiresActiveTool() {
+        let vm = ZoneDrawingViewModel()
+        vm.activeTool = nil
+        let id = vm.commitNewZone(from: (x: 0, y: 0), to: (x: 50, y: 50), canvasWidth: 100, canvasHeight: 100)
+        XCTAssertNil(id)
+        XCTAssertTrue(vm.zones.isEmpty)
+    }
+
+    @MainActor
+    func testCommitNewZoneAddsRectZoneOfActiveType() {
+        let vm = ZoneDrawingViewModel()
+        vm.activeTool = .storefront
+        let id = vm.commitNewZone(from: (x: 20, y: 80), to: (x: 60, y: 20), canvasWidth: 100, canvasHeight: 100)
+        XCTAssertEqual(id, "storefront")
+        XCTAssertEqual(vm.zones.count, 1)
+        XCTAssertEqual(vm.zones[0].type, "Storefront")
+        XCTAssertEqual(vm.zones[0].shape.kind, "rect")
+        assertRectEqual(ZoneDrawingViewModel.rect(of: vm.zones[0]), [0.2, 0.2, 0.6, 0.8], accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testCommitNewZoneGeneratesUniqueIdsForSameType() {
+        let vm = ZoneDrawingViewModel()
+        vm.activeTool = .window
+        _ = vm.commitNewZone(from: (x: 0, y: 60), to: (x: 20, y: 80), canvasWidth: 100, canvasHeight: 100)
+        let secondId = vm.commitNewZone(from: (x: 30, y: 60), to: (x: 50, y: 80), canvasWidth: 100, canvasHeight: 100)
+        XCTAssertEqual(vm.zones.map(\.id), ["window", "window_2"])
+        XCTAssertEqual(secondId, "window_2")
+    }
+
+    @MainActor
+    func testMoveZoneNoOpsWhenLocked() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1", shape: ZoneShape(points: [[0.4, 0.4], [0.6, 0.4], [0.6, 0.6], [0.4, 0.6]]))])
+        vm.toggleLocked(id: "z1")
+        XCTAssertTrue(vm.zones[0].isLocked)
+        let before = ZoneDrawingViewModel.rect(of: vm.zones[0])
+        vm.moveZone(id: "z1", to: (x: 0, y: 0), canvasWidth: 100, canvasHeight: 100)
+        XCTAssertEqual(ZoneDrawingViewModel.rect(of: vm.zones[0]), before, "locked zone must not move")
+    }
+
+    @MainActor
+    func testToggleHiddenAndLocked() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1")])
+        XCTAssertFalse(vm.zones[0].isHidden)
+        vm.toggleHidden(id: "z1")
+        XCTAssertTrue(vm.zones[0].isHidden)
+        vm.toggleHidden(id: "z1")
+        XCTAssertFalse(vm.zones[0].isHidden)
+
+        XCTAssertFalse(vm.zones[0].isLocked)
+        vm.toggleLocked(id: "z1")
+        XCTAssertTrue(vm.zones[0].isLocked)
+    }
+
+    @MainActor
+    func testRenameValidation() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1"), Zone(id: "z2")])
+        vm.rename(id: "z1", to: "front_window")
+        XCTAssertEqual(vm.zones.map(\.id), ["front_window", "z2"])
+
+        vm.rename(id: "front_window", to: "z2")   // collides with an existing id -> no-op
+        XCTAssertEqual(vm.zones.map(\.id), ["front_window", "z2"])
+
+        vm.rename(id: "front_window", to: "   ")  // blank -> no-op
+        XCTAssertEqual(vm.zones.map(\.id), ["front_window", "z2"])
+    }
+
+    @MainActor
+    func testDuplicateCreatesZoneWithNewId() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1", type: "Sign")])
+        vm.duplicate(id: "z1")
+        XCTAssertEqual(vm.zones.map(\.id), ["z1", "z1_2"])
+        XCTAssertEqual(vm.zones[1].type, "Sign")
+
+        vm.duplicate(id: "z1")
+        XCTAssertEqual(vm.zones.map(\.id), ["z1", "z1_2", "z1_3"])
+    }
+
+    @MainActor
+    func testDeleteRemovesZone() {
+        let vm = ZoneDrawingViewModel(zones: [Zone(id: "z1"), Zone(id: "z2")])
+        vm.delete(id: "z1")
+        XCTAssertEqual(vm.zones.map(\.id), ["z2"])
+    }
 }
