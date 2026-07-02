@@ -234,6 +234,9 @@ class Store:
 
     # -- part thumbnails (#344; same push model as building thumbnails — Unity renders and
     # PUTs one after import, no server-side GLB rasterizer per #326's R2 decision) -----------
+    # Nested under a per-part directory (parts/<id>/thumb.jpg), NOT flat like save_glb's
+    # parts/<id>.glb — intentional, mirrors the building-thumb layout (buildings/<id>/thumb.jpg)
+    # rather than the GLB one. No collision either way: one has a .glb suffix, the other doesn't.
 
     def save_part_thumb(self, part_id: str, data: bytes) -> Path:
         path = self.assets_dir / "parts" / part_id / "thumb.jpg"
