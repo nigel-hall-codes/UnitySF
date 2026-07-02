@@ -16,6 +16,12 @@ public final class VariationPreviewViewModel: ObservableObject {
     private let client: ServerClient
     private let templateId: String
     public let seedCount: Int
+    // Offset added to every seed 1...seedCount — resolve_template is a pure function of
+    // (template, facts, seed) (server/app/resolve.py), so re-resolving the SAME seeds always
+    // returns byte-identical placements. "Regenerate" advances this by seedCount each call so
+    // it actually produces new variety, matching what its label promises, rather than being a
+    // no-op retry of the exact same request.
+    private(set) var baseSeed = 0
 
     public init(client: ServerClient, templateId: String, seedCount: Int = 5) {
         self.client = client
@@ -38,9 +44,9 @@ public final class VariationPreviewViewModel: ObservableObject {
                      street_facades: [StreetFacade(edge_index: 0, edge: [0, 0, facadeWidthM, 0])])
     }
 
-    /// Resolves seeds 1...seedCount sequentially (not concurrently — seedCount is small, ~5, and
-    /// sequential keeps this simple and avoids introducing TaskGroup-based concurrency this
-    /// screen doesn't need).
+    /// Resolves seeds (baseSeed+1)...(baseSeed+seedCount) sequentially (not concurrently —
+    /// seedCount is small, ~5, and sequential keeps this simple and avoids introducing
+    /// TaskGroup-based concurrency this screen doesn't need).
     public func load() async {
         isLoading = true
         errorMessage = nil
@@ -49,7 +55,7 @@ public final class VariationPreviewViewModel: ObservableObject {
             partsById = Dictionary(uniqueKeysWithValues: parts.map { ($0.id, $0) })
 
             var results: [ResolvedFacade] = []
-            for seed in 1...seedCount {
+            for seed in (baseSeed + 1)...(baseSeed + seedCount) {
                 let facade = try await client.resolveTemplate(
                     templateId: templateId, facts: Self.syntheticFacts(), seed: seed)
                 results.append(facade)
@@ -59,6 +65,14 @@ public final class VariationPreviewViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// Advances to the next batch of seedCount seeds and reloads — the "Regenerate" button's
+    /// action. Unlike calling load() again directly, this produces genuinely new variants rather
+    /// than re-resolving the exact same (template, facts, seed) triples.
+    public func regenerate() async {
+        baseSeed += seedCount
+        await load()
     }
 
     /// The category of a placement's part, or "" if the part isn't in the currently-loaded

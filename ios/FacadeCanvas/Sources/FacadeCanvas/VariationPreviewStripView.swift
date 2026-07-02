@@ -23,7 +23,11 @@ struct VariationPreviewStripView: View {
                 Spacer()
                 if vm.isLoading { ProgressView() }
                 Button {
-                    Task { await vm.load() }
+                    // regenerate(), not load() — re-resolving the same seeds against the same
+                    // template/facts always returns byte-identical placements server-side
+                    // (server/app/resolve.py is a pure function of those three inputs), so
+                    // Regenerate advances to a fresh batch of seeds instead of a no-op retry.
+                    Task { await vm.regenerate() }
                 } label: {
                     Label("Regenerate", systemImage: "arrow.clockwise")
                 }
@@ -38,7 +42,12 @@ struct VariationPreviewStripView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(Array(vm.variants.enumerated()), id: \.offset) { index, variant in
-                            VariantSchematicView(seed: index + 1, facade: variant, vm: vm)
+                            // The actual server-side seed used is vm.baseSeed + index + 1, NOT
+                            // just index + 1 — baseSeed advances on each Regenerate (see
+                            // VariationPreviewViewModel.regenerate), so labeling every batch
+                            // "Seed 1, 2, 3..." would silently relabel seeds 6-10 as 1-5 after
+                            // one Regenerate press.
+                            VariantSchematicView(seed: vm.baseSeed + index + 1, facade: variant, vm: vm)
                         }
                     }
                     .padding(.horizontal)
