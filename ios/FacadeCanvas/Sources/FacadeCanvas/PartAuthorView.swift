@@ -129,27 +129,18 @@ public struct PartAuthorView: View {
     private var rolesSection: some View {
         GroupBox("Material roles") {
             VStack(alignment: .leading, spacing: 6) {
+                // One row per GLB submesh (#328: bounded by PartGlbGenerator.submeshCount,
+                // never free-form) — a role can't be assigned to a submesh that doesn't exist.
                 ForEach(vm.roles.indices, id: \.self) { i in
                     HStack(spacing: 8) {
                         Text("s\(vm.roles[i].submesh)").font(.caption).foregroundColor(.secondary)
                             .frame(width: 24)
-                        TextField("Role name", text: $vm.roles[i].role)
-                            .font(.body)
-                        Spacer()
-                        Button {
-                            vm.roles.remove(at: i)
-                        } label: {
-                            Image(systemName: "minus.circle").foregroundColor(.red)
+                        Picker("Role", selection: $vm.roles[i].role) {
+                            ForEach(PartAuthorViewModel.materialRoles, id: \.self) { Text($0) }
                         }
-                        .buttonStyle(.plain)
+                        .font(.body)
                     }
                 }
-                Button {
-                    vm.roles.append(RoleSubmesh(submesh: vm.roles.count, role: ""))
-                } label: {
-                    Label("Add role", systemImage: "plus.circle")
-                }
-                .font(.subheadline)
             }
         }
     }
@@ -339,6 +330,9 @@ private struct LabeledTextField: View {
 
 @MainActor
 final class PartAuthorViewModel: ObservableObject {
+    /// Fixed #266 role vocabulary (design D5: roles only, never free text or a colour picker).
+    static let materialRoles = ["Base", "Accent1", "Accent2", "Glass", "Metal", "Sign"]
+
     @Published var parts: [PartDef] = []
     @Published var selectedPartId: String?
     @Published var isLoading = false
@@ -351,7 +345,10 @@ final class PartAuthorViewModel: ObservableObject {
     @Published var depth = "0.15"
     @Published var anchor = "BottomCenter"
     @Published var mountDepth = "0.08"
-    @Published var roles: [RoleSubmesh] = [RoleSubmesh(submesh: 0, role: "Base")]
+    // One row per GLB submesh (#328) — never more rows than the generated GLB has submeshes.
+    @Published var roles: [RoleSubmesh] = (0..<PartGlbGenerator.submeshCount).map {
+        RoleSubmesh(submesh: $0, role: "Base")
+    }
     @Published var referenceImage: UIImage?
     @Published var drawing = PKDrawing()
     @Published var showPhotoPicker = false
