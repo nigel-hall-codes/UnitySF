@@ -14,7 +14,7 @@ The export writes these with ``by_alias=True`` so ``RolePair.from_`` serialises 
 """
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -298,6 +298,35 @@ class SidecarDoc(BaseModel):
     """One chunk's building sidecar — the POST /buildings/import-sidecar body."""
     version: int = 2
     buildings: List[BuildingFacts] = Field(default_factory=list)
+
+
+# --- Placement resolution (design #326 D2; POST /templates/{id}/resolve) ---
+# Server-side port of BuildingAssembler.cs's deterministic placement algorithm, so the
+# iPad can preview a template's generated result in seconds instead of round-tripping
+# through Unity. Output stays in the same normalized facade-UV space Exact/
+# ProceduralRule placements already use — no world-space geometry (edges/bearing) is
+# computed here, since the schematic preview only needs relative layout + part size.
+
+class ResolvedPlacement(BaseModel):
+    part: str
+    facade: str
+    floor: int = 0
+    x: float = 0.0
+    y: float = 0.0
+    scale: float = 1.0
+    w_m: float = 0.0
+    h_m: float = 0.0
+
+
+class ResolveRequest(BaseModel):
+    osm_id: Optional[int] = None
+    facts: Optional[BuildingFacts] = None   # synthetic building facts; takes precedence over osm_id
+    seed: int = 1
+
+
+class ResolvedFacade(BaseModel):
+    placements: List[ResolvedPlacement] = Field(default_factory=list)
+    paletteRoles: List[RoleDef] = Field(default_factory=list)
 
 
 class BuildingPage(BaseModel):

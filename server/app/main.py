@@ -29,11 +29,14 @@ from .models import (
     FacadeCanvas,
     PaletteDef,
     PartDef,
+    ResolvedFacade,
+    ResolveRequest,
     SidecarDoc,
     SignDef,
     SignRequest,
     TemplateDef,
 )
+from .resolve import resolve_template
 from .store import Store
 
 # Classification vocabulary (data-model.md §1 building_type is the OSM building=* tag).
@@ -129,6 +132,29 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
     def create_template(tpl: TemplateDef) -> TemplateDef:
         S().upsert_template(tpl)
         return tpl
+
+    # POST /templates/{id}/resolve (#326 D2): resolve a template against real (osm_id)
+    # or synthetic (facts) building facts + a seed into a flat placement list. Powers
+    # the iPad's variant preview and district preview without a Unity round-trip.
+    @app.post("/templates/{template_id}/resolve")
+    def resolve(template_id: str, req: ResolveRequest) -> ResolvedFacade:
+        tpl = S().get_template(template_id)
+        if tpl is None:
+            raise HTTPException(status_code=404, detail=f"unknown template '{template_id}'")
+
+        if req.facts is not None:
+            facts = req.facts
+        elif req.osm_id is not None:
+            facts = S().get_building(req.osm_id)
+            if facts is None:
+                raise HTTPException(status_code=404, detail=f"unknown building '{req.osm_id}'")
+        else:
+            raise HTTPException(status_code=400, detail="resolve requires osm_id or facts")
+
+        parts_by_id = {p.id: p for p in S().list_parts()}
+        placements = resolve_template(tpl, facts, req.seed, parts_by_id)
+        palette = next((p for p in S().list_palettes() if p.neighborhood == facts.neighborhood), None)
+        return ResolvedFacade(placements=placements, paletteRoles=palette.roles if palette else [])
 
     # -- palettes -----------------------------------------------------------
 
