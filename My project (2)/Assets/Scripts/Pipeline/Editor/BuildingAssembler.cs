@@ -229,6 +229,9 @@ namespace SFMap.Pipeline.Editor
             _placed.Clear();
             _exactMarks.Clear();
 
+            // Roof first (design #266 generation order: Create Mass → Apply Roof → Doors → …).
+            PlaceRoofParts(root.transform, template, facts);
+
             // Exact first (it also records marks the procedural avoidExact constraint reads).
             if (template.exact != null)
                 foreach (var p in template.exact)
@@ -438,6 +441,23 @@ namespace SFMap.Pipeline.Editor
         }
 
         // ---- placement ---------------------------------------------------------
+
+        // Roof parts (data-model.md §2: TemplateDef.roofParts, e.g. "cornice_sunset") are direct
+        // BuildingPart references, not placement directives — they carry no per-instance facade/
+        // floor/x/y like Exact/Procedural placements do. Each is placed once per street-facing
+        // facade (corner buildings dress every street edge, design D2), centred, at the roofline:
+        // floor = facts.floor_count / ny = 1 overshoots the top floor band, which PlacePart clamps
+        // to the building's real facade_height_m (the #279 fact), landing exactly on the roofline.
+        void PlaceRoofParts(Transform parent, BuildingTemplate template, BuildingFactsJson facts)
+        {
+            if (template.roofParts == null) return;
+            foreach (var part in template.roofParts)
+            {
+                if (part == null || string.IsNullOrEmpty(part.id)) continue;
+                foreach (var f in FacadesFor(Facade.Street, facts))
+                    PlacePart(parent, f, facts, part.id, facts.floor_count, 0.5f, 1f, 1f, 0f, Facade.Roof);
+            }
+        }
 
         void PlaceExact(Transform parent, ExactPlacement p, BuildingFactsJson facts)
         {
