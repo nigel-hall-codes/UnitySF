@@ -6,7 +6,7 @@ import PackageDescription
 // directly. Open in Xcode and embed in the app target (PencilKit/SwiftUI need the iOS SDK).
 let package = Package(
     name: "FacadeCanvas",
-    platforms: [.iOS(.v16)],
+    platforms: [.iOS(.v17)],
     products: [
         .library(name: "FacadeCanvas", targets: ["FacadeCanvas"])
     ],

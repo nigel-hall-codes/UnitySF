@@ -15,7 +15,7 @@ import PackageDescription
 // dependency, or ios/FacadeCanvas directly for local standalone development.
 let package = Package(
     name: "UnitySF",
-    platforms: [.iOS(.v16)],
+    platforms: [.iOS(.v17)],
     products: [
         .library(name: "FacadeCanvas", targets: ["FacadeCanvas"])
     ],

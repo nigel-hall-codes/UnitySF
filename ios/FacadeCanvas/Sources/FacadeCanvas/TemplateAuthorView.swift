@@ -11,7 +11,7 @@ import UIKit
 ///   - Procedural rules scatter parts with spacing/count randomization
 ///
 /// Saves via POST /templates. Existing templates are browsable in the sidebar.
-@available(iOS 16, *)
+@available(iOS 17, *)
 public struct TemplateAuthorView: View {
     private let client: ServerClient
     @StateObject private var vm: TemplateAuthorViewModel

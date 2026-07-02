@@ -7,8 +7,8 @@ import UIKit
 /// buildings from GET /buildings (with neighborhood + type filters), whose content pane shows
 /// one building's facts + facade picker, and whose detail pane is a FacadeCanvasView.
 ///
-/// Requires iOS 16+ for NavigationSplitView.
-@available(iOS 16, *)
+/// Requires iOS 17+ for ContentUnavailableView.
+@available(iOS 17, *)
 public struct BuildingBrowserView: View {
     private let client: ServerClient
     @StateObject private var vm: BuildingBrowserViewModel
@@ -234,7 +234,7 @@ private struct BuildingDetailView: View {
     let draftStore: DraftStore
 
     var body: some View {
-        List {
+        let list = List {
             Section("Facts") {
                 factsGrid
             }
@@ -244,7 +244,12 @@ private struct BuildingDetailView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("OSM \(building.osm_id)")
-        .navigationSubtitle(building.neighborhood)
+
+        if #available(iOS 26.0, *) {
+            list.navigationSubtitle(building.neighborhood)
+        } else {
+            list
+        }
     }
 
     private var factsGrid: some View {

@@ -16,7 +16,7 @@ import PhotosUI
 /// The generated GLB is the traced outline fan-triangulated into a flat polygon in the
 /// XY plane (Y-up), or a flat placeholder quad when no trace was drawn. Material colours
 /// come from the palette at runtime; the GLB stores geometry + UVs only.
-@available(iOS 16, *)
+@available(iOS 17, *)
 public struct PartAuthorView: View {
     private let client: ServerClient
     @StateObject private var vm: PartAuthorViewModel
