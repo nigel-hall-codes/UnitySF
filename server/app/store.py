@@ -202,6 +202,18 @@ class Store:
         path = self._backdrop_path(osm_id, facade)
         return path if path.exists() else None
 
+    # -- building thumbnails (#318; one rendered preview per building) -------
+
+    def save_thumb(self, osm_id: int, data: bytes) -> Path:
+        path = self.assets_dir / "buildings" / str(osm_id) / "thumb.jpg"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def thumb_path(self, osm_id: int) -> Optional[Path]:
+        path = self.assets_dir / "buildings" / str(osm_id) / "thumb.jpg"
+        return path if path.exists() else None
+
     # -- internals ----------------------------------------------------------
 
     def _upsert(self, table: str, key_col: str, key, model) -> None:

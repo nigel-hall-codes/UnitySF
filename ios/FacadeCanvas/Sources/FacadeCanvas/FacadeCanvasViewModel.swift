@@ -90,6 +90,16 @@ public final class FacadeCanvasViewModel: ObservableObject {
         }
     }
 
+    /// Upload a photo as the facade reference backdrop, then refresh it in the canvas.
+    public func uploadBackdrop(_ data: Data) async {
+        do {
+            try await client.uploadBackdrop(osmId: osmId, facade: facade, data: data)
+            await loadBackdrop()
+        } catch {
+            status = .failed(String(describing: error))
+        }
+    }
+
     /// Fetch the facade reference render for the backdrop. Returns silently if the server
     /// doesn't have one yet (404 → backdropData stays nil).
     public func loadBackdrop() async {

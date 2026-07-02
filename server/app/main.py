@@ -45,6 +45,17 @@ BUILDING_TYPES: List[str] = [
 ]
 
 
+def _image_media_type(head: bytes) -> Optional[str]:
+    """Sniff a PNG/JPEG signature from the first bytes, or None if neither. Used to
+    reject non-image thumbnail uploads and to serve stored thumbs with the right
+    Content-Type (the on-disk name is always thumb.jpg regardless of encoding)."""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    return None
+
+
 def create_app(store: Optional[Store] = None, default_export_dir: str = "",
                sign_provider: str = "") -> FastAPI:
     """Build the app. Tests pass an explicit ``store``; the module-level app passes
@@ -168,6 +179,28 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         if b is None:
             raise HTTPException(status_code=404, detail=f"unknown building '{osm_id}'")
         return b
+
+    # -- building thumbnails (#318; Unity uploads a rendered 3D preview post-import) -
+
+    @app.put("/buildings/{osm_id}/thumb")
+    async def upload_thumb(osm_id: int, request: Request) -> dict:
+        # Require the building to exist first (same guard as GLB part upload) — a
+        # thumb for an unknown osm_id would be an orphan the browser never lists.
+        if S().get_building(osm_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown building '{osm_id}'")
+        data = await request.body()
+        if _image_media_type(data) is None:
+            raise HTTPException(status_code=415, detail="thumbnail body must be PNG or JPEG")
+        S().save_thumb(osm_id, data)
+        return {"building": osm_id, "bytes": len(data)}
+
+    @app.get("/buildings/{osm_id}/thumb")
+    def get_thumb(osm_id: int) -> FileResponse:
+        path = S().thumb_path(osm_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"no thumbnail for building '{osm_id}'")
+        media_type = _image_media_type(path.read_bytes()[:8]) or "image/jpeg"
+        return FileResponse(str(path), media_type=media_type)
 
     # -- facade canvases (#278/#281; layered doc stays server-side, flattened on export) -
 

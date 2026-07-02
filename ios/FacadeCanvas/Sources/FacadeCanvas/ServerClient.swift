@@ -44,6 +44,25 @@ public actor ServerClient {
         try await post("ai/signs/generate", body: request)
     }
 
+    // PUT /canvas/{osm_id}/{facade}/backdrop — upload a photo as the facade reference backdrop.
+    public func uploadBackdrop(osmId: Int, facade: String, data imageData: Data) async throws {
+        let boundary = "Boundary-FacadeCanvas"
+        var req = URLRequest(url: baseURL.appendingPathComponent("canvas/\(osmId)/\(facade)/backdrop"))
+        req.httpMethod = "PUT"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        func s(_ str: String) { body.append(contentsOf: str.utf8) }
+        s("--\(boundary)\r\n")
+        s("Content-Disposition: form-data; name=\"file\"; filename=\"backdrop.jpg\"\r\n")
+        s("Content-Type: image/jpeg\r\n\r\n")
+        body.append(imageData)
+        s("\r\n--\(boundary)--\r\n")
+        req.httpBody = body
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ServerError.emptyBody }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+    }
+
     // GET /canvas/{osm_id}/{facade}/backdrop — reference render for drawing over; nil on 404.
     // The G2 asset-binary endpoint (#300) will serve the real UV-mapped render once shipped;
     // this returns nil gracefully until then.
