@@ -73,11 +73,11 @@ private struct TemplateCard: View {
 }
 
 /// Three-pane workspace (Layers | Facade Canvas | Properties) for one template — the UX spec's
-/// primary authoring surface. The Layers pane and Canvas (#338) are real now; Properties (#339)
-/// and the resolve-backed variant preview (#340) remain stubs, per #337's "panes may stub
-/// initially." Zones are edited locally and POSTed back to the server explicitly via Save
-/// (matching FacadeCanvasView/BuildingBrowserView's existing explicit-save convention — no
-/// silent autosave).
+/// primary authoring surface. All three panes are real: Layers + Canvas (#338), Properties
+/// (#339), plus a "Preview Variants" sheet (#340) resolving Generate-Variants schematics against
+/// the saved template. Zones are edited locally and POSTed back to the server explicitly via
+/// Save (matching FacadeCanvasView/BuildingBrowserView's existing explicit-save convention — no
+/// silent autosave); Preview Variants saves first for the same reason (see its own doc comment).
 @available(iOS 17, *)
 public struct TemplateWorkspaceView: View {
     let template: TemplateDef
@@ -86,6 +86,8 @@ public struct TemplateWorkspaceView: View {
     @State private var selectedZoneId: String?
     @State private var isSaving = false
     @State private var saveError: String?
+    @State private var showVariationPreview = false
+    @State private var isPreviewing = false
 
     public init(template: TemplateDef, client: ServerClient) {
         self.template = template
@@ -110,10 +112,43 @@ public struct TemplateWorkspaceView: View {
                     Button("Save") { Task { await save() } }
                 }
             }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if isPreviewing {
+                    ProgressView()
+                } else {
+                    Button { Task { await saveAndPreview() } } label: {
+                        Label("Preview Variants", systemImage: "square.grid.3x3")
+                    }
+                    .disabled(isSaving)
+                }
+            }
         }
         .alert("Save failed", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
             Button("OK") { }
         } message: { Text(saveError ?? "") }
+        // Variation Preview (#340) resolves whatever the SERVER has stored for this template id
+        // — there's no "preview these unsaved local edits" endpoint — so this saves first, then
+        // opens the strip, matching this view's existing explicit-Save convention (an implicit
+        // save as a documented side effect of a deliberate button press, not a background
+        // autosave) rather than showing a preview that's silently stale relative to the canvas.
+        .sheet(isPresented: $showVariationPreview) {
+            NavigationStack {
+                VariationPreviewStripView(client: client, templateId: template.id)
+                    .navigationTitle("Variants")
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") { showVariationPreview = false }
+                        }
+                    }
+            }
+        }
+    }
+
+    private func saveAndPreview() async {
+        isPreviewing = true
+        await save()
+        if saveError == nil { showVariationPreview = true }
+        isPreviewing = false
     }
 
     private func save() async {

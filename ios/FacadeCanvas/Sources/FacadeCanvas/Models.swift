@@ -161,6 +161,62 @@ public struct BuildingPage: Codable {
     }
 }
 
+// --- Placement resolution (#336/#340 — POST /templates/{id}/resolve, design #326 D2) ---
+
+public struct ResolvedPlacement: Codable, Equatable {
+    public var part: String
+    public var facade: String
+    public var floor: Int
+    public var x: Double
+    public var y: Double
+    public var scale: Double
+    public var w_m: Double
+    public var h_m: Double
+
+    public init(part: String = "", facade: String = "Front", floor: Int = 0, x: Double = 0.5,
+                y: Double = 0.5, scale: Double = 1, w_m: Double = 0, h_m: Double = 0) {
+        self.part = part; self.facade = facade; self.floor = floor
+        self.x = x; self.y = y; self.scale = scale; self.w_m = w_m; self.h_m = h_m
+    }
+}
+
+/// One material role's colour options within a palette — the server's actual PaletteDef/RoleDef
+/// shape (server/app/models.py), distinct from this package's separate (and, per #345's review,
+/// already-drifted) Palette/PaletteEntry types. Only decoded here for ResolvedFacade.paletteRoles'
+/// sake; the variation preview schematic (#340) colors by part category, not palette role, so
+/// this isn't rendered yet — kept faithful to the wire shape for whenever it is.
+public struct RoleDef: Codable, Equatable {
+    public var role: String
+    public var colors: [String]
+    public var ramp: [String]
+    public var mode: String
+
+    public init(role: String = "", colors: [String] = [], ramp: [String] = [], mode: String = "pick") {
+        self.role = role; self.colors = colors; self.ramp = ramp; self.mode = mode
+    }
+}
+
+/// Body for POST /templates/{id}/resolve. `facts` (synthetic building facts) takes precedence
+/// over `osm_id` server-side when both are omitted/present — matching ResolveRequest's own doc.
+public struct ResolveRequest: Codable {
+    public var osm_id: Int?
+    public var facts: BuildingFacts?
+    public var seed: Int
+
+    public init(osm_id: Int? = nil, facts: BuildingFacts? = nil, seed: Int = 1) {
+        self.osm_id = osm_id; self.facts = facts; self.seed = seed
+    }
+}
+
+public struct ResolvedFacade: Codable, Equatable {
+    public var placements: [ResolvedPlacement]
+    public var paletteRoles: [RoleDef]
+
+    public init(placements: [ResolvedPlacement] = [], paletteRoles: [RoleDef] = []) {
+        self.placements = placements; self.paletteRoles = paletteRoles
+    }
+}
+
 // --- Unity export / publish (#304 — POST /export/unity, design D4) ---
 
 /// Export scope (#346, design §3.4 Generation). "block" has no server-side meaning yet — no
