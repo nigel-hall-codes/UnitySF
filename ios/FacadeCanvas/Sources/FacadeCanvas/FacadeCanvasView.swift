@@ -141,7 +141,7 @@ public struct FacadeCanvasView: View {
             .environment(\.editMode, .constant(.active))
         }
         .background(Color(uiColor: .secondarySystemBackground))
-        .border(Color.separator, width: 0.5)
+        .border(Color(uiColor: .separator), width: 0.5)
     }
 
     private var statusBar: some View {

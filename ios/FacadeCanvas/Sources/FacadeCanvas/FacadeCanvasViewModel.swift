@@ -1,4 +1,6 @@
+import Combine
 import Foundation
+import SwiftUI
 
 /// State + save/load for one building facade's canvas. Deliberately **PencilKit-free**: it holds
 /// already-converted `paintStrokes` (the view converts ink → strokes via `StrokeConversion`), so the

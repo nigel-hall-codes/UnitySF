@@ -1,4 +1,5 @@
 #if canImport(SwiftUI) && canImport(UIKit)
+import Combine
 import SwiftUI
 import UIKit
 
@@ -300,7 +301,7 @@ private struct BuildingDetailView: View {
         // When the server gains per-edge-index canvas storage this mapping can be updated.
         var entries: [FacadeEntry] = building.street_facades.enumerated().map { i, sf in
             let shared = i > 0 ? " · shared canvas" : ""
-            FacadeEntry(
+            return FacadeEntry(
                 name: "Street \(i + 1) (\(sf.cardinalLabel))",
                 serverFacadeName: "Street",
                 subtitle: String(format: "Score %.2f · bearing %.0f°\(shared)", sf.score, sf.bearing_deg),

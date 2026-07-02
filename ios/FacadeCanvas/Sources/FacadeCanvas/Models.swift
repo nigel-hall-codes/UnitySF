@@ -89,7 +89,7 @@ public struct SignDef: Codable, Equatable {
 // --- Building browser (#301 — GET /buildings, GET /buildings/{osm_id}) ---
 
 /// A ranked street facade edge from the bake sidecar; sorted by score descending.
-public struct StreetFacade: Codable, Equatable {
+public struct StreetFacade: Codable, Equatable, Hashable {
     public var edge_index: Int
     public var bearing_deg: Double
     public var street_osm_id: Int
@@ -111,7 +111,7 @@ public struct StreetFacade: Codable, Equatable {
 }
 
 /// Full facts for one building — the server's GET /buildings/{osm_id} shape.
-public struct BuildingFacts: Codable, Equatable, Identifiable {
+public struct BuildingFacts: Codable, Equatable, Identifiable, Hashable {
     public var osm_id: Int
     public var neighborhood: String
     public var building_type: String
