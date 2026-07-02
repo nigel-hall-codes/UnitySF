@@ -343,11 +343,20 @@ class BuildingPage(BaseModel):
 class ExportRequest(BaseModel):
     # Where to materialise the library drop. Defaults to the env-configured target.
     outDir: str = ""
+    # Scope (#346, design §3.4 Generation): "building" (needs osm_id), "neighborhood" (needs
+    # neighborhood), or "city" (default — everything, today's original unscoped behavior).
+    # Only narrows per-building output (overrides, facade-canvas decals); parts/templates/
+    # palettes always export in full (see export.py:_filter_by_scope). "block" has no
+    # server-side meaning yet (no block-level spatial grouping exists) and behaves like "city".
+    scope: str = "city"
+    osm_id: Optional[int] = None
+    neighborhood: str = ""
 
 
 class ExportResult(BaseModel):
     outDir: str
     version: int
+    scope: str = "city"
     parts: int
     templates: int
     palettes: int

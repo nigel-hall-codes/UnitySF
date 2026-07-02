@@ -2,7 +2,9 @@
 (#269) consumes — including the array-of-pairs form for the §2 map fields."""
 import json
 
-from app.export import _neighborhood_template_weights
+import pytest
+
+from app.export import _filter_by_scope, _neighborhood_template_weights
 from app.models import DistrictDef, TemplateWeight
 from test_api import _palette, _part, _template
 
@@ -155,3 +157,95 @@ def test_export_manifest_district_weights_empty_when_no_districts(client, tmp_pa
     client.post("/export/unity", json={"outDir": str(out)})
     manifest = json.loads((out / "library.json").read_text(encoding="utf-8"))
     assert manifest["districtTemplateWeights"] == []
+
+
+# --- Scoped export (#346, design §3.4 Generation) ---------------------------
+
+def _facts(osm_id, neighborhood):
+    return {
+        "osm_id": osm_id, "neighborhood": neighborhood, "building_type": "retail",
+        "footprint_shape": "corner", "width_m": 11.4, "depth_m": 18.2,
+        "floor_count": 4, "footprint_hash": f"hash{osm_id}",
+    }
+
+
+def _seed_two_buildings(client):
+    client.post("/buildings/import-sidecar", json={"version": 2, "buildings": [
+        _facts(1001, "Mission"), _facts(2002, "Sunset"),
+    ]})
+    client.post("/building-specific", json={"osm_id": 1001, "footprint_hash": "hash1001"})
+    client.post("/building-specific", json={"osm_id": 2002, "footprint_hash": "hash2002"})
+
+
+def test_export_default_scope_is_city_and_includes_everything(client, tmp_path):
+    _seed(client)
+    _seed_two_buildings(client)
+    out = tmp_path / "drop_city"
+    r = client.post("/export/unity", json={"outDir": str(out)})
+    assert r.status_code == 200
+    result = r.json()
+    assert result["scope"] == "city" and result["overrides"] == 2
+    assert (out / "Overrides" / "1001.override.json").exists()
+    assert (out / "Overrides" / "2002.override.json").exists()
+
+
+def test_export_scope_building_includes_only_that_building(client, tmp_path):
+    _seed(client)
+    _seed_two_buildings(client)
+    out = tmp_path / "drop_building"
+    r = client.post("/export/unity", json={"outDir": str(out), "scope": "building", "osm_id": 1001})
+    assert r.status_code == 200
+    result = r.json()
+    assert result["scope"] == "building" and result["overrides"] == 1
+    assert (out / "Overrides" / "1001.override.json").exists()
+    assert not (out / "Overrides" / "2002.override.json").exists()
+    # Parts/templates/palettes stay full even for a building-scoped export.
+    assert result["parts"] == 1 and result["templates"] == 1
+
+
+def test_export_scope_neighborhood_includes_only_matching_buildings(client, tmp_path):
+    _seed(client)
+    _seed_two_buildings(client)
+    out = tmp_path / "drop_neighborhood"
+    r = client.post("/export/unity", json={"outDir": str(out), "scope": "neighborhood", "neighborhood": "Sunset"})
+    assert r.status_code == 200
+    result = r.json()
+    assert result["scope"] == "neighborhood" and result["overrides"] == 1
+    assert (out / "Overrides" / "2002.override.json").exists()
+    assert not (out / "Overrides" / "1001.override.json").exists()
+
+
+def test_filter_by_scope_neighborhood_without_neighborhood_raises(store):
+    # Defense in depth: main.py's endpoint already 400s before this is ever reachable via HTTP,
+    # but the helper itself must not silently fall through to an unscoped export for a second caller.
+    with pytest.raises(ValueError):
+        _filter_by_scope(store, [1001, 2002], "neighborhood", None, "")
+
+
+def test_export_scope_building_without_osm_id_400s(client, tmp_path):
+    r = client.post("/export/unity", json={"outDir": str(tmp_path / "x"), "scope": "building"})
+    assert r.status_code == 400
+
+
+def test_export_scope_neighborhood_without_neighborhood_400s(client, tmp_path):
+    r = client.post("/export/unity", json={"outDir": str(tmp_path / "x"), "scope": "neighborhood"})
+    assert r.status_code == 400
+
+
+def test_export_scope_building_filters_canvas_decals_too(client, tmp_path):
+    # A building with only a facade canvas (no building-specific override authored directly)
+    # must still be scoped correctly — the override is synthesized from the canvas.
+    client.post("/buildings/import-sidecar", json={"version": 2, "buildings": [
+        _facts(3003, "Mission"), _facts(4004, "Mission"),
+    ]})
+    for osm_id in (3003, 4004):
+        client.post("/canvas", json={
+            "osm_id": osm_id, "facade": "Front", "footprint_hash": f"hash{osm_id}",
+            "layers": [{"kind": "paint", "layer": 0, "mountDepth_m": 0.02,
+                        "strokes": [{"points": [[0.1, 0.1], [0.9, 0.9]], "color": "#ff0000", "width": 0.02}]}],
+        })
+    out = tmp_path / "drop_canvas_scope"
+    r = client.post("/export/unity", json={"outDir": str(out), "scope": "building", "osm_id": 3003})
+    assert r.status_code == 200
+    assert (out / "Overrides" / "3003.override.json").exists()
+    assert not (out / "Overrides" / "4004.override.json").exists()

@@ -82,9 +82,12 @@ public actor ServerClient {
     }
 
     // POST /export/unity — materialise Assets/SFBuildingTemplates/ on the server (design D4).
-    // outDir defaults to the server's env-configured export directory.
-    public func publishToUnity(outDir: String = "") async throws -> ExportResult {
-        try await post("export/unity", body: ExportRequest(outDir: outDir))
+    // outDir defaults to the server's env-configured export directory; scope defaults to .city
+    // (today's original unscoped behavior), so existing callers are unaffected (#346).
+    public func publishToUnity(outDir: String = "", scope: ExportScope = .city,
+                                osmId: Int? = nil, neighborhood: String = "") async throws -> ExportResult {
+        try await post("export/unity", body: ExportRequest(outDir: outDir, scope: scope,
+                                                             osm_id: osmId, neighborhood: neighborhood))
     }
 
     // GET /buildings — paginated list, optionally filtered by neighborhood and type.

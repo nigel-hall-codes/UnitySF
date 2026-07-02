@@ -35,6 +35,36 @@ def _within(root: Path, path: Path) -> bool:
         return False
 
 
+def _filter_by_scope(store: Store, osm_ids: list[int], scope: str, osm_id, neighborhood: str) -> set[int]:
+    """Which osm_ids (from overrides/canvases) survive the requested export scope (#346).
+
+    parts/templates/palettes/districtTemplateWeights are always exported in full regardless
+    of scope — they're authoring-scale (dozens), not building-scale, and Unity's template
+    matching needs the complete compatibility library for ANY building it assembles, not just
+    the ones in scope. Scoping only narrows the per-building data (overrides, facade decals),
+    which is the only thing that actually varies by building/neighborhood/city. "block" isn't
+    filtered here — the schema has no block-level spatial grouping (only neighborhood), so a
+    "block" request is accepted but currently behaves like "city" (see ExportRequest.scope docs
+    on the iPad side for the documented gap); this keeps behavior honest rather than silently
+    wrong for a scope level the data model can't express yet.
+    """
+    if scope == "building":
+        return {osm_id} if osm_id is not None else set()
+    if scope == "neighborhood":
+        # The HTTP layer (main.py) 400s before calling export_unity with scope="neighborhood"
+        # and no neighborhood — this guards any other caller from silently falling through to
+        # an unscoped export instead.
+        if not neighborhood:
+            raise ValueError("scope 'neighborhood' requires a neighborhood")
+        kept = set()
+        for oid in osm_ids:
+            b = store.get_building(oid)
+            if b is not None and b.neighborhood == neighborhood:
+                kept.add(oid)
+        return kept
+    return set(osm_ids)   # "city" (default) and unrecognized/"block" scopes: no narrowing
+
+
 def _neighborhood_template_weights(districts: list[DistrictDef]) -> list[dict]:
     """Flatten district.templateWeights[] out to per-neighborhood weight tables (#343):
     a district covers neighborhoods[], so the manifest keys weights the way the assembler
@@ -53,12 +83,18 @@ def _neighborhood_template_weights(districts: list[DistrictDef]) -> list[dict]:
     ]
 
 
-def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> ExportResult:
-    """Write the full library drop under ``out_dir`` and return a summary.
+def export_unity(store: Store, out_dir: str, now_iso: str | None = None, scope: str = "city",
+                  osm_id: int | None = None, neighborhood: str = "") -> ExportResult:
+    """Write the library drop under ``out_dir`` and return a summary.
 
     Layout (data-model.md §2): ``library.json`` manifest; ``Parts/<id>.part.json`` (+ the
     part's ``<id>.glb`` if a binary was uploaded); ``Palettes/<neighborhood>.palette.json``;
     ``Templates/<id>.template.json``; ``Overrides/<osm_id>.override.json``.
+
+    ``scope`` (#346, design §3.4 Generation): "building" (needs ``osm_id``), "neighborhood"
+    (needs ``neighborhood``), or "city" (default — everything, today's unscoped behavior).
+    Only narrows per-building output (overrides, facade-canvas decals); see
+    ``_filter_by_scope`` for why parts/templates/palettes always export in full.
     """
     root = Path(out_dir)
     parts_dir = root / "Parts"
@@ -72,7 +108,9 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
     parts = store.list_parts()
     templates = store.list_templates()
     palettes = store.list_palettes()
-    overrides = store.list_overrides()
+    all_overrides = store.list_overrides()
+    in_scope = _filter_by_scope(store, [ov.osm_id for ov in all_overrides], scope, osm_id, neighborhood)
+    overrides = [ov for ov in all_overrides if ov.osm_id in in_scope]
     signs = store.list_signs()
 
     glbs_copied = 0
@@ -132,11 +170,14 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
     # flattened-where-cheap form crosses into Unity (#280 consumes facadeDecals).
     canvas_decals = 0
     paint_textures = 0
+    all_canvases = store.list_canvases()
+    canvas_scope = _filter_by_scope(store, [c.osm_id for c in all_canvases], scope, osm_id, neighborhood)
     canvases_by_building: dict = {}
-    for c in store.list_canvases():
-        canvases_by_building.setdefault(c.osm_id, []).append(c)
+    for c in all_canvases:
+        if c.osm_id in canvas_scope:
+            canvases_by_building.setdefault(c.osm_id, []).append(c)
 
-    for osm_id, canvases in canvases_by_building.items():
+    for building_id, canvases in canvases_by_building.items():
         decals = []
         fp_hash = ""
         for c in canvases:
@@ -147,7 +188,7 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
             if png is not None:
                 # _safe(...).lower() is filename-only; the decal's `facade` field keeps the
                 # original case (that is what the importer keys placement off, not the filename).
-                tex_rel = f"Signs/paint_{osm_id}_{_safe(c.facade).lower()}.png"
+                tex_rel = f"Signs/paint_{building_id}_{_safe(c.facade).lower()}.png"
                 (root / tex_rel).write_bytes(png)
                 paint_textures += 1
                 decals.append({
@@ -174,11 +215,11 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         if not decals:
             continue
         canvas_decals += len(decals)
-        ov = override_map.get(osm_id)
+        ov = override_map.get(building_id)
         if ov is None:
-            ov = {"osm_id": osm_id, "footprint_hash": fp_hash,
+            ov = {"osm_id": building_id, "footprint_hash": fp_hash,
                   "placements": [], "suppress": [], "version": 2}
-            override_map[osm_id] = ov
+            override_map[building_id] = ov
         # Keep the override's existing footprint_hash if it has one; else adopt the canvas's.
         if not ov.get("footprint_hash"):
             ov["footprint_hash"] = fp_hash
@@ -186,8 +227,8 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
         ov["facadeDecals"] = sorted(decals, key=lambda d: (d["layer"], d["mountDepth_m"]))
         ov["version"] = 2   # bump: facadeDecals added
 
-    for osm_id, ov in override_map.items():
-        _write_json(overrides_dir / f"{osm_id}.override.json", ov)
+    for building_id, ov in override_map.items():
+        _write_json(overrides_dir / f"{building_id}.override.json", ov)
 
     manifest = {
         "version": 1,
@@ -203,6 +244,7 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None) -> Expo
     return ExportResult(
         outDir=str(root),
         version=1,
+        scope=scope,
         parts=len(parts),
         templates=len(templates),
         palettes=len(palettes),
