@@ -314,21 +314,112 @@ public struct ProceduralRule: Codable, Equatable {
     }
 }
 
+// --- Zones (#335/#338 — authoring format on TemplateDef, compiled server-side at export) ---
+
+public struct WeightedPart: Codable, Equatable {
+    public var part: String
+    public var weight: Double
+    public init(part: String = "", weight: Double = 1) { self.part = part; self.weight = weight }
+}
+
+public struct ZoneShape: Codable, Equatable {
+    public var kind: String                // "rect" | "polygon" — rect only for now (#338)
+    public var points: [[Double]]           // facade UV, bottom-origin
+    public init(kind: String = "rect", points: [[Double]] = []) {
+        self.kind = kind; self.points = points
+    }
+}
+
+public struct ZoneRules: Codable, Equatable {
+    public var allowedParts: [WeightedPart]
+    public var countRange: IntRange
+    public var spacingMeters: FloatRange
+    public var randomOffset: Double
+    public var alignment: String            // "Grid" | "FloorLine" | "Free"
+    public init(allowedParts: [WeightedPart] = [], countRange: IntRange = IntRange(),
+                spacingMeters: FloatRange = FloatRange(), randomOffset: Double = 0,
+                alignment: String = "Grid") {
+        self.allowedParts = allowedParts; self.countRange = countRange
+        self.spacingMeters = spacingMeters; self.randomOffset = randomOffset; self.alignment = alignment
+    }
+}
+
+public struct Zone: Codable, Equatable, Identifiable {
+    public var id: String
+    public var type: String                 // Window|Door|Storefront|Sign|Balcony|Roof|Decoration|Utility
+    public var facade: String
+    public var shape: ZoneShape
+    public var floorRange: IntRange
+    public var rules: ZoneRules
+
+    // Editor-only state (hide/lock, #338's layers pane) — NOT part of the server schema
+    // (server/app/models.py's Zone has no such fields), so these are excluded from Codable via
+    // CodingKeys below: they round-trip in-memory but never reach the wire.
+    public var isHidden: Bool
+    public var isLocked: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, type, facade, shape, floorRange, rules
+    }
+
+    public init(id: String, type: String = "Window", facade: String = "Front",
+                shape: ZoneShape = ZoneShape(), floorRange: IntRange = IntRange(),
+                rules: ZoneRules = ZoneRules(), isHidden: Bool = false, isLocked: Bool = false) {
+        self.id = id; self.type = type; self.facade = facade; self.shape = shape
+        self.floorRange = floorRange; self.rules = rules
+        self.isHidden = isHidden; self.isLocked = isLocked
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        type = try c.decodeIfPresent(String.self, forKey: .type) ?? "Window"
+        facade = try c.decodeIfPresent(String.self, forKey: .facade) ?? "Front"
+        shape = try c.decodeIfPresent(ZoneShape.self, forKey: .shape) ?? ZoneShape()
+        floorRange = try c.decodeIfPresent(IntRange.self, forKey: .floorRange) ?? IntRange()
+        rules = try c.decodeIfPresent(ZoneRules.self, forKey: .rules) ?? ZoneRules()
+        isHidden = false
+        isLocked = false
+    }
+
+    // Written explicitly (not relying on synthesis alongside the custom init(from:) above) so
+    // isHidden/isLocked are never encoded, matching CodingKeys — no ambiguity about whether
+    // Swift still synthesizes encode(to:) when init(from:) is hand-written.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(type, forKey: .type)
+        try c.encode(facade, forKey: .facade)
+        try c.encode(shape, forKey: .shape)
+        try c.encode(floorRange, forKey: .floorRange)
+        try c.encode(rules, forKey: .rules)
+    }
+}
+
+/// The 8 semantic region types the UX spec's Facade Canvas draws (design #326 §3.1).
+public enum ZoneType: String, CaseIterable, Identifiable, Equatable {
+    case window = "Window", door = "Door", storefront = "Storefront", sign = "Sign"
+    case balcony = "Balcony", roof = "Roof", decoration = "Decoration", utility = "Utility"
+    public var id: String { rawValue }
+}
+
 public struct TemplateDef: Codable, Equatable, Identifiable {
     public var id: String
     public var displayName: String
     public var compatibility: Compatibility
     public var exact: [ExactPlacement]
     public var rules: [ProceduralRule]
+    public var zones: [Zone]
     public var roofParts: [String]
     public var version: Int
 
     public init(id: String, displayName: String = "",
                 compatibility: Compatibility = Compatibility(),
-                exact: [ExactPlacement] = [], rules: [ProceduralRule] = [],
+                exact: [ExactPlacement] = [], rules: [ProceduralRule] = [], zones: [Zone] = [],
                 roofParts: [String] = [], version: Int = 1) {
         self.id = id; self.displayName = displayName; self.compatibility = compatibility
-        self.exact = exact; self.rules = rules; self.roofParts = roofParts; self.version = version
+        self.exact = exact; self.rules = rules; self.zones = zones
+        self.roofParts = roofParts; self.version = version
     }
 }
 
