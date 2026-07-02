@@ -220,4 +220,19 @@ final class FacadeCanvasTests: XCTestCase {
         vm.neighborhoodText = "Mission"
         XCTAssertTrue(vm.canPublish)
     }
+
+    // MARK: - TemplateBrowserViewModel (#337)
+
+    func testCardSubtitleCountsExactAndRules() {
+        let template = TemplateDef(
+            id: "t1",
+            exact: [ExactPlacement(part: "a", facade: "Front"), ExactPlacement(part: "b", facade: "Front")],
+            rules: [ProceduralRule(part: "c", facade: "Front")]
+        )
+        XCTAssertEqual(TemplateBrowserViewModel.cardSubtitle(template), "2 exact · 1 rules")
+    }
+
+    func testCardSubtitleHandlesEmptyTemplate() {
+        XCTAssertEqual(TemplateBrowserViewModel.cardSubtitle(TemplateDef(id: "empty")), "0 exact · 0 rules")
+    }
 }
