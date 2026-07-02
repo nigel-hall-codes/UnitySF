@@ -70,4 +70,59 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(vm.imageLayers[0].texture, "Signs/sign_lucca_deli.png")
         XCTAssertEqual(vm.imageLayers[0].signAsset, "sign_lucca_deli")
     }
+
+    // MARK: - PartGlbGenerator (#327: traced outline -> flat polygon mesh)
+
+    // Parses just the glTF JSON chunk out of the binary GLB container so tests can assert
+    // on vertex/index counts without a full glTF reader.
+    private func glbJSON(_ data: Data) throws -> [String: Any] {
+        let bytes = [UInt8](data)
+        func u32(_ offset: Int) -> UInt32 {
+            UInt32(bytes[offset]) | (UInt32(bytes[offset + 1]) << 8)
+                | (UInt32(bytes[offset + 2]) << 16) | (UInt32(bytes[offset + 3]) << 24)
+        }
+        let jsonLength = Int(u32(12))
+        let jsonData = data.subdata(in: 20..<(20 + jsonLength))
+        return try XCTUnwrap(JSONSerialization.jsonObject(with: jsonData) as? [String: Any])
+    }
+
+    private func accessorCounts(_ json: [String: Any]) throws -> [Int] {
+        let accessors = try XCTUnwrap(json["accessors"] as? [[String: Any]])
+        return try accessors.map { try XCTUnwrap($0["count"] as? Int) }
+    }
+
+    func testPartGlbGeneratorFallsBackToQuadWithoutOutline() throws {
+        let counts = try accessorCounts(glbJSON(PartGlbGenerator.generate(width: 1.2, height: 1.6)))
+        XCTAssertEqual(counts, [4, 4, 4, 6])   // POSITION, NORMAL, TEXCOORD_0: 4 verts; INDICES: 2 triangles
+    }
+
+    func testPartGlbGeneratorFallsBackOnDegenerateOutline() throws {
+        // Only 2 points — not enough to form a polygon.
+        let outline = [TracePoint(0, 0), TracePoint(1, 0)]
+        let counts = try accessorCounts(glbJSON(PartGlbGenerator.generate(width: 1, height: 1, outline: outline)))
+        XCTAssertEqual(counts, [4, 4, 4, 6])
+    }
+
+    func testPartGlbGeneratorTriangulatesTracedOutline() throws {
+        let outline = [TracePoint(0, 0), TracePoint(2, 0), TracePoint(1, 2), TracePoint(0, 1)]
+        let counts = try accessorCounts(glbJSON(PartGlbGenerator.generate(width: 1.2, height: 1.6, outline: outline)))
+        XCTAssertEqual(counts, [4, 4, 4, 6])   // no near-collinear points to simplify away
+    }
+
+    func testPartGlbGeneratorSimplifiesNearCollinearPoints() throws {
+        // A near-straight bottom edge (0,0)-(1,0.001)-(2,0) should collapse to one segment.
+        let outline = [TracePoint(0, 0), TracePoint(1, 0.001), TracePoint(2, 0),
+                        TracePoint(2, 2), TracePoint(0, 2)]
+        let counts = try accessorCounts(glbJSON(PartGlbGenerator.generate(width: 1, height: 1, outline: outline)))
+        XCTAssertEqual(counts, [4, 4, 4, 6])   // 5 traced points -> 4 after simplification
+    }
+
+    func testPartGlbGeneratorAcceptsEitherWindingDirection() throws {
+        let ccw = [TracePoint(0, 0), TracePoint(2, 0), TracePoint(2, 2), TracePoint(0, 2)]
+        let cw = Array(ccw.reversed())
+        let countsCCW = try accessorCounts(glbJSON(PartGlbGenerator.generate(width: 1, height: 1, outline: ccw)))
+        let countsCW = try accessorCounts(glbJSON(PartGlbGenerator.generate(width: 1, height: 1, outline: cw)))
+        XCTAssertEqual(countsCCW, [4, 4, 4, 6])
+        XCTAssertEqual(countsCW, [4, 4, 4, 6])
+    }
 }

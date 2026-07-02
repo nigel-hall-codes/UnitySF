@@ -9,11 +9,12 @@ import PhotosUI
 ///
 /// Workflow:
 ///   1. Pick a reference screenshot of the facade element (stays on-device per D6 — never uploaded)
-///   2. Trace over the reference with Pencil to confirm element bounds (visual guide only)
+///   2. Trace the element's outline with Pencil — this becomes the part's actual geometry (#327)
 ///   3. Enter physical size in metres + material role assignments (submesh → role name)
-///   4. Tap Save → POST /parts (PartDef) + PUT /parts/{id}/glb (generated flat quad)
+///   4. Tap Save → POST /parts (PartDef) + PUT /parts/{id}/glb (generated flat polygon)
 ///
-/// The generated GLB is a plain white quad in the XZ plane (Y-up). Material colours
+/// The generated GLB is the traced outline fan-triangulated into a flat polygon in the
+/// XY plane (Y-up), or a flat placeholder quad when no trace was drawn. Material colours
 /// come from the palette at runtime; the GLB stores geometry + UVs only.
 @available(iOS 16, *)
 public struct PartAuthorView: View {
@@ -167,7 +168,7 @@ public struct PartAuthorView: View {
     }
 
     private var traceSection: some View {
-        GroupBox("Trace (visual guide — not used in GLB)") {
+        GroupBox("Trace (becomes the part's outline)") {
             PartTraceCanvas(referenceImage: vm.referenceImage, drawing: $vm.drawing)
                 .aspectRatio(4 / 3, contentMode: .fit)
                 .cornerRadius(8)
@@ -202,8 +203,10 @@ public struct PartAuthorView: View {
 
 // MARK: - PartTraceCanvas
 
-/// PencilKit canvas shown over the reference photo. The drawing is for the author's
-/// visual reference only; the exported GLB geometry comes from the entered size values.
+/// PencilKit canvas shown over the reference photo. The drawing IS the part's geometry
+/// (#327): `PartAuthorViewModel.save()` reads `drawing.strokes` and hands their points to
+/// `PartGlbGenerator` as the outline to fan-triangulate; the entered size values only
+/// rescale that outline to real-world metres.
 @available(iOS 16, *)
 private struct PartTraceCanvas: UIViewRepresentable {
     let referenceImage: UIImage?
@@ -401,7 +404,14 @@ final class PartAuthorViewModel: ObservableObject {
             return
         }
 
-        let glbData = PartGlbGenerator.generate(width: Float(w), height: Float(h))
+        // Flatten every stroke's points into one outline, in drawing order (#327: a single
+        // continuous trace is the expected input; multiple strokes are concatenated as one
+        // path rather than treated as separate shapes). UIKit canvas coordinates are Y-down;
+        // the mesh space PartGlbGenerator expects is Y-up, so flip Y at this boundary.
+        let outline = drawing.strokes.flatMap { stroke in
+            stroke.path.map { TracePoint(Float($0.location.x), -Float($0.location.y)) }
+        }
+        let glbData = PartGlbGenerator.generate(width: Float(w), height: Float(h), outline: outline)
 
         do {
             try await client.uploadPartGlb(partId: partId, data: glbData)
