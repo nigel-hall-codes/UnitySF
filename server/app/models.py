@@ -113,12 +113,42 @@ class ProceduralRule(BaseModel):
     variants: List[str] = Field(default_factory=list)
 
 
+# --- Zones (design #326 D1; authoring format, compiled to exact/rules at export) --
+
+class WeightedPart(BaseModel):
+    part: str
+    weight: float = 1.0
+
+
+class ZoneShape(BaseModel):
+    kind: str = "rect"                                        # "rect" | "polygon"
+    points: List[List[float]] = Field(default_factory=list)   # facade UV, bottom-origin
+
+
+class ZoneRules(BaseModel):
+    allowedParts: List[WeightedPart] = Field(default_factory=list)
+    countRange: IntRange = Field(default_factory=IntRange)
+    spacingMeters: FloatRange = Field(default_factory=FloatRange)
+    randomOffset: float = 0.0
+    alignment: str = "Grid"                                    # "Grid" | "FloorLine" | "Free"
+
+
+class Zone(BaseModel):
+    id: str
+    type: str      # Window|Door|Storefront|Sign|Balcony|Roof|Decoration|Utility
+    facade: str = "Front"
+    shape: ZoneShape = Field(default_factory=ZoneShape)
+    floorRange: IntRange = Field(default_factory=IntRange)
+    rules: ZoneRules = Field(default_factory=ZoneRules)
+
+
 class TemplateDef(BaseModel):
     id: str
     displayName: str = ""
     compatibility: Compatibility = Field(default_factory=Compatibility)
     exact: List[ExactPlacement] = Field(default_factory=list)
     rules: List[ProceduralRule] = Field(default_factory=list)
+    zones: List[Zone] = Field(default_factory=list)
     roofParts: List[str] = Field(default_factory=list)
     version: int = 1
 
