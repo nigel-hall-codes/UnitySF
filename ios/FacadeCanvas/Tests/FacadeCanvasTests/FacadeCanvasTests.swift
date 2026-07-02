@@ -125,4 +125,39 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(countsCCW, [4, 4, 4, 6])
         XCTAssertEqual(countsCW, [4, 4, 4, 6])
     }
+
+    // MARK: - DashboardViewModel (#345)
+
+    func testDistrictDefRoundTripsWithServerKeys() throws {
+        let district = DistrictDef(id: "mission", name: "Mission", neighborhoods: ["Mission"],
+                                   templateWeights: [TemplateWeight(template: "victorian_a", weight: 50)],
+                                   palette: "Mission", signStyle: "Bilingual")
+        let data = try JSONEncoder().encode(district)
+        let obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(obj["id"] as? String, "mission")
+        XCTAssertEqual(obj["neighborhoods"] as? [String], ["Mission"])
+        let weights = try XCTUnwrap(obj["templateWeights"] as? [[String: Any]])
+        XCTAssertEqual(weights[0]["template"] as? String, "victorian_a")
+        XCTAssertEqual(weights[0]["weight"] as? Double, 50)
+        XCTAssertEqual(obj["signStyle"] as? String, "Bilingual")
+
+        let decoded = try JSONDecoder().decode(DistrictDef.self, from: data)
+        XCTAssertEqual(decoded, district)
+    }
+
+    func testRecentFromReturnsTailReversed() {
+        let templates = (1...8).map { TemplateDef(id: "t\($0)") }
+        let recent = DashboardViewModel.recentFrom(templates, limit: 5)
+        XCTAssertEqual(recent.map(\.id), ["t8", "t7", "t6", "t5", "t4"])
+    }
+
+    func testRecentFromHandlesFewerThanLimit() {
+        let templates = [TemplateDef(id: "only")]
+        XCTAssertEqual(DashboardViewModel.recentFrom(templates, limit: 5).map(\.id), ["only"])
+    }
+
+    func testRecentFromEmptyInputsYieldsEmpty() {
+        XCTAssertEqual(DashboardViewModel.recentFrom([], limit: 5), [])
+        XCTAssertEqual(DashboardViewModel.recentFrom([TemplateDef(id: "a")], limit: 0), [])
+    }
 }

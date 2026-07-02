@@ -131,6 +131,11 @@ public actor ServerClient {
         try await get("parts")
     }
 
+    // GET /districts — list all authored districts (#341).
+    public func listDistricts() async throws -> [DistrictDef] {
+        try await get("districts")
+    }
+
     // POST /parts — create or upsert a part record.
     public func createPart(_ part: PartDef) async throws -> PartDef {
         try await post("parts", body: part)
