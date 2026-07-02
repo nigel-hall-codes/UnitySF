@@ -122,6 +122,27 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         return FileResponse(str(path), media_type="model/gltf-binary",
                             filename=f"{part_id}.glb")
 
+    # -- part thumbnails (#344; Unity uploads a rendered preview post-import, same push
+    # model as building thumbnails #318 — see store.py for why over a server-side rasterizer) -
+
+    @app.put("/parts/{part_id}/thumb")
+    async def upload_part_thumb(part_id: str, request: Request) -> dict:
+        if S().get_part(part_id) is None:
+            raise HTTPException(status_code=404, detail=f"unknown part '{part_id}'")
+        data = await request.body()
+        if _image_media_type(data) is None:
+            raise HTTPException(status_code=415, detail="thumbnail body must be PNG or JPEG")
+        S().save_part_thumb(part_id, data)
+        return {"part": part_id, "bytes": len(data)}
+
+    @app.get("/parts/{part_id}/thumb")
+    def get_part_thumb(part_id: str) -> FileResponse:
+        path = S().part_thumb_path(part_id)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"no thumbnail for part '{part_id}'")
+        media_type = _image_media_type(path.read_bytes()[:8]) or "image/jpeg"
+        return FileResponse(str(path), media_type=media_type)
+
     # -- templates ----------------------------------------------------------
 
     @app.get("/templates")

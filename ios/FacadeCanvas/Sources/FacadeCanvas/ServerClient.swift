@@ -155,6 +155,18 @@ public actor ServerClient {
         return data
     }
 
+    // GET /parts/{id}/thumb — rendered preview image; nil on 404 (#344, same push model as
+    // building thumbnails — Unity renders and PUTs one after import).
+    public func fetchPartThumb(partId: String) async throws -> Data? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("parts/\(partId)/thumb"))
+        req.httpMethod = "GET"
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 404 { return nil }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+        return data
+    }
+
     // GET /parts/{id}/glb — download a part's binary GLB; nil on 404.
     public func getPartGlb(partId: String) async throws -> Data? {
         var req = URLRequest(url: baseURL.appendingPathComponent("parts/\(partId)/glb"))
