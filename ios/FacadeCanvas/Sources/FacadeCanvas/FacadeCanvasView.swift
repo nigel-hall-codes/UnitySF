@@ -42,9 +42,9 @@ public struct FacadeCanvasView: View {
             }
         }
         .sheet(isPresented: $showTextSheet) {
-            TextToolSheet { text, color in
+            TextToolSheet { text, color, font in
                 showTextSheet = false
-                guard let png = Self.renderTextPNG(text, color: UIColor(color)) else { return }
+                guard let png = Self.renderTextPNG(text, color: UIColor(color), font: font) else { return }
                 Task { await placeUploadedImage(png, name: text) }
             }
         }
@@ -187,10 +187,11 @@ public struct FacadeCanvasView: View {
 
     /// Render text into a transparent PNG so it rides the existing sign-asset pipeline
     /// (place, save, export) with no new server-side layer kind.
-    static func renderTextPNG(_ text: String, color: UIColor) -> Data? {
+    static func renderTextPNG(_ text: String, color: UIColor,
+                              font: CanvasFont = .sansSerif) -> Data? {
         guard !text.isEmpty else { return nil }
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 96, weight: .bold),
+            .font: font.uiFont(size: 96),
             .foregroundColor: color,
         ]
         let textSize = (text as NSString).size(withAttributes: attrs)
@@ -205,10 +206,18 @@ public struct FacadeCanvasView: View {
 // MARK: - PencilCanvas
 
 /// UIKit bridge for PencilKit's canvas. The tool is driven by the MVP tool rail (Brush /
-/// Erase) rather than the floating system PKToolPicker.
-private struct PencilCanvas: UIViewRepresentable {
+/// Erase) rather than the floating system PKToolPicker. Internal (not private) so the
+/// Building Customization Canvas (#367) shares one bridge.
+struct PencilCanvas: UIViewRepresentable {
     @Binding var drawing: PKDrawing
     let tool: PKTool
+    /// When false, the canvas ignores touches (the #367 Select/hand tools need drawing off).
+    var interactionEnabled: Bool = true
+    /// #367 undo wiring: hands the PKCanvasView reference up so the toolbar's Undo/Redo can
+    /// drive PencilKit's own UndoManager. nil for callers that don't need it (#365 surface).
+    var onCanvasReady: ((PKCanvasView) -> Void)? = nil
+    /// #367 dirty/undo timeline: fires on each user drawing change.
+    var onDrawingChanged: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> PKCanvasView {
         let view = PKCanvasView()
@@ -218,12 +227,15 @@ private struct PencilCanvas: UIViewRepresentable {
         view.delegate = context.coordinator
         view.drawing = drawing
         view.tool = tool
+        view.isUserInteractionEnabled = interactionEnabled
+        onCanvasReady?(view)
         return view
     }
 
     func updateUIView(_ view: PKCanvasView, context: Context) {
         if view.drawing != drawing { view.drawing = drawing }
         view.tool = tool     // PKTool isn't Equatable; setting every update is cheap
+        view.isUserInteractionEnabled = interactionEnabled
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -232,7 +244,11 @@ private struct PencilCanvas: UIViewRepresentable {
         let parent: PencilCanvas
         init(_ parent: PencilCanvas) { self.parent = parent }
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
+            // PencilKit fires this for programmatic loads too; only user edits carry
+            // an undoable action, so gate the change callback on undo state.
+            let isUserChange = canvasView.undoManager?.canUndo ?? false
             parent.drawing = canvasView.drawing
+            if isUserChange { parent.onDrawingChanged?() }
         }
     }
 }
@@ -281,8 +297,8 @@ private struct PlacedImageView: View {
 // MARK: - SignRequestSheet
 
 /// AI-sign request form — exposes all SignRequest fields so the server can pick a provider
-/// and apply the neighborhood style context.
-private struct SignRequestSheet: View {
+/// and apply the neighborhood style context. Internal: shared with #367's canvas.
+struct SignRequestSheet: View {
     var onSubmit: (SignRequest) -> Void
     @State private var text = ""
     @State private var businessType = ""
@@ -331,11 +347,13 @@ private struct SignRequestSheet: View {
 
 // MARK: - TextToolSheet
 
-/// The Text tool's form: a string + colour that the canvas renders to a transparent PNG.
-private struct TextToolSheet: View {
-    var onSubmit: (String, Color) -> Void
+/// The Text tool's form: string + colour + font that the canvas renders to a transparent PNG.
+/// Internal: shared with #367's canvas, which adds the font choice per the design doc.
+struct TextToolSheet: View {
+    var onSubmit: (String, Color, CanvasFont) -> Void
     @State private var text = ""
     @State private var color: Color = .black
+    @State private var font: CanvasFont = .sansSerif
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -343,12 +361,15 @@ private struct TextToolSheet: View {
             Form {
                 TextField("Text", text: $text)
                 ColorPicker("Color", selection: $color, supportsOpacity: false)
+                Picker("Font", selection: $font) {
+                    ForEach(CanvasFont.allCases) { Text($0.displayName).tag($0) }
+                }
             }
             .navigationTitle("Add Text")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { onSubmit(text, color) }
+                    Button("Add") { onSubmit(text, color, font) }
                         .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
@@ -356,10 +377,41 @@ private struct TextToolSheet: View {
     }
 }
 
+/// The design doc's sign-font vocabulary mapped onto fonts iOS ships with — no bundled
+/// font files, so text renders identically on every iPad.
+enum CanvasFont: String, CaseIterable, Identifiable {
+    case sansSerif, serif, victorian, marker, typewriter
+
+    var id: String { rawValue }
+    var displayName: String {
+        switch self {
+        case .sansSerif:  return "Sans Serif"
+        case .serif:      return "Serif (Playfair-style)"
+        case .victorian:  return "Victorian Script"
+        case .marker:     return "Marker"
+        case .typewriter: return "Typewriter"
+        }
+    }
+    /// Concrete UIFont, falling back to the bold system font if the face is missing.
+    func uiFont(size: CGFloat) -> UIFont {
+        let name: String?
+        switch self {
+        case .sansSerif:  name = nil
+        case .serif:      name = "Georgia-Bold"
+        case .victorian:  name = "SnellRoundhand-Bold"
+        case .marker:     name = "MarkerFelt-Wide"
+        case .typewriter: name = "AmericanTypewriter-Bold"
+        }
+        if let name, let font = UIFont(name: name, size: size) { return font }
+        return UIFont.systemFont(ofSize: size, weight: .bold)
+    }
+}
+
 // MARK: - ImagePickerView
 
 /// Photo-library picker for the Image tool; returns PNG data ready for POST /signs/upload.
-private struct ImagePickerView: UIViewControllerRepresentable {
+/// Internal: shared with #367's canvas.
+struct ImagePickerView: UIViewControllerRepresentable {
     var onPick: (Data) -> Void
     @Environment(\.dismiss) private var dismiss
 

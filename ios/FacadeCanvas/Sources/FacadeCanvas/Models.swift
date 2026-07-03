@@ -23,12 +23,45 @@ public struct CanvasLayer: Codable, Equatable {
     public var rect: [Double]         // image layers: normalized [x0, y0, x1, y1]
     public var texture: String        // image layers: existing PNG ref, e.g. Signs/<id>.png
     public var signAsset: String      // image layers: optional link to a #275 sign asset
+    // Canvas-authoring metadata (#367): layers-panel state + object transform. Decoded with
+    // defaults so pre-#367 documents (which lack these keys) still round-trip.
+    public var name: String           // user label shown in the layers panel
+    public var visible: Bool          // hidden layers are skipped at export (server-side)
+    public var locked: Bool           // authoring-side edit guard
+    public var opacity: Double        // 0..1 decal alpha multiplier
+    public var rotation_deg: Double   // in-plane rotation about the rect centre
+    public var flipH: Bool
+    public var flipV: Bool
 
     public init(kind: String = "paint", layer: Int = 0, mountDepth_m: Double = 0.02,
                 strokes: [Stroke] = [], rect: [Double] = [0, 0, 1, 1],
-                texture: String = "", signAsset: String = "") {
+                texture: String = "", signAsset: String = "",
+                name: String = "", visible: Bool = true, locked: Bool = false,
+                opacity: Double = 1, rotation_deg: Double = 0,
+                flipH: Bool = false, flipV: Bool = false) {
         self.kind = kind; self.layer = layer; self.mountDepth_m = mountDepth_m
         self.strokes = strokes; self.rect = rect; self.texture = texture; self.signAsset = signAsset
+        self.name = name; self.visible = visible; self.locked = locked
+        self.opacity = opacity; self.rotation_deg = rotation_deg
+        self.flipH = flipH; self.flipV = flipV
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "paint"
+        layer = try c.decodeIfPresent(Int.self, forKey: .layer) ?? 0
+        mountDepth_m = try c.decodeIfPresent(Double.self, forKey: .mountDepth_m) ?? 0.02
+        strokes = try c.decodeIfPresent([Stroke].self, forKey: .strokes) ?? []
+        rect = try c.decodeIfPresent([Double].self, forKey: .rect) ?? [0, 0, 1, 1]
+        texture = try c.decodeIfPresent(String.self, forKey: .texture) ?? ""
+        signAsset = try c.decodeIfPresent(String.self, forKey: .signAsset) ?? ""
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        visible = try c.decodeIfPresent(Bool.self, forKey: .visible) ?? true
+        locked = try c.decodeIfPresent(Bool.self, forKey: .locked) ?? false
+        opacity = try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 1
+        rotation_deg = try c.decodeIfPresent(Double.self, forKey: .rotation_deg) ?? 0
+        flipH = try c.decodeIfPresent(Bool.self, forKey: .flipH) ?? false
+        flipV = try c.decodeIfPresent(Bool.self, forKey: .flipV) ?? false
     }
 
     public static func paint(_ strokes: [Stroke], layer: Int = 0, mountDepth_m: Double = 0.02) -> CanvasLayer {
