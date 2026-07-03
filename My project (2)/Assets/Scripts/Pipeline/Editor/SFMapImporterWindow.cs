@@ -325,6 +325,12 @@ namespace SFMap.Pipeline.Editor
             var buildingParts     = new List<Mesh>();
             Mesh combinedBuildings = null;
 
+            // Buildings-tab thumbnails (#384): the server only accepts a building's thumbnail PUT
+            // once that building's facts row exists in its DB (#318 guard) — so the chunk's sidecar
+            // must be imported before any RenderAndUploadBuildingThumbnail call below runs. This was
+            // previously never wired up, so every thumbnail PUT 404'd silently.
+            UploadBuildingsSidecar(Path.GetDirectoryName(binPath), coord);
+
             // Building Assembler (design #266): if this chunk has a classification sidecar AND a
             // template library exists, buildings that match a template fork off into individual
             // nested prefabs; everything else stays on the merged path below. Null ⇒ today's
@@ -767,6 +773,41 @@ namespace SFMap.Pipeline.Editor
 
             CreateOrReplaceAsset(combined, assetPath);
             return combined;
+        }
+
+        // ------------------------------------------------------- buildings sidecar import (#384)
+
+        // Best-effort, matching UploadBuildingThumbnail below: POST the chunk's raw
+        // chunk_CC_RR_buildings.json sidecar (same file BuildingAssembler.TryCreate reads) to the
+        // server so it upserts a facts row per building. Its field names already mirror the
+        // server's SidecarDoc/BuildingFacts models 1:1 (both mirror python/sfmap/serialize.py), so
+        // the file's bytes are POSTed as-is — no Unity-side reserialization needed. A no-op when
+        // the chunk has no sidecar (un-classified bake, same as BuildingAssembler.TryCreate).
+        static void UploadBuildingsSidecar(string chunkDir, ChunkCoord coord)
+        {
+            string src = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_buildings.json");
+            if (!File.Exists(src)) return;
+
+            try
+            {
+                byte[] body = System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(src));
+                string url = $"{ServerBaseUrl}/buildings/import-sidecar";
+                using var req = new UnityWebRequest(url, "POST");
+                req.uploadHandler = new UploadHandlerRaw(body);
+                req.downloadHandler = new DownloadHandlerBuffer();
+                req.SetRequestHeader("Content-Type", "application/json");
+                req.timeout = 5; // seconds
+                var op = req.SendWebRequest();
+                while (!op.isDone) { }
+
+                if (req.result != UnityWebRequest.Result.Success)
+                    Debug.LogWarning($"[SFMapImporter] {coord}: buildings sidecar import to {url} " +
+                                     $"failed ({req.responseCode}): {req.error}");
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[SFMapImporter] {coord}: buildings sidecar import failed: {e.Message}");
+            }
         }
 
         // ------------------------------------------------------- building thumbnails (#369)
