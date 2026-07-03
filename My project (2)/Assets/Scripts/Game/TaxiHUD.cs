@@ -51,20 +51,25 @@ namespace SFMap.Game
 
             _money.text = "$" + game.Earnings;
 
-            // Objective line reflects the current phase and live distance.
+            // Objective line is the dispatch: phase, cross-street address, and live distance.
             if (over)
                 _objective.text = "";
             else if (warmup)
                 _objective.text = "Starting run…";
             else if (game.State == TaxiGame.Phase.SeekingPickup)
-                _objective.text = ColorTag("● PICK UP FARE", 0.32f, 0.95f, 0.5f) + DistanceSuffix(game);
+                _objective.text = ColorTag("● PICK UP", 0.32f, 0.95f, 0.5f)
+                                  + AddressSuffix(game.ObjectiveAddress) + DistanceSuffix(game);
             else // Carrying
-                _objective.text = ColorTag($"▲ DROP OFF  $" + game.CurrentFare, 1f, 0.82f, 0.25f)
-                                  + DistanceSuffix(game);
+                _objective.text = ColorTag("▲ DROP OFF  $" + game.CurrentFare, 1f, 0.82f, 0.25f)
+                                  + AddressSuffix(game.ObjectiveAddress) + DistanceSuffix(game);
 
             UpdateToast(game);
             UpdateGameOver(game, over);
         }
+
+        // The cross-street dispatch, e.g. "  ·  20th St & Kansas St". Blank while it resolves.
+        static string AddressSuffix(string address)
+            => string.IsNullOrEmpty(address) ? "" : "   ·   " + address;
 
         static string DistanceSuffix(TaxiGame game)
             => game.ObjectiveDistance >= 0f ? $"   {Mathf.RoundToInt(game.ObjectiveDistance)} m" : "";
@@ -160,7 +165,7 @@ namespace SFMap.Game
             var oRt = (RectTransform)_objective.transform;
             oRt.anchorMin = oRt.anchorMax = oRt.pivot = new Vector2(1f, 1f);
             oRt.anchoredPosition = new Vector2(-24f, -140f);
-            oRt.sizeDelta = new Vector2(520f, 34f);
+            oRt.sizeDelta = new Vector2(760f, 34f); // wide enough for a full cross-street address
 
             // Payout toast, just below the objective; fades itself out.
             _toast = MakeLabel("Toast", canvasGO.transform, 30, FontStyle.Bold, TextAnchor.UpperRight);

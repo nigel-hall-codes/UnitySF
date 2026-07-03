@@ -63,6 +63,9 @@ namespace SFMap.Game
         public int CurrentFare { get; private set; }
         /// XZ distance from the cab to the active objective, or -1 when there is none.
         public float ObjectiveDistance { get; private set; } = -1f;
+        /// Cross-street address of the current objective ("20th St & Kansas St"), or null while
+        /// it is still resolving / unnamed. This is the "dispatch" the HUD reads out (#388).
+        public string ObjectiveAddress { get; private set; }
         /// Last payout, exposed so the HUD can flash a "+$/+s" toast. Cleared once shown.
         public int LastFarePaid { get; private set; }
         public float LastTimeAdded { get; private set; }
@@ -194,6 +197,7 @@ namespace SFMap.Game
             CurrentFare = 0;
             _hasObjective = false;
             ObjectiveDistance = -1f;
+            ObjectiveAddress = null;
             if (_beacon) _beacon.gameObject.SetActive(false);
         }
 
@@ -203,14 +207,17 @@ namespace SFMap.Game
             State = Phase.SeekingPickup;
             CurrentFare = 0;
             _hasObjective = false;
+            ObjectiveAddress = null;
             if (_beacon) _beacon.gameObject.SetActive(false);
         }
 
         void AcquirePickup()
         {
-            if (!TrySamplePoint(PickupMinDist, PickupMaxDist, out var p)) return; // retry next frame
+            if (!TrySampleObjective(PickupMinDist, PickupMaxDist, out var p, out var addr))
+                return; // retry next frame
             _objective = p;
             _hasObjective = true;
+            ObjectiveAddress = addr;
             ShowBeacon(p, PickupColor);
         }
 
@@ -219,14 +226,17 @@ namespace SFMap.Game
             _pickupPos = _objective;
             State = Phase.Carrying;
             _hasObjective = false;
+            ObjectiveAddress = null;
             if (_beacon) _beacon.gameObject.SetActive(false);
         }
 
         void AcquireDestination()
         {
-            if (!TrySamplePoint(DropMinDist, DropMaxDist, out var dest)) return; // retry next frame
+            if (!TrySampleObjective(DropMinDist, DropMaxDist, out var dest, out var addr))
+                return; // retry next frame
             _objective = dest;
             _hasObjective = true;
+            ObjectiveAddress = addr;
             CurrentFare = Mathf.RoundToInt(FareBase + FarePerMetre * XZDistance(_pickupPos, dest));
             ShowBeacon(dest, DropColor);
         }
@@ -247,32 +257,43 @@ namespace SFMap.Game
             BeginSeekingPickup();
         }
 
-        // --- Point sampling -------------------------------------------------------------------
+        // --- Objective sampling ---------------------------------------------------------------
 
-        /// Samples a road point in the [min,max] ring around the cab and resolves its ground
-        /// height by raycasting the Road layer (the same trick <see cref="TrafficManager"/> uses
-        /// to spot streamed-in chunks). Retries a few edges before giving up for this frame.
-        bool TrySamplePoint(float minDist, float maxDist, out Vector3 world)
+        /// Samples a dispatchable <b>intersection</b> in the [min,max] ring around the cab: a road
+        /// edge is drawn (biased toward arterials), and a junction endpoint of it (degree ≥ 3, so
+        /// it has genuine cross streets) becomes the objective. Ground height comes from raycasting
+        /// the Road layer — the same trick <see cref="TrafficManager"/> uses, which also skips
+        /// corners whose chunk hasn't streamed in yet. The corner's cross-street address is read
+        /// from <see cref="RoadNameIndex"/>. Retries a handful of edges before giving up this frame.
+        bool TrySampleObjective(float minDist, float maxDist, out Vector3 world, out string address)
         {
             world = default;
+            address = null;
             var net = RoadNetwork.Instance;
             if (net == null || !_player) return false;
 
-            for (int attempt = 0; attempt < 12; attempt++)
+            for (int attempt = 0; attempt < 16; attempt++)
             {
                 int edge = net.RandomEdgeNear(_player.position, minDist, maxDist, ClassBias);
                 if (edge < 0) continue;
 
-                var pts = net.GetEdge(edge).Points;
-                Vector2 mid = pts[pts.Length / 2]; // a point on the centreline, away from the junction
+                // Prefer a real junction endpoint so the cross-street address is meaningful; the
+                // From endpoint is the one guaranteed to sit inside the sampling ring.
+                var e = net.GetEdge(edge);
+                int node = net.Degree(e.FromNode) >= 3 ? e.FromNode
+                         : net.Degree(e.ToNode) >= 3 ? e.ToNode : -1;
+                if (node < 0) continue; // a bend or dead-end, not a dispatchable corner
 
-                var origin = new Vector3(mid.x, 1000f, mid.y);
-                if (Physics.Raycast(origin, Vector3.down, out var hit, 2000f, _roadMask,
-                                    QueryTriggerInteraction.Ignore))
-                {
-                    world = hit.point;
-                    return true;
-                }
+                Vector2 xz = net.GetNode(node);
+                var origin = new Vector3(xz.x, 1000f, xz.y);
+                if (!Physics.Raycast(origin, Vector3.down, out var hit, 2000f, _roadMask,
+                                     QueryTriggerInteraction.Ignore))
+                    continue; // that corner's chunk hasn't streamed in — try elsewhere
+
+                world = hit.point;
+                var names = RoadNameIndex.Instance;
+                address = names != null ? names.CrossStreetsNear(hit.point) : null;
+                return true;
             }
             return false;
         }
