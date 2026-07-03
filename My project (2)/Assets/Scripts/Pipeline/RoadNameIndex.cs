@@ -85,6 +85,45 @@ namespace SFMap.Pipeline
             return result;
         }
 
+        // Returns the two nearest *distinct* named roads at a point, formatted "A St & B St" —
+        // the cross streets of the corner it sits on. Falls back to the single name in range, or
+        // null if no named road is within <paramref name="radius"/>. Gives taxi fares a street
+        // address (#388). Called only when a new fare is dispatched, so the per-call dictionary
+        // is not a hot-path allocation.
+        public string CrossStreetsNear(Vector3 worldPos, float radius = 30f)
+        {
+            float px = worldPos.x, pz = worldPos.z;
+            float r2 = radius * radius;
+
+            // Closest squared distance seen per street name within the radius.
+            var nearest = new Dictionary<string, float>();
+            foreach (var seg in _segs)
+            {
+                float[] xz = seg.xz;
+                float segBest = float.MaxValue;
+                for (int i = 0; i + 3 < xz.Length; i += 2)
+                {
+                    float d2 = SegDistSq(px, pz, xz[i], xz[i + 1], xz[i + 2], xz[i + 3]);
+                    if (d2 < segBest) segBest = d2;
+                }
+                if (segBest > r2) continue;
+                if (!nearest.TryGetValue(seg.name, out float cur) || segBest < cur)
+                    nearest[seg.name] = segBest;
+            }
+
+            if (nearest.Count == 0) return null;
+
+            // Pick the two closest distinct names (a full sort is overkill for two slots).
+            string n1 = null, n2 = null;
+            float d1 = float.MaxValue, d2 = float.MaxValue;
+            foreach (var kv in nearest)
+            {
+                if (kv.Value < d1) { n2 = n1; d2 = d1; n1 = kv.Key; d1 = kv.Value; }
+                else if (kv.Value < d2) { n2 = kv.Key; d2 = kv.Value; }
+            }
+            return n2 == null ? n1 : $"{n1} & {n2}";
+        }
+
         static float SegDistSq(float px, float pz, float ax, float az, float bx, float bz)
         {
             float dx = bx - ax, dz = bz - az;
