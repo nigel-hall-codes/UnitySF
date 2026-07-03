@@ -3,7 +3,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Networking;
+using UnityEngine.SceneManagement;
 using Debug = UnityEngine.Debug;
 using SFMap.Pipeline;
 using SFMap.Pipeline.Buildings;
@@ -73,6 +76,12 @@ namespace SFMap.Pipeline.Editor
         // The python placement footprint (sfmap/geometry/parking.py) is scaled to
         // match, so spacing stays dense without overlap.
         const float ParkedCarScale = 0.5f;
+
+        // Buildings-tab thumbnails (#369): base URL of the local dev server the
+        // Unity importer PUTs rendered thumbnails to. Matches the default used by
+        // ios/FacadeCanvas/Tests/FacadeCanvasTests/FacadeCanvasTests.swift.
+        const string ServerBaseUrl = "http://localhost:8000";
+        const int    ThumbSize     = 512;
 
         // --------------------------------------------------------------- timing
         // Stage 2 had no instrumentation (#260): it logged only a chunk count, so
@@ -370,6 +379,13 @@ namespace SFMap.Pipeline.Editor
                             intersectionMeshes.Add(mesh);
                             break;
                         case MeshType.Building:
+                            // Buildings-tab thumbnails (#369): render + upload a snapshot for every
+                            // building — templated or merged-fallback — right here, while its raw
+                            // mesh (world-space per the comment above CombineParts) and bounds are
+                            // still available per-building, before it forks below or gets merged.
+                            // Best-effort: never aborts the import (see the try/catch inside).
+                            RenderAndUploadBuildingThumbnail(osmId, mesh);
+
                             if (assembler != null &&
                                 assembler.TryMatch(osmId, out var bFacts, out var bTpl))
                             {
@@ -751,6 +767,126 @@ namespace SFMap.Pipeline.Editor
 
             CreateOrReplaceAsset(combined, assetPath);
             return combined;
+        }
+
+        // ------------------------------------------------------- building thumbnails (#369)
+
+        // Best-effort: render an offscreen snapshot of this building and PUT it to the
+        // server. Any failure (server not running, non-2xx response, render hiccup) is
+        // logged as a warning and swallowed — most local bakes run without the server up,
+        // and a missing thumbnail is exactly the placeholder-swatch fallback the iOS app
+        // and server already handle correctly.
+        static void RenderAndUploadBuildingThumbnail(long osmId, Mesh mesh)
+        {
+            try
+            {
+                byte[] jpg = RenderBuildingThumbnail(mesh, osmId);
+                if (jpg == null) return;
+                UploadBuildingThumbnail(osmId, jpg);
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[SFMapImporter] Building {osmId}: thumbnail render/upload failed: {e.Message}");
+            }
+        }
+
+        // Spawns a throwaway camera + GameObject, both moved into an isolated Editor preview
+        // scene (review #369: a plain cullingMask isn't enough — the import scene already
+        // contains previously-imported chunks' geometry at real world coordinates, so a mask
+        // alone can't stop the camera from rendering into/through neighboring buildings; a
+        // preview scene guarantees the camera sees only what we put in it, regardless of what
+        // else exists in the map). Renders `mesh` (already world-space, per CombineParts'
+        // comment) from a 3/4 angle framing its bounds, reads the result back into a Texture2D,
+        // and JPEG-encodes it. Closing the preview scene tears down everything spawned into it
+        // — nothing leaks into the chunk prefab or the real scene.
+        static byte[] RenderBuildingThumbnail(Mesh mesh, long osmId)
+        {
+            Bounds bounds = mesh.bounds;
+            if (bounds.size.sqrMagnitude < 1e-6f) return null;
+
+            var previewScene   = default(Scene);
+            bool previewOpen   = false;
+            Material   mat     = null;
+            RenderTexture rt   = null;
+            Texture2D  tex     = null;
+            RenderTexture prevActive = RenderTexture.active;
+            try
+            {
+                previewScene = EditorSceneManager.NewPreviewScene();
+                previewOpen  = true;
+
+                var meshGo = new GameObject($"ThumbMesh_{osmId}") { hideFlags = HideFlags.HideAndDontSave };
+                meshGo.AddComponent<MeshFilter>().sharedMesh = mesh;
+                mat = new Material(Shader.Find("Unlit/Color"))
+                {
+                    color = BuildingPalette[(int)(Math.Abs(osmId) % BuildingPalette.Length)],
+                };
+                meshGo.AddComponent<MeshRenderer>().sharedMaterial = mat;
+                SceneManager.MoveGameObjectToScene(meshGo, previewScene);
+
+                var camGo = new GameObject($"ThumbCam_{osmId}") { hideFlags = HideFlags.HideAndDontSave };
+                var cam = camGo.AddComponent<Camera>();
+                cam.scene           = previewScene; // renders ONLY this preview scene's contents
+                cam.clearFlags      = CameraClearFlags.SolidColor;
+                cam.backgroundColor = new Color(0.82f, 0.82f, 0.82f, 1f);
+                cam.fieldOfView     = 40f;
+                cam.nearClipPlane   = 0.05f;
+                SceneManager.MoveGameObjectToScene(camGo, previewScene);
+
+                // Frame the bounds from a 3/4 angle: back off far enough along that
+                // direction that the bounding sphere fits inside the vertical FOV.
+                float radius   = Mathf.Max(bounds.extents.magnitude, 0.5f);
+                float distance = radius / Mathf.Sin(cam.fieldOfView * 0.5f * Mathf.Deg2Rad) * 1.2f;
+                Vector3 dir    = new Vector3(1f, 0.6f, 1f).normalized;
+                camGo.transform.position = bounds.center + dir * distance;
+                camGo.transform.LookAt(bounds.center, Vector3.up);
+                cam.farClipPlane = distance + radius * 2f + 10f;
+
+                rt = new RenderTexture(ThumbSize, ThumbSize, 24, RenderTextureFormat.ARGB32);
+                cam.targetTexture = rt;
+                cam.Render();
+
+                RenderTexture.active = rt;
+                tex = new Texture2D(ThumbSize, ThumbSize, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, ThumbSize, ThumbSize), 0, 0);
+                tex.Apply();
+
+                return ImageConversion.EncodeToJPG(tex, 85);
+            }
+            finally
+            {
+                // Restore whatever was active before we touched it — never hardcode null,
+                // or we silently break whatever rendering/Editor GUI runs next this frame.
+                RenderTexture.active = prevActive;
+                if (tex != null) DestroyImmediate(tex);
+                if (rt != null)
+                {
+                    rt.Release();
+                    DestroyImmediate(rt);
+                }
+                if (mat != null) DestroyImmediate(mat);
+                // Closing the preview scene destroys every GameObject moved into it
+                // (meshGo, camGo) — no separate DestroyImmediate needed for those.
+                if (previewOpen) EditorSceneManager.ClosePreviewScene(previewScene);
+            }
+        }
+
+        // Blocking PUT (Editor tooling only): RunImport's loop is synchronous, so we spin on
+        // isDone rather than pulling async/await or a coroutine into the rest of the flow.
+        // `timeout` bounds the spin: a stalled (not merely refused) server would otherwise hang
+        // the Editor UI thread indefinitely with no way to recover short of force-killing Unity.
+        static void UploadBuildingThumbnail(long osmId, byte[] jpgBytes)
+        {
+            string url = $"{ServerBaseUrl}/buildings/{osmId}/thumb";
+            using var req = UnityWebRequest.Put(url, jpgBytes);
+            req.SetRequestHeader("Content-Type", "image/jpeg");
+            req.timeout = 5; // seconds
+            var op = req.SendWebRequest();
+            while (!op.isDone) { }
+
+            if (req.result != UnityWebRequest.Result.Success)
+                Debug.LogWarning($"[SFMapImporter] Building {osmId}: thumbnail upload to {url} " +
+                                 $"failed ({req.responseCode}): {req.error}");
         }
 
         static Vector3[] ReadVec3Array(BinaryReader r, int count)
