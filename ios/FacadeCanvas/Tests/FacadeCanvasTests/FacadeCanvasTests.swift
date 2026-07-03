@@ -71,6 +71,172 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(vm.imageLayers[0].signAsset, "sign_lucca_deli")
     }
 
+    // MARK: - Building Customization Canvas (#367)
+
+    func testCanvasLayerMetadataRoundTrips() throws {
+        var layer = CanvasLayer.image(rect: [0.1, 0.2, 0.3, 0.4], texture: "Signs/x.png")
+        layer.name = "Joe's Coffee Sign"; layer.visible = false; layer.locked = true
+        layer.opacity = 0.5; layer.rotation_deg = 12.5; layer.flipH = true
+
+        let data = try JSONEncoder().encode(layer)
+        let decoded = try JSONDecoder().decode(CanvasLayer.self, from: data)
+        XCTAssertEqual(decoded, layer)
+    }
+
+    func testCanvasLayerDecodesPre367DocumentWithDefaults() throws {
+        // The pre-#367 wire shape (no metadata keys) must decode with authoring defaults.
+        let json = Data("""
+        {"kind":"image","layer":1,"mountDepth_m":0.03,"strokes":[],
+         "rect":[0.4,0.6,0.6,0.82],"texture":"Signs/old.png","signAsset":"old"}
+        """.utf8)
+        let layer = try JSONDecoder().decode(CanvasLayer.self, from: json)
+        XCTAssertTrue(layer.visible)
+        XCTAssertFalse(layer.locked)
+        XCTAssertEqual(layer.opacity, 1)
+        XCTAssertEqual(layer.rotation_deg, 0)
+        XCTAssertEqual(layer.name, "")
+    }
+
+    @MainActor
+    func testBuildCanvasCarriesLayerMetadata() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, client: client)
+        vm.imageLayers = [.init(rect: [0.1, 0.1, 0.3, 0.3], texture: "Signs/a.png",
+                                name: "Mural", visible: false, locked: true,
+                                opacity: 0.7, rotationDeg: -30, flipH: true, flipV: false)]
+        let layer = vm.buildCanvas().layers[0]
+        XCTAssertEqual(layer.name, "Mural")
+        XCTAssertFalse(layer.visible)
+        XCTAssertTrue(layer.locked)
+        XCTAssertEqual(layer.opacity, 0.7)
+        XCTAssertEqual(layer.rotation_deg, -30)
+        XCTAssertTrue(layer.flipH)
+    }
+
+    @MainActor
+    func testUndoRedoRestoresLayerSnapshots() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, client: client)
+        let sign = SignDef(signId: "s1", png: "Signs/s1.png", thumb: "", provider: "upload",
+                           version: 1, businessType: "", neighborhood: "", text: "S1",
+                           aspectRatio: "1:1", stylePreset: "")
+        XCTAssertFalse(vm.canUndo)
+
+        vm.placeSign(sign)
+        XCTAssertEqual(vm.imageLayers.count, 1)
+        XCTAssertTrue(vm.canUndo)
+        XCTAssertTrue(vm.isDirty)
+
+        vm.undo()
+        XCTAssertEqual(vm.imageLayers.count, 0)
+        XCTAssertNil(vm.selectedLayerId, "selection must not dangle after undo")
+        XCTAssertTrue(vm.canRedo)
+
+        vm.redo()
+        XCTAssertEqual(vm.imageLayers.count, 1)
+        XCTAssertEqual(vm.imageLayers[0].signAsset, "s1")
+    }
+
+    @MainActor
+    func testNewEditClearsRedoStack() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, client: client)
+        let sign = SignDef(signId: "s1", png: "Signs/s1.png", thumb: "", provider: "upload",
+                           version: 1, businessType: "", neighborhood: "", text: "",
+                           aspectRatio: "1:1", stylePreset: "")
+        vm.placeSign(sign)
+        vm.undo()
+        XCTAssertTrue(vm.canRedo)
+        vm.placeSign(sign)                    // divergent edit invalidates the redo branch
+        XCTAssertFalse(vm.canRedo)
+    }
+
+    @MainActor
+    func testLockedLayerRefusesEditsButTogglesVisibility() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, client: client)
+        vm.imageLayers = [.init(rect: [0.4, 0.4, 0.6, 0.6], texture: "Signs/a.png", locked: true)]
+        let id = vm.imageLayers[0].id
+        vm.selectedLayerId = id
+
+        vm.updateSelected { $0.rect = [0, 0, 1, 1] }
+        XCTAssertEqual(vm.imageLayers[0].rect, [0.4, 0.4, 0.6, 0.6], "locked layer must not move")
+
+        vm.toggleVisible(id: id)               // the eye works regardless of the lock
+        XCTAssertFalse(vm.imageLayers[0].visible)
+    }
+
+    @MainActor
+    func testDuplicateOffsetsCopyAndSelectsIt() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, client: client)
+        vm.imageLayers = [.init(rect: [0.4, 0.4, 0.6, 0.6], texture: "Signs/a.png",
+                                signAsset: "a", name: "Sign")]
+        vm.duplicateLayer(id: vm.imageLayers[0].id)
+
+        XCTAssertEqual(vm.imageLayers.count, 2)
+        let copy = vm.imageLayers[1]
+        XCTAssertEqual(copy.name, "Sign copy")
+        XCTAssertNotEqual(copy.rect, vm.imageLayers[0].rect, "copy must be visibly offset")
+        XCTAssertEqual(copy.rect[2] - copy.rect[0], 0.2, accuracy: 0.0001, "size preserved")
+        XCTAssertEqual(vm.selectedLayerId, copy.id)
+    }
+
+    @MainActor
+    func testAlignSelectedPreservesWidth() {
+        let client = ServerClient(baseURL: URL(string: "http://localhost:8000")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, client: client)
+        vm.imageLayers = [.init(rect: [0.4, 0.4, 0.6, 0.6], texture: "Signs/a.png")]
+        vm.selectedLayerId = vm.imageLayers[0].id
+
+        vm.alignSelected(.left)
+        XCTAssertEqual(vm.imageLayers[0].rect[0], 0, accuracy: 0.0001)
+        XCTAssertEqual(vm.imageLayers[0].rect[2], 0.2, accuracy: 0.0001)
+
+        vm.alignSelected(.right)
+        XCTAssertEqual(vm.imageLayers[0].rect[2], 1, accuracy: 0.0001)
+
+        vm.alignSelected(.center)
+        XCTAssertEqual(vm.imageLayers[0].rect[0], 0.4, accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testSwitchFacadeStashesAndRestoresDrafts() async {
+        // localhost with nothing listening: the unvisited facade's load fails fast and
+        // leaves an empty canvas, which is exactly the offline-draft path under test.
+        let client = ServerClient(baseURL: URL(string: "http://127.0.0.1:1")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, facade: "Front", client: client)
+        vm.imageLayers = [.init(rect: [0.1, 0.1, 0.3, 0.3], texture: "Signs/front.png")]
+        vm.paintStrokes = [Stroke(points: [[0, 0], [1, 1]], color: "#123456", width: 0.02)]
+
+        await vm.switchFacade(to: "Left")
+        XCTAssertEqual(vm.facade, "Left")
+        XCTAssertTrue(vm.imageLayers.isEmpty)
+
+        vm.imageLayers = [.init(rect: [0.5, 0.5, 0.7, 0.7], texture: "Signs/left.png")]
+
+        await vm.switchFacade(to: "Front")
+        XCTAssertEqual(vm.imageLayers[0].texture, "Signs/front.png")
+        XCTAssertEqual(vm.paintStrokes.count, 1, "stash must keep the paint strokes")
+
+        await vm.switchFacade(to: "Left")
+        XCTAssertEqual(vm.imageLayers[0].texture, "Signs/left.png")
+    }
+
+    @MainActor
+    func testHasUnsavedChangesSeesStashedDirtyFacades() async {
+        let client = ServerClient(baseURL: URL(string: "http://127.0.0.1:1")!)
+        let vm = FacadeCanvasViewModel(osmId: 9, facade: "Front", client: client)
+        XCTAssertFalse(vm.hasUnsavedChanges)
+
+        let sign = SignDef(signId: "s1", png: "Signs/s1.png", thumb: "", provider: "upload",
+                           version: 1, businessType: "", neighborhood: "", text: "",
+                           aspectRatio: "1:1", stylePreset: "")
+        vm.placeSign(sign)                      // dirty on Front
+        await vm.switchFacade(to: "Left")       // Front stashed dirty; Left is clean
+        XCTAssertTrue(vm.hasUnsavedChanges, "stashed dirty facade must trip the Back guard")
+    }
+
     // MARK: - Buildings tab MVP (#365)
 
     func testDisplayAddressAndPrimaryFacade() {

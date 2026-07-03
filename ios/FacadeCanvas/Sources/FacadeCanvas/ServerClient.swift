@@ -87,6 +87,23 @@ public actor ServerClient {
         return try decoder.decode(SignDef.self, from: data)
     }
 
+    // GET /signs — every stored sign asset (AI-generated and uploaded); the canvas asset
+    // library's data source (#367).
+    public func listSigns() async throws -> [SignDef] {
+        try await get("signs")
+    }
+
+    // GET /signs/{id}/thumb — sign preview image; nil on 404 (#367 asset cards + layer rows).
+    public func fetchSignThumb(signId: String) async throws -> Data? {
+        var req = URLRequest(url: baseURL.appendingPathComponent("signs/\(signId)/thumb"))
+        req.httpMethod = "GET"
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { return nil }
+        if http.statusCode == 404 { return nil }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+        return data
+    }
+
     // GET /neighborhoods — filter-dropdown vocabulary (#365).
     public func listNeighborhoods() async throws -> [NeighborhoodInfo] {
         try await get("neighborhoods")

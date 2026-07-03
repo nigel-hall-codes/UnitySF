@@ -52,22 +52,11 @@ public struct BuildingBrowserView: View {
         // source of truth for whether the save actually landed.
         .fullScreenCover(item: $customizeTarget,
                          onDismiss: { Task { await vm.refreshCustomized() } }) { target in
-            NavigationStack {
-                FacadeCanvasView(viewModel: FacadeCanvasViewModel(
-                    osmId: target.building.osm_id,
-                    facade: target.building.primaryFacadeName,
-                    footprintHash: target.building.footprint_hash,
-                    client: client,
-                    draftStore: vm.draftStore
-                ))
-                .navigationTitle(target.building.displayAddress)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Done") { customizeTarget = nil }
-                    }
-                }
-            }
+            // The Building Customization Canvas (#367): five-region editor with its own
+            // toolbar (Back carries the unsaved-changes guard), replacing the #365 MVP surface.
+            BuildingCanvasView(building: target.building, client: client,
+                               draftStore: vm.draftStore,
+                               onClose: { customizeTarget = nil })
         }
         .confirmationDialog("Reset to Generated?",
                             isPresented: $showResetConfirm,

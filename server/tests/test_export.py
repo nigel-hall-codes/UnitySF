@@ -249,3 +249,46 @@ def test_export_scope_building_filters_canvas_decals_too(client, tmp_path):
     assert r.status_code == 200
     assert (out / "Overrides" / "3003.override.json").exists()
     assert not (out / "Overrides" / "4004.override.json").exists()
+
+
+# --- #367 canvas layer metadata at export ------------------------------------
+
+def test_export_skips_hidden_layers(client, tmp_path):
+    client.post("/canvas", json={
+        "osm_id": 5005, "facade": "Front", "footprint_hash": "h5",
+        "layers": [
+            {"kind": "paint", "layer": 0, "visible": False,
+             "strokes": [{"points": [[0.1, 0.1], [0.9, 0.9]], "color": "#ff0000", "width": 0.02}]},
+            {"kind": "image", "layer": 1, "rect": [0.4, 0.6, 0.6, 0.8],
+             "texture": "Signs/hidden.png", "visible": False},
+            {"kind": "image", "layer": 2, "rect": [0.1, 0.1, 0.3, 0.3],
+             "texture": "Signs/shown.png"},
+        ],
+    })
+    out = tmp_path / "drop_hidden"
+    r = client.post("/export/unity", json={"outDir": str(out)})
+    assert r.status_code == 200
+    ov = json.loads((out / "Overrides" / "5005.override.json").read_text(encoding="utf-8"))
+    textures = [d["texture"] for d in ov["facadeDecals"]]
+    assert textures == ["Signs/shown.png"]          # hidden image + hidden paint both skipped
+    assert not (out / "Signs" / "paint_5005_front.png").exists()
+
+
+def test_export_emits_transform_metadata_only_when_non_default(client, tmp_path):
+    client.post("/canvas", json={
+        "osm_id": 6006, "facade": "Front", "footprint_hash": "h6",
+        "layers": [
+            {"kind": "image", "layer": 1, "rect": [0.4, 0.6, 0.6, 0.8],
+             "texture": "Signs/rotated.png", "opacity": 0.5, "rotation_deg": 15.0, "flipH": True},
+            {"kind": "image", "layer": 2, "rect": [0.1, 0.1, 0.3, 0.3],
+             "texture": "Signs/plain.png"},
+        ],
+    })
+    out = tmp_path / "drop_transform"
+    client.post("/export/unity", json={"outDir": str(out)})
+    ov = json.loads((out / "Overrides" / "6006.override.json").read_text(encoding="utf-8"))
+    rotated = next(d for d in ov["facadeDecals"] if d["texture"] == "Signs/rotated.png")
+    plain = next(d for d in ov["facadeDecals"] if d["texture"] == "Signs/plain.png")
+    assert rotated["opacity"] == 0.5 and rotated["rotation_deg"] == 15.0 and rotated["flipH"] is True
+    # Pre-#367 decal shape stays byte-identical for untouched layers.
+    assert all(k not in plain for k in ("opacity", "rotation_deg", "flipH", "flipV"))

@@ -53,6 +53,28 @@ def test_canvas_crud_roundtrip(client):
     assert client.get("/canvas/65307880/Back").status_code == 404
 
 
+# --- layer metadata (#367 Building Customization Canvas) --------------------
+
+def test_canvas_layer_metadata_roundtrips(client):
+    doc = _canvas()
+    doc["layers"][1].update({"name": "Joe's Coffee Sign", "visible": False, "locked": True,
+                             "opacity": 0.5, "rotation_deg": 12.5, "flipH": True})
+    assert client.post("/canvas", json=doc).status_code == 200
+    layer = client.get("/canvas/65307880/Front").json()["layers"][1]
+    assert layer["name"] == "Joe's Coffee Sign"
+    assert layer["visible"] is False and layer["locked"] is True
+    assert layer["opacity"] == 0.5 and layer["rotation_deg"] == 12.5
+    assert layer["flipH"] is True and layer["flipV"] is False
+
+
+def test_canvas_pre367_document_gets_metadata_defaults(client):
+    # A document without the #367 keys (the pre-#367 wire shape) must load with defaults.
+    assert client.post("/canvas", json=_canvas()).status_code == 200
+    layer = client.get("/canvas/65307880/Front").json()["layers"][1]
+    assert layer["visible"] is True and layer["locked"] is False
+    assert layer["opacity"] == 1.0 and layer["rotation_deg"] == 0.0
+
+
 # --- customized index + reset (#365) ----------------------------------------
 
 def test_customized_index_lists_distinct_osm_ids(client):

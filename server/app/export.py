@@ -182,7 +182,8 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None, scope: 
         fp_hash = ""
         for c in canvases:
             fp_hash = fp_hash or c.footprint_hash
-            paint_layers = [layer for layer in c.layers if layer.kind == "paint"]
+            # Hidden layers (#367 layers panel) never cross into Unity.
+            paint_layers = [layer for layer in c.layers if layer.kind == "paint" and layer.visible]
             strokes = [s for layer in paint_layers for s in layer.strokes]
             png = flatten_paint(strokes)
             if png is not None:
@@ -201,7 +202,7 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None, scope: 
             # Placed images / AI signs stay discrete decals (reusing existing sign PNGs). An
             # image layer identified only by signAsset resolves to that sign's PNG (#275).
             for layer in c.layers:
-                if layer.kind != "image":
+                if layer.kind != "image" or not layer.visible:
                     continue
                 tex = layer.texture or (f"Signs/{_safe(layer.signAsset)}.png" if layer.signAsset else "")
                 if not tex:
@@ -210,6 +211,16 @@ def export_unity(store: Store, out_dir: str, now_iso: str | None = None, scope: 
                      "texture": tex, "mountDepth_m": layer.mountDepth_m}
                 if layer.signAsset:
                     d["signAsset"] = layer.signAsset
+                # #367 transform metadata: emitted only when non-default so pre-#367 override
+                # files stay byte-identical; the Unity importer ignores keys it doesn't know.
+                if layer.opacity != 1.0:
+                    d["opacity"] = layer.opacity
+                if layer.rotation_deg != 0.0:
+                    d["rotation_deg"] = layer.rotation_deg
+                if layer.flipH:
+                    d["flipH"] = True
+                if layer.flipV:
+                    d["flipV"] = True
                 decals.append(d)
 
         if not decals:
