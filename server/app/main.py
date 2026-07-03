@@ -268,6 +268,18 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         S().upsert_canvas(canvas)
         return canvas
 
+    # The Buildings tab's 'Customized' badge index (#365): one cheap call instead of a
+    # GET /canvas/{osm_id} per grid card.
+    @app.get("/canvas")
+    def customized_buildings() -> List[int]:
+        return S().list_customized_osm_ids()
+
+    # 'Reset to Generated' (#365): drop every authored canvas so the building renders
+    # from its template again on the next export. Idempotent — deleting 0 is fine.
+    @app.delete("/canvas/{osm_id}")
+    def reset_building(osm_id: int) -> dict:
+        return {"osm_id": osm_id, "deleted": S().delete_canvases_for(osm_id)}
+
     @app.get("/canvas/{osm_id}")
     def list_building_canvases(osm_id: int) -> List[FacadeCanvas]:
         return S().list_canvases_for(osm_id)
@@ -322,6 +334,23 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
     @app.get("/signs")
     def list_signs() -> List[SignDef]:
         return S().list_signs()
+
+    # User-supplied image as a reusable sign asset (#365 canvas Image/Text tools). Same
+    # stored shape as AI generation (provider "upload") so placement, listing and the
+    # Unity export treat it identically. Thumb is the full image — no server-side resizer.
+    @app.post("/signs/upload")
+    async def upload_sign(file: UploadFile, name: str = "") -> SignDef:
+        data = await file.read()
+        if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+            raise HTTPException(status_code=415, detail="sign upload must be a PNG")
+        base = slug(name or (file.filename or "").rsplit(".", 1)[0])
+        sign_id = f"sign_{base}"
+        S().save_sign_png(sign_id, data, data)
+        sign = SignDef(signId=sign_id, png=f"Signs/{sign_id}.png",
+                       thumb=f"Signs/{sign_id}.thumb.png", provider="upload",
+                       version=1, text=name)
+        S().upsert_sign(sign)
+        return sign
 
     @app.get("/ai/signs/providers")
     def sign_providers() -> dict:

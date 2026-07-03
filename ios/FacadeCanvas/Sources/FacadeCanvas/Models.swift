@@ -86,6 +86,20 @@ public struct SignDef: Codable, Equatable {
     public var stylePreset: String
 }
 
+// --- Read vocabularies (#365 — GET /neighborhoods feeds the filter dropdown) ---
+
+/// One entry from GET /neighborhoods: a neighborhood that has an authored palette.
+public struct NeighborhoodInfo: Codable, Equatable, Identifiable {
+    public var neighborhood: String
+    public var palette: Bool
+
+    public var id: String { neighborhood }
+
+    public init(neighborhood: String = "", palette: Bool = false) {
+        self.neighborhood = neighborhood; self.palette = palette
+    }
+}
+
 // --- Building browser (#301 — GET /buildings, GET /buildings/{osm_id}) ---
 
 /// A ranked street facade edge from the bake sidecar; sorted by score descending.
@@ -139,6 +153,14 @@ public struct BuildingFacts: Codable, Equatable, Identifiable, Hashable {
         self.facade_height_m = facade_height_m; self.street_facades = street_facades
         self.footprint_hash = footprint_hash
     }
+
+    /// Card/inspector title (#365). The bake sidecar carries no street address, so the
+    /// stable OSM id stands in until address data exists server-side.
+    public var displayAddress: String { "OSM \(osm_id)" }
+
+    /// The facade the Customize button opens (#365): the primary street facade's shared
+    /// server slot when one exists, else Front.
+    public var primaryFacadeName: String { street_facades.isEmpty ? "Front" : "Street" }
 
     /// All addressable facade names in display order: street facades (ranked) then cardinal faces.
     public var allFacadeNames: [String] {

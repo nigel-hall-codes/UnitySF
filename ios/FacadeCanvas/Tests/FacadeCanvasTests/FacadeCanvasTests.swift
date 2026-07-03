@@ -71,6 +71,25 @@ final class FacadeCanvasTests: XCTestCase {
         XCTAssertEqual(vm.imageLayers[0].signAsset, "sign_lucca_deli")
     }
 
+    // MARK: - Buildings tab MVP (#365)
+
+    func testDisplayAddressAndPrimaryFacade() {
+        let plain = BuildingFacts(osm_id: 42)
+        XCTAssertEqual(plain.displayAddress, "OSM 42")          // no address data server-side yet
+        XCTAssertEqual(plain.primaryFacadeName, "Front")
+        let street = BuildingFacts(osm_id: 7, street_facades: [
+            StreetFacade(edge_index: 0, bearing_deg: 90, street_osm_id: 1, score: 0.9, edge: []),
+        ])
+        XCTAssertEqual(street.primaryFacadeName, "Street")      // shared primary street slot
+    }
+
+    func testNeighborhoodInfoDecodesServerShape() throws {
+        let json = Data(#"[{"neighborhood":"Mission","palette":true}]"#.utf8)
+        let infos = try JSONDecoder().decode([NeighborhoodInfo].self, from: json)
+        XCTAssertEqual(infos.first?.neighborhood, "Mission")
+        XCTAssertEqual(infos.first?.palette, true)
+    }
+
     // MARK: - PartGlbGenerator (#327: traced outline -> flat polygon mesh)
 
     // Parses just the glTF JSON chunk out of the binary GLB container so tests can assert

@@ -44,6 +44,32 @@ def test_local_stub_is_deterministic():
     assert a == b and a[0].startswith(_PNG_SIG) and a[1].startswith(_PNG_SIG)
 
 
+# --- endpoint: upload (#365 canvas Image/Text tools) ------------------------
+
+def test_sign_upload_stores_and_serves(client):
+    png = encode_solid_png(4, 4, (1, 2, 3))
+    r = client.post("/signs/upload", params={"name": "My Logo"},
+                    files={"file": ("logo.png", png, "image/png")})
+    assert r.status_code == 200
+    sign = r.json()
+    assert sign["signId"] == "sign_my_logo" and sign["provider"] == "upload"
+    assert client.get("/signs/sign_my_logo/png").content == png
+    assert client.get("/signs/sign_my_logo/thumb").content == png    # thumb = full image
+    assert any(s["signId"] == "sign_my_logo" for s in client.get("/signs").json())
+
+
+def test_sign_upload_name_defaults_to_filename(client):
+    png = encode_solid_png(2, 2, (9, 9, 9))
+    r = client.post("/signs/upload", files={"file": ("Cafe Menu.png", png, "image/png")})
+    assert r.json()["signId"] == "sign_cafe_menu"
+
+
+def test_sign_upload_rejects_non_png(client):
+    r = client.post("/signs/upload",
+                    files={"file": ("x.jpg", b"\xff\xd8\xff\x00", "image/jpeg")})
+    assert r.status_code == 415
+
+
 # --- endpoint: generate, store, list ---------------------------------------
 
 def test_generate_stores_reusable_png_and_metadata(client, store):

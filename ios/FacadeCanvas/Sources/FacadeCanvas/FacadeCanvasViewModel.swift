@@ -121,6 +121,17 @@ public final class FacadeCanvasViewModel: ObservableObject {
         }
     }
 
+    /// Store a user-supplied PNG (the Image and Text tools, #365) as a reusable sign asset.
+    /// Returns the stored record for `placeSign`, or nil (with status set) on failure.
+    public func uploadImageAsset(name: String, png: Data) async -> SignDef? {
+        do {
+            return try await client.uploadSignImage(name: name, png: png)
+        } catch {
+            status = .failed(String(describing: error))
+            return nil
+        }
+    }
+
     /// Place a generated/existing sign as an image layer (a centred default rect the user can move).
     public func placeSign(_ sign: SignDef, rect: [Double] = [0.4, 0.55, 0.6, 0.75]) {
         imageLayers.append(.init(rect: rect, texture: sign.png, signAsset: sign.signId))

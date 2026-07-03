@@ -53,6 +53,26 @@ def test_canvas_crud_roundtrip(client):
     assert client.get("/canvas/65307880/Back").status_code == 404
 
 
+# --- customized index + reset (#365) ----------------------------------------
+
+def test_customized_index_lists_distinct_osm_ids(client):
+    assert client.get("/canvas").json() == []
+    client.post("/canvas", json=_canvas(osm_id=1, facade="Front"))
+    client.post("/canvas", json=_canvas(osm_id=1, facade="Back"))
+    client.post("/canvas", json=_canvas(osm_id=12))   # prefix of no other id's key
+    assert client.get("/canvas").json() == [1, 12]
+
+
+def test_reset_deletes_all_canvases_for_building_only(client):
+    client.post("/canvas", json=_canvas(osm_id=1, facade="Front"))
+    client.post("/canvas", json=_canvas(osm_id=1, facade="Back"))
+    client.post("/canvas", json=_canvas(osm_id=12))
+    assert client.delete("/canvas/1").json() == {"osm_id": 1, "deleted": 2}
+    assert client.get("/canvas/1/Front").status_code == 404
+    assert client.get("/canvas").json() == [12]        # osm_id 12 untouched by "1:%"
+    assert client.delete("/canvas/1").json()["deleted"] == 0   # idempotent
+
+
 # --- backdrop upload/serve (#317) ------------------------------------------
 
 def test_backdrop_put_get_roundtrip_png(client):

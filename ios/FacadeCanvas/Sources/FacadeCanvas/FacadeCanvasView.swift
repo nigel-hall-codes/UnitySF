@@ -3,17 +3,19 @@ import SwiftUI
 import PencilKit
 import PhotosUI
 
-/// The facade canvas authoring surface (#282, mode inside the #276 client): a Pencil paint layer
-/// plus draggable placed images / AI signs over the unit square of one building facade, saved to
-/// the server. Never touches AI or Unity directly — the view model's `ServerClient` is the sole egress.
+/// The Building Canvas (#282, MVP surface per #365): exactly five tools — Brush, Image,
+/// AI Sign, Text, Erase — over one facade's unit square, plus Save. No procedural tools,
+/// no region tools, no template concepts. Never touches AI or Unity directly — the view
+/// model's `ServerClient` is the sole egress.
 public struct FacadeCanvasView: View {
     @StateObject private var vm: FacadeCanvasViewModel
     @State private var drawing = PKDrawing()
     @State private var canvasSize: CGSize = .zero
+    @State private var tool: CanvasTool = .brush
+    @State private var brushColor: Color = .black
     @State private var showSignSheet = false
-    @State private var showPaletteSheet = false
-    @State private var showLayerPanel = false
-    @State private var showBackdropPicker = false
+    @State private var showImagePicker = false
+    @State private var showTextSheet = false
 
     public init(viewModel: FacadeCanvasViewModel) {
         _vm = StateObject(wrappedValue: viewModel)
@@ -21,15 +23,8 @@ public struct FacadeCanvasView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            header
-            HStack(spacing: 0) {
-                canvas
-                if showLayerPanel {
-                    layerPanel
-                        .frame(width: 200)
-                        .transition(.move(edge: .trailing))
-                }
-            }
+            toolRail
+            canvas
             statusBar
         }
         .sheet(isPresented: $showSignSheet) {
@@ -40,48 +35,77 @@ public struct FacadeCanvasView: View {
                 }
             }
         }
-        .sheet(isPresented: $showPaletteSheet) {
-            PaletteAuthorSheet { palette in
-                Task { _ = await vm.savePalette(palette) }
-                showPaletteSheet = false
+        .sheet(isPresented: $showImagePicker) {
+            ImagePickerView { png in
+                Task { await placeUploadedImage(png, name: "upload_\(shortId())") }
             }
         }
-        .sheet(isPresented: $showBackdropPicker) {
-            BackdropPickerView { data in
-                Task { await vm.uploadBackdrop(data) }
+        .sheet(isPresented: $showTextSheet) {
+            TextToolSheet { text, color in
+                showTextSheet = false
+                guard let png = Self.renderTextPNG(text, color: UIColor(color)) else { return }
+                Task { await placeUploadedImage(png, name: text) }
             }
         }
         .task {
             await vm.load()
             await vm.loadBackdrop()
         }
-        .animation(.easeInOut(duration: 0.2), value: showLayerPanel)
     }
 
-    private var header: some View {
-        HStack {
-            Text("Building \(vm.osmId)").font(.headline)
-            Picker("Facade", selection: $vm.facade) {
-                ForEach(["Front", "Back", "Left", "Right", "Street"], id: \.self) { Text($0) }
+    // MARK: - Tool rail (the five MVP tools + Save)
+
+    private enum CanvasTool { case brush, erase }
+
+    private var pkTool: PKTool {
+        switch tool {
+        case .brush: return PKInkingTool(.pen, color: UIColor(brushColor), width: 8)
+        case .erase: return PKEraserTool(.bitmap)
+        }
+    }
+
+    private var toolRail: some View {
+        HStack(spacing: 8) {
+            toolButton("Brush", systemImage: "paintbrush.pointed", isActive: tool == .brush) {
+                tool = .brush
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 360)
+            Button { showImagePicker = true } label: {
+                Label("Image", systemImage: "photo")
+            }
+            Button { showSignSheet = true } label: {
+                Label("AI Sign", systemImage: "sparkles")
+            }
+            Button { showTextSheet = true } label: {
+                Label("Text", systemImage: "textformat")
+            }
+            toolButton("Erase", systemImage: "eraser", isActive: tool == .erase) {
+                tool = .erase
+            }
+
+            if tool == .brush {
+                ColorPicker("Brush color", selection: $brushColor, supportsOpacity: false)
+                    .labelsHidden()
+            }
+
             Spacer()
-            Button { showBackdropPicker = true } label: {
-                Label("Backdrop", systemImage: "photo.badge.plus")
-            }
-            Button("AI Sign") { showSignSheet = true }
-            Button("Palette") { showPaletteSheet = true }
-            Toggle(isOn: $showLayerPanel) {
-                Label("Layers", systemImage: "square.3.layers.3d")
-            }
-            .toggleStyle(.button)
             Button("Save") { save() }
                 .buttonStyle(.borderedProminent)
                 .disabled(vm.status == .saving)
         }
+        .buttonStyle(.bordered)
         .padding()
     }
+
+    private func toolButton(_ title: String, systemImage: String, isActive: Bool,
+                            action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+        }
+        .buttonStyle(.bordered)
+        .tint(isActive ? .blue : nil)
+    }
+
+    // MARK: - Canvas
 
     private var canvas: some View {
         GeometryReader { geo in
@@ -89,8 +113,7 @@ public struct FacadeCanvasView: View {
                 // Static wall colour (Unity's vertex-coloured wall shows through the alpha channel
                 // in the real export; this is the authoring stand-in).
                 Rectangle().fill(Color(white: 0.9))
-                // Facade reference render for tracing over (gap G2 preview, fetched from server).
-                // The VM stores raw Data; convert here where UIKit is guaranteed available.
+                // Facade reference render for tracing over, when one exists on the server.
                 if let data = vm.backdropData, let uiImage = UIImage(data: data) {
                     Image(uiImage: uiImage)
                         .resizable()
@@ -98,10 +121,14 @@ public struct FacadeCanvasView: View {
                         .opacity(0.35)
                         .clipped()
                 }
-                PencilCanvas(drawing: $drawing)
-                // Image layers rendered in z-order (array order = ascending z).
+                PencilCanvas(drawing: $drawing, tool: pkTool)
+                // Image layers rendered in z-order (array order = ascending z). With the
+                // Erase tool active, tapping a placed image removes it.
                 ForEach($vm.imageLayers) { $img in
-                    PlacedImageView(image: $img, canvasSize: geo.size)
+                    PlacedImageView(image: $img, canvasSize: geo.size,
+                                    eraseActive: tool == .erase) {
+                        vm.imageLayers.removeAll { $0.id == img.id }
+                    }
                 }
             }
             .onAppear { canvasSize = geo.size }
@@ -110,38 +137,6 @@ public struct FacadeCanvasView: View {
         .aspectRatio(1, contentMode: .fit)   // the facade unit square
         .border(Color.secondary)
         .padding()
-    }
-
-    /// Side panel for reordering image layers by drag.
-    private var layerPanel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Layers")
-                .font(.caption.bold())
-                .foregroundColor(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.top, 8)
-            List {
-                // Paint layer is always at the bottom; shown as a non-movable separator.
-                if !vm.paintStrokes.isEmpty {
-                    Label("Paint", systemImage: "paintbrush")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .listRowBackground(Color.clear)
-                }
-                ForEach(vm.imageLayers) { img in
-                    Label(img.signAsset.isEmpty ? "Image" : img.signAsset,
-                          systemImage: "photo")
-                        .font(.caption)
-                        .lineLimit(1)
-                }
-                .onMove { vm.moveImageLayer(from: $0, to: $1) }
-                .onDelete { vm.imageLayers.remove(atOffsets: $0) }
-            }
-            .listStyle(.plain)
-            .environment(\.editMode, .constant(.active))
-        }
-        .background(Color(uiColor: .secondarySystemBackground))
-        .border(Color(uiColor: .separator), width: 0.5)
     }
 
     private var statusBar: some View {
@@ -161,6 +156,8 @@ public struct FacadeCanvasView: View {
         .padding(.bottom, 8)
     }
 
+    // MARK: - Actions
+
     private func save() {
         let converted = StrokeConversion.strokes(from: drawing, canvasSize: canvasSize)
         // Don't wipe strokes loaded from the server that aren't yet re-hydrated into the on-screen
@@ -171,13 +168,42 @@ public struct FacadeCanvasView: View {
         }
         Task { await vm.save() }
     }
+
+    /// Image and Text tools share one path: PNG → POST /signs/upload → placed image layer.
+    private func placeUploadedImage(_ png: Data, name: String) async {
+        if let sign = await vm.uploadImageAsset(name: name, png: png) {
+            vm.placeSign(sign)
+        }
+    }
+
+    private func shortId() -> String {
+        String(UUID().uuidString.prefix(8)).lowercased()
+    }
+
+    /// Render text into a transparent PNG so it rides the existing sign-asset pipeline
+    /// (place, save, export) with no new server-side layer kind.
+    static func renderTextPNG(_ text: String, color: UIColor) -> Data? {
+        guard !text.isEmpty else { return nil }
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 96, weight: .bold),
+            .foregroundColor: color,
+        ]
+        let textSize = (text as NSString).size(withAttributes: attrs)
+        let size = CGSize(width: ceil(textSize.width) + 24, height: ceil(textSize.height) + 16)
+        let image = UIGraphicsImageRenderer(size: size).image { _ in
+            (text as NSString).draw(at: CGPoint(x: 12, y: 8), withAttributes: attrs)
+        }
+        return image.pngData()
+    }
 }
 
 // MARK: - PencilCanvas
 
-/// UIKit bridge for PencilKit's canvas + system tool picker.
+/// UIKit bridge for PencilKit's canvas. The tool is driven by the MVP tool rail (Brush /
+/// Erase) rather than the floating system PKToolPicker.
 private struct PencilCanvas: UIViewRepresentable {
     @Binding var drawing: PKDrawing
+    let tool: PKTool
 
     func makeUIView(context: Context) -> PKCanvasView {
         let view = PKCanvasView()
@@ -186,28 +212,19 @@ private struct PencilCanvas: UIViewRepresentable {
         view.isOpaque = false
         view.delegate = context.coordinator
         view.drawing = drawing
+        view.tool = tool
         return view
     }
 
     func updateUIView(_ view: PKCanvasView, context: Context) {
         if view.drawing != drawing { view.drawing = drawing }
-        // Attach the system tool picker once the view is actually in the window hierarchy —
-        // becomeFirstResponder / picker attach fail in makeUIView (view.window is still nil).
-        if !context.coordinator.pickerAttached, view.window != nil {
-            context.coordinator.pickerAttached = true
-            let picker = context.coordinator.toolPicker
-            picker.setVisible(true, forFirstResponder: view)
-            picker.addObserver(view)
-            view.becomeFirstResponder()
-        }
+        view.tool = tool     // PKTool isn't Equatable; setting every update is cheap
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, PKCanvasViewDelegate {
         let parent: PencilCanvas
-        let toolPicker = PKToolPicker()          // iOS 14+; no window needed
-        var pickerAttached = false
         init(_ parent: PencilCanvas) { self.parent = parent }
         func canvasViewDrawingDidChange(_ canvasView: PKCanvasView) {
             parent.drawing = canvasView.drawing
@@ -222,6 +239,8 @@ private struct PencilCanvas: UIViewRepresentable {
 private struct PlacedImageView: View {
     @Binding var image: FacadeCanvasViewModel.PlacedImage
     let canvasSize: CGSize
+    let eraseActive: Bool
+    let onDelete: () -> Void
 
     var body: some View {
         let w = CGFloat(image.rect[2] - image.rect[0]) * canvasSize.width
@@ -231,12 +250,13 @@ private struct PlacedImageView: View {
         let cy = (1 - CGFloat((image.rect[1] + image.rect[3]) / 2)) * canvasSize.height
 
         return RoundedRectangle(cornerRadius: 4)
-            .strokeBorder(Color.blue, lineWidth: 2)
+            .strokeBorder(eraseActive ? Color.red : Color.blue, lineWidth: 2)
             .background(Color.blue.opacity(0.08))
             .overlay(Text(image.signAsset.isEmpty ? "image" : image.signAsset)
                         .font(.caption2).lineLimit(1).padding(2))
             .frame(width: max(w, 24), height: max(h, 24))
             .position(x: cx, y: cy)
+            .onTapGesture { if eraseActive { onDelete() } }
             .gesture(DragGesture().onChanged { g in move(to: g.location) })
     }
 
@@ -304,73 +324,37 @@ private struct SignRequestSheet: View {
     }
 }
 
-// MARK: - PaletteAuthorSheet
+// MARK: - TextToolSheet
 
-/// Palette authoring form — builds a named PaletteEntry list and POSTs to /palettes.
-private struct PaletteAuthorSheet: View {
-    var onSubmit: (Palette) -> Void
-    @State private var name = ""
-    @State private var entries: [PaletteEntry] = [
-        PaletteEntry(role: "wall",   color: "#C8B89A"),
-        PaletteEntry(role: "trim",   color: "#FFFFFF"),
-        PaletteEntry(role: "window", color: "#6AADE4"),
-    ]
+/// The Text tool's form: a string + colour that the canvas renders to a transparent PNG.
+private struct TextToolSheet: View {
+    var onSubmit: (String, Color) -> Void
+    @State private var text = ""
+    @State private var color: Color = .black
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Palette name") {
-                    TextField("Name", text: $name)
-                }
-                Section("Material roles") {
-                    // Use index-based ForEach to avoid requiring PaletteEntry: Identifiable.
-                    ForEach(entries.indices, id: \.self) { i in
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                TextField("Role", text: $entries[i].role)
-                                    .frame(maxWidth: 90)
-                                TextField("Color (#RRGGBB)", text: $entries[i].color)
-                                    .font(.system(.body, design: .monospaced))
-                            }
-                            HStack {
-                                Text("M").font(.caption).foregroundColor(.secondary)
-                                Stepper(value: $entries[i].metallic, in: 0...1, step: 0.1) {
-                                    Text(String(format: "%.1f", entries[i].metallic))
-                                        .font(.caption)
-                                }
-                                Spacer()
-                                Text("R").font(.caption).foregroundColor(.secondary)
-                                Stepper(value: $entries[i].roughness, in: 0...1, step: 0.1) {
-                                    Text(String(format: "%.1f", entries[i].roughness))
-                                        .font(.caption)
-                                }
-                            }
-                        }
-                        .swipeActions { Button("Delete", role: .destructive) { entries.remove(at: i) } }
-                    }
-                    Button("Add role") {
-                        entries.append(PaletteEntry())
-                    }
-                }
+                TextField("Text", text: $text)
+                ColorPicker("Color", selection: $color, supportsOpacity: false)
             }
-            .navigationTitle("New Palette")
+            .navigationTitle("Add Text")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSubmit(Palette(name: name, entries: entries))
-                    }
-                    .disabled(name.isEmpty || entries.isEmpty)
+                    Button("Add") { onSubmit(text, color) }
+                        .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
     }
 }
 
-// MARK: - BackdropPickerView
+// MARK: - ImagePickerView
 
-private struct BackdropPickerView: UIViewControllerRepresentable {
+/// Photo-library picker for the Image tool; returns PNG data ready for POST /signs/upload.
+private struct ImagePickerView: UIViewControllerRepresentable {
     var onPick: (Data) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -388,16 +372,17 @@ private struct BackdropPickerView: UIViewControllerRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     final class Coordinator: NSObject, PHPickerViewControllerDelegate {
-        let parent: BackdropPickerView
-        init(_ parent: BackdropPickerView) { self.parent = parent }
+        let parent: ImagePickerView
+        init(_ parent: ImagePickerView) { self.parent = parent }
 
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
             parent.dismiss()
             guard let provider = results.first?.itemProvider,
                   provider.canLoadObject(ofClass: UIImage.self) else { return }
             provider.loadObject(ofClass: UIImage.self) { obj, _ in
+                // PNG, not JPEG: /signs/upload accepts only PNG so transparency survives.
                 guard let image = obj as? UIImage,
-                      let data = image.jpegData(compressionQuality: 0.9) else { return }
+                      let data = image.pngData() else { return }
                 DispatchQueue.main.async { self.parent.onPick(data) }
             }
         }
