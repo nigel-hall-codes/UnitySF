@@ -115,6 +115,15 @@ public actor DraftStore {
         syncStatus = outbox.isEmpty ? .synced : .pending(count: outbox.count)
     }
 
+    /// Drop every queued write for a building ('Reset to Generated', #365) — otherwise a
+    /// canvas save queued offline would be re-POSTed on the next flush and silently
+    /// resurrect the customization the user just reset.
+    public func removeQueued(osmId: Int) {
+        outbox.removeAll { $0.canvas.osm_id == osmId }
+        persistOutbox()
+        syncStatus = outbox.isEmpty ? .synced : .pending(count: outbox.count)
+    }
+
     // MARK: - Persistence (private)
 
     private func persist<T: Encodable>(_ value: T, to url: URL) {

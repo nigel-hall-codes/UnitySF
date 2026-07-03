@@ -10,6 +10,7 @@ Build a test app with ``create_app(store)``; the module-level ``app`` builds a s
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -344,7 +345,11 @@ def create_app(store: Optional[Store] = None, default_export_dir: str = "",
         if not data.startswith(b"\x89PNG\r\n\x1a\n"):
             raise HTTPException(status_code=415, detail="sign upload must be a PNG")
         base = slug(name or (file.filename or "").rsplit(".", 1)[0])
-        sign_id = f"sign_{base}"
+        # Content-addressed suffix: re-uploading the same bytes dedupes to one asset, while
+        # different content under the same name (e.g. two Text placements, same string,
+        # different colors) gets a distinct id instead of silently repainting the earlier
+        # placement. Also can't collide with an AI id (those never carry an 8-hex suffix).
+        sign_id = f"sign_{base}_{hashlib.sha256(data).hexdigest()[:8]}"
         S().save_sign_png(sign_id, data, data)
         sign = SignDef(signId=sign_id, png=f"Signs/{sign_id}.png",
                        thumb=f"Signs/{sign_id}.thumb.png", provider="upload",

@@ -10,6 +10,7 @@ import PhotosUI
 public struct FacadeCanvasView: View {
     @StateObject private var vm: FacadeCanvasViewModel
     @State private var drawing = PKDrawing()
+    @State private var didDrawThisSession = false
     @State private var canvasSize: CGSize = .zero
     @State private var tool: CanvasTool = .brush
     @State private var brushColor: Color = .black
@@ -51,6 +52,9 @@ public struct FacadeCanvasView: View {
             await vm.load()
             await vm.loadBackdrop()
         }
+        // Fires only on ink activity (draw or erase) — the marker that the on-screen
+        // PKDrawing, not the server copy, is now the truth for the paint layer.
+        .onChange(of: drawing) { _, _ in didDrawThisSession = true }
     }
 
     // MARK: - Tool rail (the five MVP tools + Save)
@@ -161,9 +165,10 @@ public struct FacadeCanvasView: View {
     private func save() {
         let converted = StrokeConversion.strokes(from: drawing, canvasSize: canvasSize)
         // Don't wipe strokes loaded from the server that aren't yet re-hydrated into the on-screen
-        // PKDrawing (paint reload is a follow-up): only overwrite when the user painted this session
-        // (drawing non-empty), or when there were no strokes to preserve.
-        if !converted.isEmpty || vm.paintStrokes.isEmpty {
+        // PKDrawing (paint reload is a follow-up): overwrite only once the user has inked this
+        // session — including erasing to empty, which must persist as "no strokes" — or when
+        // there was nothing to preserve.
+        if didDrawThisSession || vm.paintStrokes.isEmpty {
             vm.paintStrokes = converted
         }
         Task { await vm.save() }

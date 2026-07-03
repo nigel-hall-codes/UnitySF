@@ -398,7 +398,7 @@ private struct BuildingThumbView: View {
     let client: ServerClient
 
     @State private var image: UIImage?
-    @State private var didAttemptLoad = false
+    @State private var loadedOsmId: Int?
 
     var body: some View {
         ZStack {
@@ -415,8 +415,12 @@ private struct BuildingThumbView: View {
         }
         .clipped()
         .task(id: osmId) {
-            guard !didAttemptLoad else { return }
-            didAttemptLoad = true
+            // Key the cache by osm_id, not a did-load flag: the inspector reuses this view
+            // across selections (stable structural identity), so a plain flag would pin the
+            // first building's thumbnail forever. Grid scroll-back still skips the refetch.
+            guard loadedOsmId != osmId else { return }
+            loadedOsmId = osmId
+            image = nil
             if let data = try? await client.fetchBuildingThumb(osmId: osmId) {
                 image = UIImage(data: data)
             }
@@ -590,6 +594,7 @@ final class BuildingBrowserViewModel: ObservableObject {
     private let client: ServerClient
     let draftStore: DraftStore     // passed into canvas VMs so offline saves queue
     private var isSearchPool = false
+    private var isPoolLoading = false
 
     init(client: ServerClient, draftStore: DraftStore = DraftStore()) {
         self.client = client
@@ -649,19 +654,27 @@ final class BuildingBrowserViewModel: ObservableObject {
     /// `displayedBuildings` narrows live; clearing it restores server-side pagination.
     func searchChanged(forceReload: Bool = false) async {
         if isSearching {
-            guard !isSearchPool || forceReload else { return }   // pool already loaded
+            // Pool already loaded, or a keystroke raced in while it's still fetching.
+            guard (!isSearchPool && !isPoolLoading) || forceReload else { return }
+            isPoolLoading = true
             isLoading = true
             do {
                 let page = try await client.listBuildings(
                     neighborhood: filterNeighborhood.isEmpty ? nil : filterNeighborhood,
                     type: filterType.isEmpty ? nil : filterType,
                     limit: searchPoolSize, offset: 0)
-                buildings = page.buildings
-                total = page.total
-                isSearchPool = true
+                // The user may have cleared the search while the fetch was in flight —
+                // committing then would swap the paged grid for the whole pool under a
+                // stale pagination bar.
+                if isSearching {
+                    buildings = page.buildings
+                    total = page.total
+                    isSearchPool = true
+                }
             } catch {
                 errorMessage = error.localizedDescription
             }
+            isPoolLoading = false
             isLoading = false
         } else if isSearchPool || forceReload {
             isSearchPool = false
@@ -702,11 +715,14 @@ final class BuildingBrowserViewModel: ObservableObject {
         }
     }
 
-    /// 'Reset to Generated' for the selected building: server delete, then badge removal.
+    /// 'Reset to Generated' for the selected building: server delete, badge removal, and
+    /// purge of any offline-queued saves that would otherwise resurrect the customization
+    /// on the next outbox flush.
     func resetSelected() async {
         guard let building = selectedBuilding else { return }
         do {
             try await client.resetBuilding(osmId: building.osm_id)
+            await draftStore.removeQueued(osmId: building.osm_id)
             customizedIds.remove(building.osm_id)
         } catch {
             errorMessage = error.localizedDescription

@@ -52,16 +52,33 @@ def test_sign_upload_stores_and_serves(client):
                     files={"file": ("logo.png", png, "image/png")})
     assert r.status_code == 200
     sign = r.json()
-    assert sign["signId"] == "sign_my_logo" and sign["provider"] == "upload"
-    assert client.get("/signs/sign_my_logo/png").content == png
-    assert client.get("/signs/sign_my_logo/thumb").content == png    # thumb = full image
-    assert any(s["signId"] == "sign_my_logo" for s in client.get("/signs").json())
+    sid = sign["signId"]
+    assert sid.startswith("sign_my_logo_") and sign["provider"] == "upload"
+    assert client.get(f"/signs/{sid}/png").content == png
+    assert client.get(f"/signs/{sid}/thumb").content == png    # thumb = full image
+    assert any(s["signId"] == sid for s in client.get("/signs").json())
+
+
+def test_sign_upload_ids_are_content_addressed(client):
+    # Same name + same bytes dedupes to one asset; same name + different bytes must NOT
+    # clobber the first upload (two Text placements differing only in color, #365).
+    png_a = encode_solid_png(4, 4, (1, 2, 3))
+    png_b = encode_solid_png(4, 4, (200, 2, 3))
+    id_1 = client.post("/signs/upload", params={"name": "Menu"},
+                       files={"file": ("m.png", png_a, "image/png")}).json()["signId"]
+    id_2 = client.post("/signs/upload", params={"name": "Menu"},
+                       files={"file": ("m.png", png_a, "image/png")}).json()["signId"]
+    id_3 = client.post("/signs/upload", params={"name": "Menu"},
+                       files={"file": ("m.png", png_b, "image/png")}).json()["signId"]
+    assert id_1 == id_2 and id_1 != id_3
+    assert client.get(f"/signs/{id_1}/png").content == png_a   # first asset intact
+    assert client.get(f"/signs/{id_3}/png").content == png_b
 
 
 def test_sign_upload_name_defaults_to_filename(client):
     png = encode_solid_png(2, 2, (9, 9, 9))
     r = client.post("/signs/upload", files={"file": ("Cafe Menu.png", png, "image/png")})
-    assert r.json()["signId"] == "sign_cafe_menu"
+    assert r.json()["signId"].startswith("sign_cafe_menu_")
 
 
 def test_sign_upload_rejects_non_png(client):
