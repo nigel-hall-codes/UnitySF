@@ -762,7 +762,7 @@ private struct LayersPanel: View {
                 Text("• Double tap to reset zoom")
                 Text("• Drag layers to reorder")
             }
-            .font(.caption2).foregroundColor(.secondary)
+            .font(.caption2).foregroundColor(.primary)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
@@ -831,7 +831,7 @@ private struct PropertiesPanel: View {
             Text("Nothing selected")
                 .font(.caption).foregroundColor(.secondary)
             Text("Select an object on the facade with the Select tool, or place one from the asset library below.")
-                .font(.caption2).foregroundColor(.secondary)
+                .font(.caption2).foregroundColor(.primary)
             Divider()
             Text("Facade: \(vm.facade)").font(.caption)
             Text(String(format: "%.1f m × %.1f m", facadeWidthM, facadeHeightM))
@@ -1118,7 +1118,7 @@ private struct BuildingThumbImage: View {
                     Text("No render yet — save and import in Unity to see this building.")
                         .font(.caption2).multilineTextAlignment(.center)
                 }
-                .foregroundColor(.secondary)
+                .foregroundColor(.primary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(Color(.secondarySystemBackground))
             }
