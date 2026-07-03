@@ -21,6 +21,9 @@ public struct BuildingCanvasView: View {
     // Paint drawings are view-owned (the VM stays PencilKit-free), one per facade.
     @State private var drawing = PKDrawing()
     @State private var facadeDrawings: [String: PKDrawing] = [:]
+    // Facades the user actually inked this session (#365's didDrawThisSession, per facade):
+    // only then may syncStrokes overwrite server strokes — including erasing to empty.
+    @State private var inkedFacades: Set<String> = []
 
     @State private var tool: EditorTool = .select
     @State private var brushColor: Color = .black
@@ -302,7 +305,10 @@ public struct BuildingCanvasView: View {
                     vm.paintUndo = { [weak cv] in cv?.undoManager?.undo() }
                     vm.paintRedo = { [weak cv] in cv?.undoManager?.redo() }
                 },
-                onDrawingChanged: { vm.notePaintAction() }
+                onDrawingChanged: {
+                    vm.notePaintAction()
+                    inkedFacades.insert(vm.facade)
+                }
             )
             .opacity(vm.paintVisible ? vm.paintOpacity : 0)
             ForEach(vm.imageLayers.filter(\.visible)) { img in
@@ -317,6 +323,9 @@ public struct BuildingCanvasView: View {
         }
         .coordinateSpace(name: "facade")   // layer move/resize gestures resolve here (unscaled)
         .border(Color.secondary.opacity(0.6))
+        // Double-tap BEFORE single-tap so the spec's double-tap zoom reset wins over the
+        // deselect tap when both land on the facade surface.
+        .onTapGesture(count: 2) { fitToFace() }
         .onTapGesture {
             if tool == .select { vm.selectedLayerId = nil }
         }
@@ -419,12 +428,13 @@ public struct BuildingCanvasView: View {
         vm.hasUnsavedChanges
     }
 
-    /// Convert the on-screen drawing to normalized strokes before any save/stash — same
-    /// preserve-server-strokes rule as the #365 surface.
+    /// Convert the on-screen drawing to normalized strokes before any save/stash. Server
+    /// strokes not yet re-hydrated into the PKDrawing are preserved unless the user inked
+    /// this facade this session — including erasing to empty, which must persist (#365 rule).
     private func syncStrokes() {
         guard canvasLogicalSize != .zero else { return }
         let converted = StrokeConversion.strokes(from: drawing, canvasSize: canvasLogicalSize)
-        if !converted.isEmpty || vm.paintStrokes.isEmpty {
+        if inkedFacades.contains(vm.facade) || vm.paintStrokes.isEmpty {
             vm.paintStrokes = converted
         }
     }
