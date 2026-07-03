@@ -151,6 +151,23 @@ class Store:
         row = self._one("canvases", "key", self._canvas_key(osm_id, facade))
         return FacadeCanvas.model_validate_json(row) if row else None
 
+    def list_customized_osm_ids(self) -> List[int]:
+        """Distinct osm_ids with at least one authored canvas — the Buildings tab's
+        'Customized' badge index (#365)."""
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT DISTINCT CAST(substr(key, 1, instr(key, ':') - 1) AS INTEGER) "
+                "FROM canvases ORDER BY 1")
+            return [r[0] for r in cur.fetchall()]
+
+    def delete_canvases_for(self, osm_id: int) -> int:
+        """Drop every authored canvas for a building ('Reset to Generated', #365).
+        Backdrops are drawing aids keyed separately on disk and are deliberately kept."""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM canvases WHERE key LIKE ?", (f"{osm_id}:%",))
+            self._conn.commit()
+            return cur.rowcount
+
     # -- building facts (#299; filterable by neighborhood/type) -------------
 
     def upsert_building(self, b: BuildingFacts) -> None:

@@ -254,6 +254,16 @@ class CanvasLayer(BaseModel):
     rect: List[float] = Field(default_factory=lambda: [0.0, 0.0, 1.0, 1.0])
     texture: str = ""                # existing PNG ref, e.g. Signs/<id>.png
     signAsset: str = ""              # optional link to a #275 sign asset
+    # Canvas-authoring metadata (#367 Building Customization Canvas). Defaults keep every
+    # pre-#367 document valid. `visible` gates export; the transform fields ride the decal
+    # so the Unity importer can adopt them (it ignores unknown keys until then).
+    name: str = ""                   # user label shown in the layers panel
+    visible: bool = True             # hidden layers are skipped at export
+    locked: bool = False             # authoring-side edit guard (no export meaning)
+    opacity: float = 1.0             # 0..1 decal alpha multiplier
+    rotation_deg: float = 0.0        # in-plane rotation about the rect centre
+    flipH: bool = False
+    flipV: bool = False
 
 
 class FacadeCanvas(BaseModel):
