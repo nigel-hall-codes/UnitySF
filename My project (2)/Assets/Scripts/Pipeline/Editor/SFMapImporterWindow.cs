@@ -484,6 +484,13 @@ namespace SFMap.Pipeline.Editor
             {
                 bldgGo.AddComponent<MeshFilter>().sharedMesh = combinedBuildings;
                 bldgGo.AddComponent<MeshRenderer>().sharedMaterial = bldgMat;
+                // On-foot raycasts (graffiti spray, #390) need to hit facades, so the combined
+                // building mesh gets a MeshCollider on the Default layer — one cook per chunk,
+                // matching the roads/sidewalks pattern above. Traffic/car raycasts use the Road
+                // layer, so this stays clear of them.
+                StartOp();
+                bldgGo.AddComponent<MeshCollider>().sharedMesh = combinedBuildings;
+                StopOp(ref _timings.colliderMs);
             }
             if (assembler != null)
             {
