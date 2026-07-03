@@ -39,9 +39,62 @@ public actor ServerClient {
         try await get("canvas/\(osmId)")
     }
 
+    // GET /canvas — osm_ids with at least one authored canvas; drives the Buildings tab's
+    // 'Customized' badges with one call instead of one per grid card (#365).
+    public func listCustomizedBuildingIds() async throws -> [Int] {
+        try await get("canvas")
+    }
+
+    // DELETE /canvas/{osm_id} — 'Reset to Generated' (#365): drop every authored canvas
+    // for the building. Idempotent.
+    public func resetBuilding(osmId: Int) async throws {
+        var req = URLRequest(url: baseURL.appendingPathComponent("canvas/\(osmId)"))
+        req.httpMethod = "DELETE"
+        let (_, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ServerError.emptyBody }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+    }
+
     // POST /ai/signs/generate — server-mediated; returns a reusable sign asset record.
     public func generateSign(_ request: SignRequest) async throws -> SignDef {
         try await post("ai/signs/generate", body: request)
+    }
+
+    // POST /signs/upload — store a user-supplied PNG as a reusable sign asset (the canvas
+    // Image and Text tools, #365). Same stored shape as AI generation, provider "upload".
+    public func uploadSignImage(name: String, png: Data) async throws -> SignDef {
+        guard var components = URLComponents(url: baseURL.appendingPathComponent("signs/upload"),
+                                              resolvingAgainstBaseURL: false) else {
+            throw ServerError.emptyBody
+        }
+        components.queryItems = [URLQueryItem(name: "name", value: name)]
+        guard let url = components.url else { throw ServerError.emptyBody }
+        let boundary = "Boundary-FacadeCanvas"
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        var body = Data()
+        func s(_ str: String) { body.append(contentsOf: str.utf8) }
+        s("--\(boundary)\r\n")
+        s("Content-Disposition: form-data; name=\"file\"; filename=\"\(name).png\"\r\n")
+        s("Content-Type: image/png\r\n\r\n")
+        body.append(png)
+        s("\r\n--\(boundary)--\r\n")
+        req.httpBody = body
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else { throw ServerError.emptyBody }
+        guard (200..<300).contains(http.statusCode) else { throw ServerError.http(http.statusCode) }
+        return try decoder.decode(SignDef.self, from: data)
+    }
+
+    // GET /neighborhoods — filter-dropdown vocabulary (#365).
+    public func listNeighborhoods() async throws -> [NeighborhoodInfo] {
+        try await get("neighborhoods")
+    }
+
+    // GET /building-types — filter-dropdown vocabulary (#365).
+    public func listBuildingTypes() async throws -> [String] {
+        try await get("building-types")
     }
 
     // PUT /canvas/{osm_id}/{facade}/backdrop — upload a photo as the facade reference backdrop.
