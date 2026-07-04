@@ -14,7 +14,8 @@ import numpy as np
 from pathlib import Path
 
 from sfmap.elevation import HeightmapData
-from sfmap.serialize import ChunkData, MeshEntry, MeshType, write_chunk
+from sfmap.types import ChunkData, MeshEntry, MeshType
+from sfmap.serialize import write_chunk
 
 GOLDEN = Path(__file__).parent / "fixtures" / "chunk_01_02.bin"
 
