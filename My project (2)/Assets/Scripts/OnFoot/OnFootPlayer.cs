@@ -32,6 +32,7 @@ namespace SFMap.OnFoot
         const float EyeHeight = 1.7f;
         const float BodyRadius = 0.3f;
         const float GroundStick = -2f;        // small downward bias so isGrounded stays true on slopes
+        const float JumpSpeed = 6f;           // upward impulse; with Gravity=-20 gives ~0.9m apex (v=sqrt(2*20*0.9))
 
         // After (re)placing us — a scene spawn or stepping out of a car — the chunk under us may not
         // be streamed yet. We probe straight down and drop in once a collider exists.
@@ -171,7 +172,11 @@ namespace SFMap.OnFoot
             var wish = Vector3.ClampMagnitude(transform.forward * fwd + transform.right * str, 1f);
             float speed = Input.GetKey(KeyCode.LeftShift) ? RunSpeed : WalkSpeed;
 
-            if (_cc.isGrounded && _vy < 0f) _vy = GroundStick;
+            // Space or gamepad A (Xbox A == JoystickButton0) — explicit binding, not the stock "Jump"
+            // axis, whose default gamepad button (3 / Y) collides with the car-toggle button.
+            bool jumpPressed = Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.JoystickButton0);
+            if (_cc.isGrounded && jumpPressed) _vy = JumpSpeed;
+            else if (_cc.isGrounded && _vy < 0f) _vy = GroundStick;
             _vy += Gravity * Time.deltaTime;
 
             _cc.Move((wish * speed + Vector3.up * _vy) * Time.deltaTime);
