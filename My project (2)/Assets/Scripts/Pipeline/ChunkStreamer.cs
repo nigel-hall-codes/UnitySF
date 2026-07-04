@@ -47,7 +47,6 @@ namespace SFMap.Pipeline
         ChunkManifest _manifest;
         readonly Dictionary<ChunkCoord, ChunkManifestEntry> _entries = new();
         float _chunkSize;
-        float _originX, _originZ; // world position of the (col 0, row 0) chunk corner
 
         // ---- Runtime state ----
         readonly Dictionary<ChunkCoord, GameObject> _loaded = new();
@@ -149,11 +148,6 @@ namespace SFMap.Pipeline
             _entries.Clear();
             foreach (var e in _manifest.chunks)
                 _entries[new ChunkCoord(e.col, e.row)] = e;
-
-            // Derive the grid origin from any entry: worldX/worldZ is that chunk's corner.
-            var anchor = _manifest.chunks[0];
-            _originX = anchor.worldX - anchor.col * _chunkSize;
-            _originZ = anchor.worldZ - anchor.row * _chunkSize;
 
             ClearStaticChunks();
 
@@ -274,12 +268,7 @@ namespace SFMap.Pipeline
             }
         }
 
-        ChunkCoord WorldToChunk(Vector3 world)
-        {
-            int col = Mathf.FloorToInt((world.x - _originX) / _chunkSize);
-            int row = Mathf.FloorToInt((world.z - _originZ) / _chunkSize);
-            return new ChunkCoord(col, row);
-        }
+        ChunkCoord WorldToChunk(Vector3 world) => _manifest.WorldToChunk(world);
 
         static int Chebyshev(ChunkCoord a, ChunkCoord b)
             => Mathf.Max(Mathf.Abs(a.Col - b.Col), Mathf.Abs(a.Row - b.Row));

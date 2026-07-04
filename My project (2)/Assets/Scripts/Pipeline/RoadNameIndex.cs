@@ -42,22 +42,12 @@ namespace SFMap.Pipeline
             foreach (var entry in manifest.chunks)
             {
                 var coord = new ChunkCoord(entry.col, entry.row);
-                var asset = Resources.Load<TextAsset>(GeneratedAssets.RuntimeChunkRoadNames(coord));
-                if (asset == null) continue;
-
-                try
+                var roads = RoadNames.Load(coord);
+                if (roads == null) continue;
+                foreach (var r in roads)
                 {
-                    var parsed = JsonUtility.FromJson<RoadNamesJson>(asset.text);
-                    if (parsed?.roads == null) continue;
-                    foreach (var r in parsed.roads)
-                    {
-                        if (string.IsNullOrEmpty(r.n) || r.xz == null || r.xz.Length < 4) continue;
-                        _segs.Add(new Segment { name = r.n, xz = r.xz });
-                    }
-                }
-                catch (Exception e)
-                {
-                    Debug.LogWarning($"[RoadNameIndex] Failed to parse {coord}_names: {e.Message}");
+                    if (string.IsNullOrEmpty(r.n) || r.xz == null || r.xz.Length < 4) continue;
+                    _segs.Add(new Segment { name = r.n, xz = r.xz });
                 }
             }
         }
@@ -134,8 +124,5 @@ namespace SFMap.Pipeline
             return ex * ex + ez * ez;
         }
 
-        // Matches the JSON written by python/sfmap/serialize.py write_road_names()
-        [Serializable] class RoadNamesJson { public RoadEntry[] roads; }
-        [Serializable] class RoadEntry    { public string n; public float[] xz; }
     }
 }
