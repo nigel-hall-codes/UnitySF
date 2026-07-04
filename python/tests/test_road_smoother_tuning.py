@@ -1,7 +1,7 @@
 """Locks the road-smoother window tuning rationale (#232).
 
-The default `road._SMOOTH_WINDOW_M` is not arbitrary: at the real densify
-spacing (`_MAX_SEG_M`, 4 m) the tricube window must comfortably exceed 2x the
+The default `road.SMOOTH_WINDOW_M` is not arbitrary: at the real densify
+spacing (`MAX_SEG_M`, 4 m) the tricube window must comfortably exceed 2x the
 spacing or it is a near no-op, and it must stay small enough to preserve genuine
 grades. These tests guard the chosen value against silent regressions in either
 the smoother or the densify cap.
@@ -10,7 +10,7 @@ the smoother or the densify cap.
 from __future__ import annotations
 
 import road_smoothing_tuning as rst
-from sfmap.geometry.road import _SMOOTH_WINDOW_M
+from sfmap.geometry.primitives import SMOOTH_WINDOW_M
 
 def _row(rows, window):
     return next(r for r in rows if r["window_m"] == window)
@@ -23,7 +23,7 @@ def test_small_windows_are_noops_at_densify_spacing():
         assert _row(rows, w)["flat_roughness_frac"] > 0.95
 
 def test_default_window_is_effective_and_grade_preserving():
-    row = _row(rst.evaluate(), _SMOOTH_WINDOW_M)
+    row = _row(rst.evaluate(), SMOOTH_WINDOW_M)
     assert row["flat_roughness_frac"] <= rst._FLAT_TARGET   # smooths the flat block
     assert row["grade_kept"] >= rst._GRADE_FLOOR            # keeps the steep grade
 
@@ -32,4 +32,4 @@ def test_recommended_window_matches_default():
     # constant and the tuning evidence stay in agreement.
     rec = rst.recommend(rst.evaluate())
     assert rec is not None
-    assert rec["window_m"] == _SMOOTH_WINDOW_M
+    assert rec["window_m"] == SMOOTH_WINDOW_M

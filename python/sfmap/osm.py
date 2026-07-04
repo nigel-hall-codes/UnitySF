@@ -569,7 +569,7 @@ def _polyline_intersects_rect(
     """True if any part of the XZ polyline lies within [x_min,x_max]×[z_min,z_max].
 
     Liang-Barsky parametric clip per segment — matches the segment test in
-    ``road._clip_polyline_to_rect``, so the chunks an edge is *kept* in agree
+    ``primitives.clip_polyline_to_rect``, so the chunks an edge is *kept* in agree
     exactly with the chunks its centerline clips to a non-empty portion.
     """
     for i in range(1, len(cl)):

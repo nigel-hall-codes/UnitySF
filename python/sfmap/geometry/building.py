@@ -8,7 +8,7 @@ import numpy as np
 
 from ..elevation import HeightmapData
 from ..osm import BuildingWay, StreetGraph
-from .road import MeshArrays, _sample_elevation
+from .primitives import MeshArrays, sample_elevation
 
 _DEFAULT_HEIGHT = 10.0  # metres when building has no height tag
 
@@ -37,7 +37,7 @@ def building_base_y(
         fp = fp[:-1]
     if len(fp) < 3:
         return None
-    return min(_sample_elevation(hmap, px, pz) for px, pz in fp) - _FOUNDATION_EMBED
+    return min(sample_elevation(hmap, px, pz) for px, pz in fp) - _FOUNDATION_EMBED
 
 
 def build_building_meshes(
@@ -81,7 +81,7 @@ def _build_single(
     # lowest sample so the walls bury into the ground everywhere (no downhill
     # gap), and lift the roof off the highest sample so the uphill side keeps its
     # full height above ground (no sinking into the hill). See issue #219.
-    elevs = [_sample_elevation(hmap, px, pz) for px, pz in fp]
+    elevs = [sample_elevation(hmap, px, pz) for px, pz in fp]
     base_y = min(elevs) - _FOUNDATION_EMBED
     height = b.height if b.height > 0.0 else default_height
     top_y = max(elevs) + height

@@ -9,7 +9,7 @@ from shapely.geometry import Polygon
 
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph, StreetNode
-from .road import _sample_elevation
+from .primitives import sample_elevation
 
 _BEVEL_THRESHOLD = 5.0   # metres; miter points beyond this become two-vertex bevels
 _RAISE = 0.20            # metres; clears bilinear bleed, matches road.py
@@ -183,14 +183,14 @@ def triangulate_fan(
     apex_x = sum(p[0] for p in pts) / n
     apex_z = sum(p[1] for p in pts) / n
 
-    apex_y = _sample_elevation(hmap, center_x + apex_x, center_z + apex_z) + _RAISE
+    apex_y = sample_elevation(hmap, center_x + apex_x, center_z + apex_z) + _RAISE
     verts: List[Tuple[float, float, float]] = [(center_x + apex_x, apex_y, center_z + apex_z)]
     uvs: List[Tuple[float, float]] = [(0.5, 0.5)]
     indices: List[int] = []
 
     for ox, oz in pts:
         wx, wz = center_x + ox, center_z + oz
-        wy = _sample_elevation(hmap, wx, wz) + _RAISE
+        wy = sample_elevation(hmap, wx, wz) + _RAISE
         verts.append((wx, wy, wz))
         uvs.append((ox / (2.0 * max_r) + 0.5, oz / (2.0 * max_r) + 0.5))
 
@@ -282,10 +282,10 @@ def build_sidewalk_corner_meshes(
             # down toward terrain but stay a hair above it (+_OUTER_RAISE), matching
             # the sidewalk strip ends so the corner fill is continuous, stays fully
             # visible (never buried by terrain), and forms no cliff for cars to catch.
-            li_ay = _sample_elevation(hmap, li_ax, li_az) + _RAISE
-            lo_ay = _sample_elevation(hmap, lo_ax, lo_az) + _OUTER_RAISE
-            ri_by = _sample_elevation(hmap, ri_bx, ri_bz) + _RAISE
-            ro_by = _sample_elevation(hmap, ro_bx, ro_bz) + _OUTER_RAISE
+            li_ay = sample_elevation(hmap, li_ax, li_az) + _RAISE
+            lo_ay = sample_elevation(hmap, lo_ax, lo_az) + _OUTER_RAISE
+            ri_by = sample_elevation(hmap, ri_bx, ri_bz) + _RAISE
+            ro_by = sample_elevation(hmap, ro_bx, ro_bz) + _OUTER_RAISE
 
             # Sort the four corners into CW order (front-facing from above in Unity
             # left-handed coords) by angle from their centroid.  A fixed vertex

@@ -139,7 +139,7 @@ def apply_vertical_exaggeration(hmap: HeightmapData, factor: float) -> None:
     lowest contour stays put and every slope gets ``factor``× steeper. The
     normalised [0,1] heightmap is untouched; only the min/max metres that map
     [0,1] → world Y are scaled. Both the terrain header and feature elevation
-    sampling (``road._sample_elevation``) derive metres from these two values,
+    sampling (``primitives.sample_elevation``) derive metres from these two values,
     so terrain and roads/sidewalks/buildings stay aligned. Building heights are
     added on top of the sampled ground, so they are unaffected.
 
