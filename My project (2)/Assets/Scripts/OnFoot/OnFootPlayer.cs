@@ -5,14 +5,14 @@ namespace SFMap.OnFoot
 {
     /// <summary>
     /// A minimal first-person on-foot player for walking the streamed SF city — the movement
-    /// half of the graffiti mechanic (#390) before any spraying exists. A CharacterController
-    /// walks/strafes over the streamed colliders (roads, sidewalks, and building facades from
-    /// #393) under gravity, while mouse-look drives a first-person camera.
+    /// half of the graffiti mechanic (#390). A CharacterController walks/strafes over the streamed
+    /// colliders (roads, sidewalks, and building facades from #393) under gravity, while mouse-look
+    /// drives a first-person camera.
     ///
-    /// Self-bootstraps after the scene loads (the <see cref="SFMap.Game.TaxiGame"/> /HUD idiom),
-    /// so there is <b>no scene wiring</b>: the assembly spawns the walker and registers it as
-    /// <see cref="ChunkStreamer.target"/> so the world streams around it. Spawn-on-foot only —
-    /// getting out of a car is out of MVP scope (#390 / C2).
+    /// Lifecycle is owned by <see cref="PlayerModeController"/> (#405): it is spawned dormant via
+    /// <see cref="EnsureInstance"/> and switched on/off with <see cref="Activate"/> /
+    /// <see cref="Deactivate"/> as the player steps out of / into a car. It no longer self-bootstraps,
+    /// so it never contends with the car's follow camera — the coordinator hands the camera across.
     ///
     /// Uses the legacy <see cref="UnityEngine.Input"/> (matching TaxiGame), not the new Input System.
     /// </summary>
@@ -32,8 +32,8 @@ namespace SFMap.OnFoot
         const float BodyRadius = 0.3f;
         const float GroundStick = -2f;        // small downward bias so isGrounded stays true on slopes
 
-        // Chunks stream in asynchronously, so at scene start there may be no ground beneath us.
-        // We probe straight down from high above our XZ and drop in once a collider exists.
+        // After (re)placing us — a scene spawn or stepping out of a car — the chunk under us may not
+        // be streamed yet. We probe straight down and drop in once a collider exists.
         const float SpawnProbeHeight = 500f;
         const float SpawnProbeMax = 2000f;
 
@@ -41,15 +41,18 @@ namespace SFMap.OnFoot
         Transform _cam;
         float _pitch;                         // accumulated look pitch (degrees)
         float _vy;                            // vertical velocity carried across frames for gravity
-        bool _spawned;                        // false until we've dropped onto real streamed ground
+        bool _spawned;                        // false until we've dropped onto real ground
 
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-        static void Bootstrap()
+        /// Create the (single) walker, dormant. The coordinator calls this once and then drives it
+        /// with <see cref="Activate"/> / <see cref="Deactivate"/>. RequireComponent adds the
+        /// CharacterController; Awake sets <see cref="Instance"/>.
+        public static OnFootPlayer EnsureInstance()
         {
-            if (FindObjectOfType<OnFootPlayer>() != null) return;
+            if (Instance != null) return Instance;
             var go = new GameObject(nameof(OnFootPlayer));
-            go.AddComponent<OnFootPlayer>();          // RequireComponent adds the CharacterController
+            go.AddComponent<OnFootPlayer>();
             DontDestroyOnLoad(go);
+            return Instance;
         }
 
         void Awake()
@@ -61,41 +64,49 @@ namespace SFMap.OnFoot
             _cc.height = EyeHeight;
             _cc.center = new Vector3(0f, EyeHeight * 0.5f, 0f);
             _cc.radius = BodyRadius;
-
-            // Seed our XZ from wherever the scene camera already is (the car's follow camera, if
-            // any), so we spawn over the city rather than at a possibly-empty world origin. Capture
-            // its world position *before* reparenting the camera under us below.
-            var cam = Camera.main;
-            var seed = cam != null ? cam.transform.position : Vector3.zero;
-            transform.position = new Vector3(seed.x, seed.y, seed.z);
-
-            // First-person camera: reuse Camera.main if present, otherwise create one. Parent it to
-            // the body at eye height so mouse-look pitches the camera and yaw turns the body.
-            if (cam == null)
-            {
-                var camGo = new GameObject("OnFootCamera") { tag = "MainCamera" };
-                cam = camGo.AddComponent<Camera>();
-            }
-            _cam = cam.transform;
-            _cam.SetParent(transform, false);
-            _cam.localPosition = new Vector3(0f, EyeHeight, 0f);
-            _cam.localRotation = Quaternion.identity;
-
-            // Stream the world around the walker instead of whatever it was following before.
-            var streamer = FindObjectOfType<ChunkStreamer>();
-            if (streamer != null) streamer.target = transform;
-
-            // Stay disabled until we've found ground: a CharacterController is itself a collider,
-            // so an enabled one would be hit by our own downward spawn probe (giving a bogus "ground"
-            // hit on our capsule) and would also fall under gravity before real ground streams in.
-            _cc.enabled = false;
-
-            LockCursor(true);
+            _cc.enabled = false;              // enabled once placed on ground (see TrySpawn)
         }
 
         void OnDestroy()
         {
             if (Instance == this) Instance = null;
+        }
+
+        /// Switch the walker on at <paramref name="position"/>, taking ownership of the camera and
+        /// the streaming target. Re-probes onto the ground under the new spot, so it works both for
+        /// an initial spawn and for stepping out of a car onto a road.
+        public void Activate(Vector3 position, Camera cam, ChunkStreamer streamer)
+        {
+            gameObject.SetActive(true);
+
+            _cc.enabled = false;             // disable while we teleport + re-probe (probe skips self)
+            transform.position = position;
+            transform.rotation = Quaternion.identity;
+
+            if (cam != null)
+            {
+                _cam = cam.transform;
+                _cam.SetParent(transform, false);
+                _cam.localPosition = new Vector3(0f, EyeHeight, 0f);
+                _cam.localRotation = Quaternion.identity;
+                _pitch = 0f;
+            }
+
+            if (streamer != null) streamer.target = transform;
+
+            _spawned = false;                // drop onto ground at the new position
+            _vy = 0f;
+            LockCursor(true);
+        }
+
+        /// Switch the walker off, releasing the camera (keeping its world pose) so the car's follow
+        /// camera can drive it again. The coordinator re-enables that follow camera afterwards.
+        public void Deactivate()
+        {
+            if (_cam != null) { _cam.SetParent(null, true); _cam = null; }
+            _cc.enabled = false;
+            LockCursor(false);
+            gameObject.SetActive(false);
         }
 
         void Update()
@@ -115,7 +126,7 @@ namespace SFMap.OnFoot
         }
 
         // Wait for the chunk under us to stream in, then drop the controller onto it. The controller
-        // is kept disabled (see Awake) until now, so this probe can't hit our own capsule and we
+        // is kept disabled (Awake/Activate) until now, so this probe can't hit our own capsule and we
         // don't fall before there's ground. Enabling it after placing avoids it fighting the move.
         void TrySpawn()
         {
