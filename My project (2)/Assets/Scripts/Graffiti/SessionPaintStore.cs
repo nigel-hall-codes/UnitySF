@@ -28,8 +28,20 @@ namespace SFMap.Graffiti
         // MVP: one can, one colour, one soft round nozzle.
         public static readonly Color SprayColor = new Color(0.85f, 0.12f, 0.55f, 1f); // magenta
 
-        const int MaxDabsPerChunk = 4000;   // memory cap; dabs beyond this in a chunk are dropped
-        const float SurfaceOffset = 0.03f;  // metres proud of the surface, to avoid z-fighting
+        // Feel/perf knobs — serialized for the #398 by-feel pass (tune live in the Hierarchy during
+        // Play; nozzle softness is baked in Awake, so a change to it needs a Play restart to show).
+        [SerializeField, Range(200, 20000),
+         Tooltip("Per-chunk dab cap (batching/memory threshold). Dabs beyond this in one chunk are dropped.")]
+        int _maxDabsPerChunk = 4000;
+
+        [SerializeField, Range(0.005f, 0.15f),
+         Tooltip("Metres a dab sits proud of the surface — enough to beat z-fighting without floating visibly.")]
+        float _surfaceOffset = 0.03f;
+
+        [SerializeField, Range(0f, 0.9f),
+         Tooltip("Radius (0=centre, 1=edge) where the nozzle's soft falloff begins. Lower = softer, " +
+                 "more feathered edge that blends into a stroke; higher = harder-edged dab.")]
+        float _nozzleCoreRadius = 0.30f;
 
         struct Dab
         {
@@ -108,11 +120,11 @@ namespace SFMap.Graffiti
             var coord = _streamer.ChunkAt(worldPos);
             if (!_dabs.TryGetValue(coord, out var list))
                 _dabs[coord] = list = new List<Dab>();
-            if (list.Count >= MaxDabsPerChunk) return;
+            if (list.Count >= _maxDabsPerChunk) return;
 
             var dab = new Dab
             {
-                pos = worldPos + normal * SurfaceOffset,
+                pos = worldPos + normal * _surfaceOffset,
                 // Face the surface normal, with a random roll so overlapping dabs don't visibly tile.
                 rot = Quaternion.LookRotation(normal) * Quaternion.Euler(0f, 0f, Random.value * 360f),
                 size = size,
@@ -187,7 +199,7 @@ namespace SFMap.Graffiti
             if (shader == null)
                 Debug.LogError("[SessionPaintStore] Shader 'SFMap/DecalUnlitTransparent' not found.", this);
             _mat = new Material(shader) { name = "SprayDab", enableInstancing = true };
-            _mat.mainTexture = BuildNozzle();
+            _mat.mainTexture = BuildNozzle(_nozzleCoreRadius);
             _mat.SetColor("_Color", SprayColor);
         }
 
@@ -209,18 +221,20 @@ namespace SFMap.Graffiti
         }
 
         // A soft round nozzle: white RGB with a radial alpha falloff, so dabs blend into strokes.
-        static Texture2D BuildNozzle()
+        // coreRadius sets where the falloff starts (0=centre, 1=edge) — lower is softer.
+        static Texture2D BuildNozzle(float coreRadius)
         {
             const int N = 64;
             var tex = new Texture2D(N, N, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp };
             var px = new Color32[N * N];
             float c = (N - 1) * 0.5f;
+            float core = Mathf.Clamp(coreRadius, 0f, 0.95f);               // keep a non-zero falloff band
             for (int y = 0; y < N; y++)
             for (int x = 0; x < N; x++)
             {
                 float dx = (x - c) / c, dy = (y - c) / c;
                 float r = Mathf.Sqrt(dx * dx + dy * dy);                     // 0 centre -> 1 edge
-                float a = 1f - Mathf.SmoothStep(0.35f, 1f, r);              // solid core, soft rim
+                float a = 1f - Mathf.SmoothStep(core, 1f, r);              // solid core, soft rim
                 px[y * N + x] = new Color32(255, 255, 255, (byte)(Mathf.Clamp01(a) * 255f));
             }
             tex.SetPixels32(px);
