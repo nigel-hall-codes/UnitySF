@@ -1,0 +1,16 @@
+{
+    "name": "SFMap.Graffiti",
+    "rootNamespace": "SFMap.Graffiti",
+    "references": [
+        "SFMap.Pipeline"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
