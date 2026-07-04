@@ -26,7 +26,7 @@ SFSERVER_DB=sfserver.db SFSERVER_ASSETS=assets SFSERVER_EXPORT_DIR="../My projec
 | `GET  /templates` · `POST /templates` | list / author templates |
 | `GET  /palettes` · `POST /palettes` | list / author neighborhood palettes |
 | `POST /building-specific` | store an override (osm_id + footprint_hash) |
-| `POST /buildings/import-sidecar` | ingest the bake's per-chunk building sidecar (v2 `chunk_CC_RR_buildings.json`) |
+| `POST /buildings/import-sidecar` | ingest the bake's per-chunk building sidecar (v3 `chunk_CC_RR_buildings.json`) |
 | `GET  /buildings?neighborhood=…&type=…` | paginated building list (`limit`/`offset`) → `{buildings,total,limit,offset}` |
 | `GET  /buildings/{osm_id}` | full classification facts for one building |
 | `POST /ai/signs/generate` · `GET /signs` | server-mediated AI sign gen (swappable provider) → PNG+thumb+metadata |

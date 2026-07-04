@@ -170,7 +170,7 @@ def _facts(osm_id, neighborhood):
 
 
 def _seed_two_buildings(client):
-    client.post("/buildings/import-sidecar", json={"version": 2, "buildings": [
+    client.post("/buildings/import-sidecar", json={"version": 3, "buildings": [
         _facts(1001, "Mission"), _facts(2002, "Sunset"),
     ]})
     client.post("/building-specific", json={"osm_id": 1001, "footprint_hash": "hash1001"})
@@ -235,7 +235,7 @@ def test_export_scope_neighborhood_without_neighborhood_400s(client, tmp_path):
 def test_export_scope_building_filters_canvas_decals_too(client, tmp_path):
     # A building with only a facade canvas (no building-specific override authored directly)
     # must still be scoped correctly — the override is synthesized from the canvas.
-    client.post("/buildings/import-sidecar", json={"version": 2, "buildings": [
+    client.post("/buildings/import-sidecar", json={"version": 3, "buildings": [
         _facts(3003, "Mission"), _facts(4004, "Mission"),
     ]})
     for osm_id in (3003, 4004):

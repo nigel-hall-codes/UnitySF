@@ -301,12 +301,17 @@ class BuildingFacts(BaseModel):
     base_y: float = 0.0
     facade_height_m: float = 0.0
     street_facades: List[StreetFacade] = Field(default_factory=list)
+    # Best-effort edges relative to street_facades[0] ("front"); None when there's no
+    # front to reason from (#407, sidecar version 3).
+    back_facade: Optional[StreetFacade] = None
+    left_facade: Optional[StreetFacade] = None
+    right_facade: Optional[StreetFacade] = None
     footprint_hash: str = ""
 
 
 class SidecarDoc(BaseModel):
     """One chunk's building sidecar — the POST /buildings/import-sidecar body."""
-    version: int = 2
+    version: int = 3
     buildings: List[BuildingFacts] = Field(default_factory=list)
 
 

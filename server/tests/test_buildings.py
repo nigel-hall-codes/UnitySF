@@ -13,7 +13,7 @@ def _facts(osm_id=65307880, neighborhood="Mission", building_type="retail"):
 
 
 def _sidecar(*buildings):
-    return {"version": 2, "buildings": list(buildings)}
+    return {"version": 3, "buildings": list(buildings)}
 
 
 def test_import_sidecar_and_get_building(client):
@@ -32,10 +32,29 @@ def test_get_unknown_building_404(client):
 
 
 def test_import_rejects_off_version_sidecar(client):
-    # A wrong-version sidecar must fail loud, not silently coerce into v2 shape.
+    # A wrong-version sidecar must fail loud, not silently coerce into v3 shape.
     r = client.post("/buildings/import-sidecar", json={"version": 1, "buildings": [_facts()]})
     assert r.status_code == 400
     assert client.get("/buildings").json()["total"] == 0
+
+
+def test_import_rejects_stale_v2_sidecar(client):
+    # v2 (pre-#407, no back/left/right facades) is a stale bake and must also fail
+    # loud rather than silently importing without the new fields.
+    r = client.post("/buildings/import-sidecar", json={"version": 2, "buildings": [_facts()]})
+    assert r.status_code == 400
+
+
+def test_import_sidecar_stores_back_left_right_facades(client):
+    facts = _facts()
+    facts["back_facade"] = {"edge_index": 0, "bearing_deg": 297.0, "street_osm_id": -1,
+                             "score": 0.0, "edge": [5.0, 6.0, 7.0, 8.0]}
+    r = client.post("/buildings/import-sidecar", json=_sidecar(facts))
+    assert r.status_code == 200
+
+    b = client.get("/buildings/65307880").json()
+    assert b["back_facade"]["edge"] == [5.0, 6.0, 7.0, 8.0]
+    assert b["left_facade"] is None and b["right_facade"] is None
 
 
 def test_reimport_updates_in_place(client):
