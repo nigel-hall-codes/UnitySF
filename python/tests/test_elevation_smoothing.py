@@ -12,17 +12,13 @@ Runs under pytest, or standalone with the project venv:
 from __future__ import annotations
 
 import os
-import sys
 import tempfile
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from sfmap import elevation
 from sfmap.elevation import _low_pass_normalized, _rasterize, clear_cache, parse
 from sfmap.projection import GeoOrigin, OsmBounds
-
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -36,7 +32,6 @@ def _second_diff_energy(grid):
     )
     return float(np.sum(lap * lap))
 
-
 # ---------------------------------------------------------------------------
 # _low_pass_normalized
 # ---------------------------------------------------------------------------
@@ -46,7 +41,6 @@ def test_low_pass_sigma_zero_is_noop():
     covered = np.ones_like(g)
     out = _low_pass_normalized(g, covered, 0.0)
     assert np.array_equal(out, g)
-
 
 def test_low_pass_reduces_high_frequency_energy():
     n = 40
@@ -61,7 +55,6 @@ def test_low_pass_reduces_high_frequency_energy():
     # Overall relief is preserved (mean roughly unchanged).
     assert abs(float(out.mean()) - float(noisy.mean())) < 0.02
 
-
 def test_low_pass_preserves_linear_ramp_interior():
     # A Gaussian leaves a linear function unchanged except near the boundary.
     n = 40
@@ -70,7 +63,6 @@ def test_low_pass_preserves_linear_ramp_interior():
     out = _low_pass_normalized(ramp, covered, sigma_cells=2.0)
     m = 6  # ignore boundary band
     assert np.allclose(out[m:-m, m:-m], ramp[m:-m, m:-m], atol=1e-4)
-
 
 def test_low_pass_no_zero_bleed_from_uncovered():
     # Left half covered & constant 0.8; right half uncovered (outside hull).
@@ -88,7 +80,6 @@ def test_low_pass_no_zero_bleed_from_uncovered():
     assert np.allclose(out[cov], 0.8, atol=1e-5)
     # Uncovered cells are left exactly as they were.
     assert np.array_equal(out[~cov], values[~cov])
-
 
 # ---------------------------------------------------------------------------
 # _rasterize coverage mask
@@ -109,7 +100,6 @@ def test_rasterize_returns_coverage_mask():
     assert covered.max() == 1.0 and covered.mean() > 0.9
     assert float(values.min()) >= 0.0 and float(values.max()) <= 1.0
 
-
 def test_rasterize_marks_outside_hull_uncovered():
     # A small triangle in the corner leaves far cells outside the hull.
     pts = np.array([[0.0, 0.0], [2.0, 0.0], [0.0, 2.0]], dtype=np.float64)
@@ -117,7 +107,6 @@ def test_rasterize_marks_outside_hull_uncovered():
     _values, covered = _rasterize(pts, elevs, 0.0, 1.0, 11, 0.0, 0.0, 10.0, 10.0)
     assert covered[0, 0] == 1.0       # inside the triangle
     assert covered[-1, -1] == 0.0     # far opposite corner, outside hull
-
 
 # ---------------------------------------------------------------------------
 # parse() integration (exercises the cache + CLI default path)
@@ -131,11 +120,9 @@ _CSV = (
     '4,60,"LINESTRING (-122.4000 37.8015, -122.3990 37.8015, -122.3980 37.8015)"\n'
 )
 
-
 def _bounds_origin():
     bounds = OsmBounds(min_lat=37.8000, max_lat=37.8015, min_lon=-122.4000, max_lon=-122.3980)
     return bounds, GeoOrigin.from_bounds(bounds)
-
 
 def _parse_csv(text, **kwargs):
     """Parse a throwaway CSV, clearing its cache so smoothing actually re-runs."""
@@ -157,7 +144,6 @@ def _parse_csv(text, **kwargs):
         if os.path.exists(path):
             os.remove(path)
 
-
 def test_parse_smoothing_stays_normalized_and_smooths():
     raw = _parse_csv(_CSV, resolution=65, smooth_sigma_m=0.0)
     smoothed = _parse_csv(_CSV, resolution=65, smooth_sigma_m=4.0)
@@ -171,11 +157,9 @@ def test_parse_smoothing_stays_normalized_and_smooths():
     # it should reduce it.
     assert _second_diff_energy(smoothed.values) <= _second_diff_energy(raw.values) + 1e-9
 
-
 def test_parse_default_smoothing_enabled():
     # The module default is on; the CLI flag mirrors it.
     assert elevation._HMAP_SMOOTH_SIGMA_M > 0.0
-
 
 def test_cli_default_matches_library_default():
     # sfmap_bake duplicates the default as a literal (to avoid importing scipy
@@ -184,28 +168,6 @@ def test_cli_default_matches_library_default():
 
     assert sfmap_bake._DEFAULT_HMAP_SMOOTH_M == elevation._HMAP_SMOOTH_SIGMA_M
 
-
 # ---------------------------------------------------------------------------
 # standalone runner
 # ---------------------------------------------------------------------------
-
-def _run_all():
-    tests = sorted(
-        (name, obj)
-        for name, obj in globals().items()
-        if name.startswith("test_") and callable(obj)
-    )
-    failures = 0
-    for name, fn in tests:
-        try:
-            fn()
-            print(f"PASS {name}")
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            print(f"FAIL {name}: {exc!r}")
-    print(f"\n{len(tests) - failures}/{len(tests)} passed")
-    return failures
-
-
-if __name__ == "__main__":
-    sys.exit(1 if _run_all() else 0)
