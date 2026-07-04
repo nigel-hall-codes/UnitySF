@@ -33,10 +33,9 @@ namespace SFMap.Pipeline.Editor
 
     public class SFMapImporterWindow : EditorWindow
     {
-        const uint ChunkMagic   = 0x4B4E4843u; // "CHNK"
-        const uint ChunkVersion = 1;
-
-        enum MeshType : byte { Road = 0, Intersection = 1, Sidewalk = 2, Building = 3 }
+        // .bin format constants, MeshType, and the byte-level parse live in
+        // SFMap.Pipeline.ChunkBinReader (runtime assembly) so the edit-mode tests can
+        // exercise the same parser against the Python golden fixture (#426).
 
         [SerializeField] string chunkDir    = "";
         [SerializeField] string presetName  = "default";
@@ -277,37 +276,14 @@ namespace SFMap.Pipeline.Editor
         float ImportChunk(string binPath, ChunkCoord coord, float worldX, float worldZ, GameObject mapRoot)
         {
             StartOp();
-            using var fs     = File.OpenRead(binPath);
-            using var reader = new BinaryReader(fs);
-
-            // ---- Header (40 bytes) ----
-            uint  magic      = reader.ReadUInt32();
-            uint  version    = reader.ReadUInt32();
-            int   col        = reader.ReadInt32();
-            int   row        = reader.ReadInt32();
-            float _worldX    = reader.ReadSingle();
-            float _worldZ    = reader.ReadSingle();
-            float chunkSizeM = reader.ReadSingle();
-            float minElevM   = reader.ReadSingle();
-            float maxElevM   = reader.ReadSingle();
-            int   hmapRes    = reader.ReadInt32();
-
-            if (magic != ChunkMagic)
-                throw new InvalidDataException(
-                    $"Bad magic in {binPath}: expected 0x{ChunkMagic:X8}, got 0x{magic:X8}");
-            if (version != ChunkVersion)
-                throw new InvalidDataException(
-                    $"Unsupported .bin version {version} in {binPath} (expected {ChunkVersion})");
-
-            // ---- Heightmap ----
-            int    hmapCount = hmapRes * hmapRes;
-            byte[] hmapBytes = reader.ReadBytes(hmapCount * 4);
-            var    heights1D = new float[hmapCount];
-            Buffer.BlockCopy(hmapBytes, 0, heights1D, 0, hmapBytes.Length);
-
-            var heights2D = new float[hmapRes, hmapRes]; // [row, col]
-            for (int idx = 0; idx < hmapCount; idx++)
-                heights2D[idx / hmapRes, idx % hmapRes] = heights1D[idx];
+            // Byte-level parse (header + heightmap + all mesh entries) lives in the shared
+            // runtime-side reader; this method just builds Unity assets from the result.
+            ChunkBinData chunk = ChunkBinReader.Read(binPath);
+            int   hmapRes    = chunk.HmapRes;
+            float chunkSizeM = chunk.ChunkSizeM;
+            float minElevM   = chunk.MinElevM;
+            float maxElevM   = chunk.MaxElevM;
+            float[,] heights2D = chunk.Heights;
             StopOp(ref _timings.binParseMs);
 
             EnsureChunkFolder(coord);
@@ -357,20 +333,16 @@ namespace SFMap.Pipeline.Editor
                 StopOp(ref _timings.terrainMs);
 
                 // ---- Mesh entries ----
-                int meshCount = reader.ReadInt32();
-                for (int m = 0; m < meshCount; m++)
+                foreach (var cm in chunk.Meshes)
                 {
-                    var   meshType = (MeshType)reader.ReadByte();
-                    long  osmId    = reader.ReadInt64();
-                    int   vertCnt  = reader.ReadInt32();
-                    int   idxCnt   = reader.ReadInt32();
+                    var  meshType = cm.Type;
+                    long osmId    = cm.OsmId;
+                    var  verts    = cm.Vertices;
+                    var  normals  = cm.Normals;
+                    var  uvs      = cm.Uvs;
+                    var  indices  = cm.Indices;
 
-                    var verts   = ReadVec3Array(reader, vertCnt);
-                    var normals = ReadVec3Array(reader, vertCnt);
-                    var uvs     = ReadVec2Array(reader, vertCnt);
-                    var indices = ReadIndices(reader, idxCnt);
-
-                    if (vertCnt == 0 || idxCnt == 0) continue;
+                    if (verts.Length == 0 || indices.Length == 0) continue;
 
                     StartOp();
                     var mesh = BuildMesh(MeshName(meshType, osmId), verts, normals, uvs, indices);
@@ -378,19 +350,19 @@ namespace SFMap.Pipeline.Editor
 
                     switch (meshType)
                     {
-                        case MeshType.Road:
+                        case ChunkMeshType.Road:
                             CreateOrReplaceAsset(mesh, GeneratedAssets.RoadMesh(coord, osmId));
                             roadMeshes.Add(mesh);
                             break;
-                        case MeshType.Sidewalk:
+                        case ChunkMeshType.Sidewalk:
                             CreateOrReplaceAsset(mesh, GeneratedAssets.SidewalkMesh(coord, osmId));
                             sidewalkMeshes.Add(mesh);
                             break;
-                        case MeshType.Intersection:
+                        case ChunkMeshType.Intersection:
                             CreateOrReplaceAsset(mesh, GeneratedAssets.IntersectionMesh(coord, osmId));
                             intersectionMeshes.Add(mesh);
                             break;
-                        case MeshType.Building:
+                        case ChunkMeshType.Building:
                             // Buildings-tab thumbnails (#369): render + upload a snapshot for every
                             // building — templated or merged-fallback — right here, while its raw
                             // mesh (world-space per the comment above CombineParts) and bounds are
@@ -419,8 +391,8 @@ namespace SFMap.Pipeline.Editor
                                 // stay coherent (#272); otherwise the legacy 7-colour pastel palette.
                                 Color32 c = (assembler != null && assembler.TryFallbackColor(osmId, out var pc))
                                     ? pc : (Color32)BuildingPalette[(int)(Math.Abs(osmId) % BuildingPalette.Length)];
-                                var colors = new Color32[vertCnt];
-                                for (int v = 0; v < vertCnt; v++) colors[v] = c;
+                                var colors = new Color32[verts.Length];
+                                for (int v = 0; v < verts.Length; v++) colors[v] = c;
                                 mesh.SetColors(colors);
                                 buildingParts.Add(mesh);
                             }
@@ -736,12 +708,12 @@ namespace SFMap.Pipeline.Editor
             AssetDatabase.CreateAsset(obj, path);
         }
 
-        static string MeshName(MeshType t, long osmId) => t switch
+        static string MeshName(ChunkMeshType t, long osmId) => t switch
         {
-            MeshType.Road         => $"road_{osmId}",
-            MeshType.Intersection => $"intersection_{osmId}",
-            MeshType.Sidewalk     => $"sidewalk_{osmId}",
-            MeshType.Building     => $"building_{osmId}",
+            ChunkMeshType.Road         => $"road_{osmId}",
+            ChunkMeshType.Intersection => $"intersection_{osmId}",
+            ChunkMeshType.Sidewalk     => $"sidewalk_{osmId}",
+            ChunkMeshType.Building     => $"building_{osmId}",
             _                     => $"mesh_{osmId}",
         };
 
@@ -1084,38 +1056,6 @@ namespace SFMap.Pipeline.Editor
             if (req.result != UnityWebRequest.Result.Success)
                 Debug.LogWarning($"[SFMapImporter] Building {osmId}: facade {facade} backdrop upload " +
                                  $"to {url} failed ({req.responseCode}): {req.error}");
-        }
-
-        static Vector3[] ReadVec3Array(BinaryReader r, int count)
-        {
-            var bytes  = r.ReadBytes(count * 12);
-            var result = new Vector3[count];
-            for (int i = 0; i < count; i++)
-                result[i] = new Vector3(
-                    BitConverter.ToSingle(bytes, i * 12),
-                    BitConverter.ToSingle(bytes, i * 12 + 4),
-                    BitConverter.ToSingle(bytes, i * 12 + 8));
-            return result;
-        }
-
-        static Vector2[] ReadVec2Array(BinaryReader r, int count)
-        {
-            var bytes  = r.ReadBytes(count * 8);
-            var result = new Vector2[count];
-            for (int i = 0; i < count; i++)
-                result[i] = new Vector2(
-                    BitConverter.ToSingle(bytes, i * 8),
-                    BitConverter.ToSingle(bytes, i * 8 + 4));
-            return result;
-        }
-
-        static int[] ReadIndices(BinaryReader r, int count)
-        {
-            var bytes  = r.ReadBytes(count * 4);
-            var result = new int[count];
-            for (int i = 0; i < count; i++)
-                result[i] = (int)BitConverter.ToUInt32(bytes, i * 4);
-            return result;
         }
 
         static bool AllZero(Vector3[] vecs)
