@@ -137,6 +137,59 @@ def test_no_facade_when_roads_far_away():
     assert rank_street_facades(rect, [far]) == []
 
 
+# --- opposite_facades: back/left/right relative to front (#407) -------------
+
+def test_opposite_facades_rect_picks_correct_edges():
+    # Rect with edge 0 (bottom, v0->v1) facing the road → front. Back is the top
+    # edge (edge 2), left/right are the two sides.
+    rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    road = (42, [(-5.0, -8.0), (15.0, -8.0)])
+    front = rank_street_facades(rect, [road])[0]
+    assert front.edge_index == 0
+
+    from sfmap.classify import opposite_facades
+    back, left, right = opposite_facades(rect, front)
+    assert back.edge_index == 2
+    assert {left.edge_index, right.edge_index} == {1, 3}
+    # Neither is scored against a real street.
+    assert back.street_osm_id == -1 and back.score == 0.0
+
+
+def test_opposite_facades_none_edges_are_not_scored_streets():
+    rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    road = (42, [(-5.0, -8.0), (15.0, -8.0)])
+    front = rank_street_facades(rect, [road])[0]
+    from sfmap.classify import opposite_facades
+    back, left, right = opposite_facades(rect, front)
+    for f in (back, left, right):
+        assert f.street_osm_id == -1
+        assert f.score == 0.0
+
+
+def test_classify_building_computes_back_left_right_when_street_facade_exists():
+    rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    road = (42, [(-5.0, -8.0), (15.0, -8.0)])
+    rec = classify_building(
+        osm_id=11, footprint=rect, height=9.0, building_type=None,
+        roads=[road], neighborhood="",
+    )
+    assert rec.street_facades[0].edge_index == 0
+    assert rec.back_facade is not None and rec.back_facade.edge_index == 2
+    assert {rec.left_facade.edge_index, rec.right_facade.edge_index} == {1, 3}
+
+
+def test_classify_building_leaves_back_left_right_none_without_street_facade():
+    rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
+    rec = classify_building(
+        osm_id=12, footprint=rect, height=9.0, building_type=None,
+        roads=[], neighborhood="",
+    )
+    assert rec.street_facades == []
+    assert rec.back_facade is None
+    assert rec.left_facade is None
+    assert rec.right_facade is None
+
+
 # --- top-level classify_building --------------------------------------------
 
 def test_classify_building_floor_count_and_passthrough():
@@ -221,7 +274,7 @@ def test_write_buildings_schema_and_sorted(tmp_path):
     assert out is not None
     assert out.name == "chunk_03_04_buildings.json"
     data = json.loads(out.read_text(encoding="utf-8"))
-    assert data["version"] == 2
+    assert data["version"] == 3
     ids = [b["osm_id"] for b in data["buildings"]]
     assert ids == [10, 20]                 # ascending osm_id (deterministic)
     b20 = data["buildings"][1]
@@ -232,6 +285,30 @@ def test_write_buildings_schema_and_sorted(tmp_path):
     f = b20["street_facades"][0]
     assert f == {"edge_index": 1, "bearing_deg": 90.0, "street_osm_id": 555,
                  "score": 0.8, "edge": [10.0, 20.0, 15.0, 20.0]}
+    # No back/left/right computed for this record → all three serialize as null.
+    assert b20["back_facade"] is None
+    assert b20["left_facade"] is None
+    assert b20["right_facade"] is None
+
+
+def test_write_buildings_serializes_back_left_right_facades(tmp_path):
+    rec = ClassificationRecord(
+        osm_id=30, neighborhood="Sunset", building_type="house",
+        footprint_shape="rect", width_m=10.0, depth_m=5.0, height_m=9.0,
+        floor_count=3,
+        street_facades=[StreetFacade(0, 180.0, 555, 0.8, x0=0.0, z0=0.0, x1=10.0, z1=0.0)],
+        back_facade=StreetFacade(2, 0.0, -1, 0.0, x0=10.0, z0=5.0, x1=0.0, z1=5.0),
+        left_facade=StreetFacade(1, 90.0, -1, 0.0, x0=10.0, z0=0.0, x1=10.0, z1=5.0),
+        right_facade=StreetFacade(3, 270.0, -1, 0.0, x0=0.0, z0=5.0, x1=0.0, z1=0.0),
+        footprint_hash="deadbeef", base_y=0.0, facade_height_m=9.0,
+    )
+    out = write_buildings(_chunk_with([rec]), str(tmp_path))
+    data = json.loads(out.read_text(encoding="utf-8"))
+    b = data["buildings"][0]
+    assert b["back_facade"] == {"edge_index": 2, "bearing_deg": 0.0, "street_osm_id": -1,
+                                 "score": 0.0, "edge": [10.0, 5.0, 0.0, 5.0]}
+    assert b["left_facade"]["edge_index"] == 1
+    assert b["right_facade"]["edge_index"] == 3
 
 
 def test_write_buildings_none_when_empty(tmp_path):

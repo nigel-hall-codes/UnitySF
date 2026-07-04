@@ -58,6 +58,12 @@ _FACADE_ROAD_DIST_M = 30.0
 # Minimum combined score for an edge to be reported as a street facade at all.
 _MIN_FACADE_SCORE = 0.15
 
+# Compass offsets (deg) from the front facade's outward bearing to back/left/right,
+# used to pick each one's best-matching footprint edge (#407).
+_BACK_OFFSET_DEG = 180.0
+_LEFT_OFFSET_DEG = -90.0
+_RIGHT_OFFSET_DEG = 90.0
+
 
 @dataclass
 class StreetFacade:
@@ -93,6 +99,11 @@ class ClassificationRecord:
     footprint_hash: str = ""
     base_y: float = 0.0              # foundation Y (mass wall flat bottom); facade decal anchor (#279)
     facade_height_m: float = 0.0     # floor_count × floor height — the canvas's facade UV height (#279)
+    # Best-effort back/left/right edges, relative to street_facades[0] ("front");
+    # None when there's no front to reason from (no street facades at all) (#407).
+    back_facade: Optional[StreetFacade] = None
+    left_facade: Optional[StreetFacade] = None
+    right_facade: Optional[StreetFacade] = None
 
 
 # ---------------------------------------------------------------------------
@@ -373,6 +384,57 @@ def _outward_bearing(a: Point, b: Point, ccw: bool) -> float:
     return (math.degrees(math.atan2(nx, nz)) + 360.0) % 360.0
 
 
+def _bearing_delta(a: float, b: float) -> float:
+    """Smallest absolute difference between two compass bearings, in [0, 180]."""
+    d = abs(a - b) % 360.0
+    return d if d <= 180.0 else 360.0 - d
+
+
+def opposite_facades(
+    ring: Sequence[Point], front: StreetFacade
+) -> Tuple[Optional[StreetFacade], Optional[StreetFacade], Optional[StreetFacade]]:
+    """Best-effort back/left/right edges for a footprint, relative to its ``front``
+    street facade (#407, data-model.md §1).
+
+    For each of back/left/right, picks the ring edge whose outward bearing is
+    closest to front's bearing offset by 180/-90/+90 degrees — the wall most nearly
+    opposite, left of, or right of the front. Exact for a rectangular footprint and
+    a reasonable approximation for L/corner shapes, which is all the per-facade
+    backdrop render needs: a wrong pick only shows a real photo from a slightly
+    different angle, never the misleading procedural fallback it replaces.
+
+    Unlike ``rank_street_facades``, these edges aren't scored against roads —
+    ``score`` is always 0.0 and ``street_osm_id`` is always -1 (no street).
+    """
+    pts = _drop_closing(ring)
+    n = len(pts)
+    if n < 3:
+        return None, None, None
+    ccw = _signed_area(pts) > 0
+
+    edges = []
+    for i in range(n):
+        a, b = pts[i], pts[(i + 1) % n]
+        elen = math.hypot(b[0] - a[0], b[1] - a[1])
+        if elen < 1e-9:
+            continue
+        edges.append((i, a, b, _outward_bearing(a, b, ccw)))
+    if not edges:
+        return None, None, None
+
+    def best_for(offset: float) -> StreetFacade:
+        target = (front.bearing_deg + offset) % 360.0
+        i, a, b, bearing = min(edges, key=lambda e: _bearing_delta(e[3], target))
+        return StreetFacade(
+            edge_index=i, bearing_deg=round(bearing, 1),
+            street_osm_id=-1, score=0.0,
+            x0=round(a[0], 3), z0=round(a[1], 3),
+            x1=round(b[0], 3), z1=round(b[1], 3),
+        )
+
+    return (best_for(_BACK_OFFSET_DEG), best_for(_LEFT_OFFSET_DEG), best_for(_RIGHT_OFFSET_DEG))
+
+
 def rank_street_facades(
     ring: Sequence[Point],
     roads: Sequence[Tuple[int, Sequence[Point]]],
@@ -470,6 +532,10 @@ def classify_building(
     eff_height = height if height > 0.0 else _DEFAULT_HEIGHT_M
     long_m, short_m = _oriented_bbox(_drop_closing(footprint))
     floor_count = max(1, round(eff_height / _FLOOR_HEIGHT_M))
+    street_facades = rank_street_facades(footprint, roads)
+    back_facade = left_facade = right_facade = None
+    if street_facades:
+        back_facade, left_facade, right_facade = opposite_facades(footprint, street_facades[0])
     return ClassificationRecord(
         osm_id=osm_id,
         neighborhood=neighborhood,
@@ -479,10 +545,13 @@ def classify_building(
         depth_m=round(short_m, 1),
         height_m=round(eff_height, 1),
         floor_count=floor_count,
-        street_facades=rank_street_facades(footprint, roads),
+        street_facades=street_facades,
         footprint_hash=footprint_hash(footprint),
         base_y=round(base_y, 3),
         facade_height_m=round(floor_count * _FLOOR_HEIGHT_M, 3),
+        back_facade=back_facade,
+        left_facade=left_facade,
+        right_facade=right_facade,
     )
 
 
