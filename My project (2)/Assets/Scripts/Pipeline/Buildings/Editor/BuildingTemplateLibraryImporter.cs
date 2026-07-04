@@ -22,7 +22,7 @@ namespace SFMap.Pipeline.Buildings.Editor
     /// </summary>
     public static class BuildingTemplateLibraryImporter
     {
-        private const string LibraryRoot = "Assets/SFBuildingTemplates";
+        private const string LibraryRoot = SFBuildingTemplatePaths.LibraryRoot;
         private const string GeneratedRoot = LibraryRoot + "/Generated";
 
         [MenuItem("SFMap/Rebuild Building Template Library")]

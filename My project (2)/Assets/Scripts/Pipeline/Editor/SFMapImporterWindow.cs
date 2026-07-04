@@ -986,8 +986,7 @@ namespace SFMap.Pipeline.Editor
                 // sidecar bearing, same convention BuildingAssembler.PlacePart uses), level
                 // (Vector3.up), centred on the wall both along its width and its height.
                 Vector3 center  = (a + b) * 0.5f + Vector3.up * (wallHeight * 0.5f);
-                float br        = f.bearing_deg * Mathf.Deg2Rad;
-                Vector3 outward = new Vector3(Mathf.Sin(br), 0f, Mathf.Cos(br));
+                Vector3 outward = FacadeFrame.OutwardNormal(f.bearing_deg);
                 float distance  = Mathf.Max(wallLen, wallHeight) + 5f;
                 camGo.transform.position = center + outward * distance;
                 camGo.transform.LookAt(center, Vector3.up);

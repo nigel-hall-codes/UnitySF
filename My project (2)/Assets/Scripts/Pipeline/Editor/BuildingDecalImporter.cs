@@ -4,6 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 using SFMap.Pipeline;
+using SFMap.Pipeline.Buildings;
 
 namespace SFMap.Pipeline.Editor
 {
@@ -18,7 +19,7 @@ namespace SFMap.Pipeline.Editor
     /// </summary>
     public static class BuildingDecalImporter
     {
-        const string LibraryRoot = "Assets/SFBuildingTemplates";
+        const string LibraryRoot = SFBuildingTemplatePaths.LibraryRoot;
         const float FloorHeightMeters = 3.0f;
 
         /// <summary>Build the chunk's facade decals under <paramref name="chunkRoot"/>. No-op when the
@@ -128,8 +129,7 @@ namespace SFMap.Pipeline.Editor
             if (len < 1e-4f) return false;
             along /= len;
 
-            float br = facade.bearing_deg * Mathf.Deg2Rad;
-            Vector3 outward = new Vector3(Mathf.Sin(br), 0f, Mathf.Cos(br));
+            Vector3 outward = FacadeFrame.OutwardNormal(facade.bearing_deg);
             float fh = Mathf.Max(f.facade_height_m, FloorHeightMeters);
 
             float rx0 = d.rect[0], ry0 = d.rect[1], rx1 = d.rect[2], ry1 = d.rect[3];
@@ -212,22 +212,9 @@ namespace SFMap.Pipeline.Editor
         public static List<OverrideJson> LoadDecalOverrides()
         {
             var list = new List<OverrideJson>();
-            string abs = Path.Combine(Application.dataPath, "SFBuildingTemplates/Overrides");
-            if (!Directory.Exists(abs)) return list;
-            foreach (string file in Directory.GetFiles(abs, "*.override.json", SearchOption.AllDirectories))
-            {
-                if (!file.EndsWith(".override.json", StringComparison.OrdinalIgnoreCase)) continue;
-                try
-                {
-                    var ov = JsonUtility.FromJson<OverrideJson>(File.ReadAllText(file));
-                    if (ov != null && ov.facadeDecals != null && ov.facadeDecals.Length > 0)
-                        list.Add(ov);
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogWarning($"[BuildingDecalImporter] Failed to parse override {file}: {ex.Message}");
-                }
-            }
+            foreach (var ov in BuildingAssembler.ScanOverrides())
+                if (ov.facadeDecals != null && ov.facadeDecals.Length > 0)
+                    list.Add(ov);
             return list;
         }
 
