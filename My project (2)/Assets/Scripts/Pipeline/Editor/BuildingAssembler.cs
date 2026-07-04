@@ -30,6 +30,11 @@ namespace SFMap.Pipeline.Editor
         public float base_y;            // mass foundation Y (#279)
         public float facade_height_m;   // floor_count × floor height (#279)
         public StreetFacadeJson[] street_facades;
+        // Best-effort edges relative to street_facades[0] ("front"); null when there's
+        // no front to reason from (#407, sidecar version 3).
+        public StreetFacadeJson back_facade;
+        public StreetFacadeJson left_facade;
+        public StreetFacadeJson right_facade;
         public string footprint_hash;
     }
 
@@ -526,14 +531,28 @@ namespace SFMap.Pipeline.Editor
             return false;
         }
 
-        // The facade(s) a placement targets: Front → primary street facade; Street → every
-        // ranked street facade; other faces aren't carried in the sidecar (MVP) → warn + none.
+        // The facade(s) a placement targets: Front → primary street facade; Back/Left/Right →
+        // the matching best-effort edge (#407, null if the building had no front to reason
+        // one from); Street → every ranked street facade; Roof isn't a placement target here
+        // (PlaceRoofParts always targets Street) → warn + none.
         IEnumerable<StreetFacadeJson> FacadesFor(Facade facade, BuildingFactsJson facts)
         {
             if (facade == Facade.Front)
             {
                 var f = PrimaryFacade(facts);
                 if (f != null) yield return f;
+            }
+            else if (facade == Facade.Back)
+            {
+                if (facts.back_facade != null) yield return facts.back_facade;
+            }
+            else if (facade == Facade.Left)
+            {
+                if (facts.left_facade != null) yield return facts.left_facade;
+            }
+            else if (facade == Facade.Right)
+            {
+                if (facts.right_facade != null) yield return facts.right_facade;
             }
             else if (facade == Facade.Street)
             {
@@ -543,7 +562,7 @@ namespace SFMap.Pipeline.Editor
             else
             {
                 Debug.LogWarning($"[BuildingAssembler] building {facts.osm_id}: facade {facade} not " +
-                                 "supported yet (only Front/Street carry sidecar geometry); skipped.");
+                                 "supported as a placement target; skipped.");
             }
         }
 
@@ -736,7 +755,9 @@ namespace SFMap.Pipeline.Editor
             return null;
         }
 
-        static StreetFacadeJson PrimaryFacade(BuildingFactsJson facts)
+        // internal: also used by SFMapImporterWindow to pick the front edge for facade
+        // backdrop renders (#407).
+        internal static StreetFacadeJson PrimaryFacade(BuildingFactsJson facts)
             => (facts.street_facades != null && facts.street_facades.Length > 0)
                 ? facts.street_facades[0] : null;
 

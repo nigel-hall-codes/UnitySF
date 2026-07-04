@@ -199,27 +199,44 @@ def write_parked_cars(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     return out_path
 
 
+def _facade_json(f: "StreetFacade") -> dict:
+    return {
+        "edge_index": f.edge_index,
+        "bearing_deg": round(f.bearing_deg, 1),
+        "street_osm_id": f.street_osm_id,
+        "score": round(f.score, 2),
+        "edge": [round(f.x0, 3), round(f.z0, 3), round(f.x1, 3), round(f.z1, 3)],
+    }
+
+
 def write_buildings(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     """Write chunk_CC_RR_buildings.json — the per-building classification sidecar.
 
-    JSON schema (data-model.md §1; version 2 adds the #279 facade edge geometry).
-    Unity reads this as a TextAsset at import time:
-      {"version":2,"buildings":[
+    JSON schema (data-model.md §1; version 2 adds the #279 facade edge geometry,
+    version 3 adds the #407 back/left/right facade edges). Unity reads this as a
+    TextAsset at import time:
+      {"version":3,"buildings":[
         {"osm_id":65307880,"neighborhood":"Mission","building_type":"retail",
          "footprint_shape":"corner","width_m":11.4,"depth_m":18.2,"height_m":12.0,
          "floor_count":4,"base_y":42.3,"facade_height_m":12.0,
          "street_facades":[{"edge_index":2,"bearing_deg":117.0,"street_osm_id":8412731,
                             "score":0.94,"edge":[x0,z0,x1,z1]}],
+         "back_facade":{"edge_index":0,"bearing_deg":297.0,"street_osm_id":-1,
+                        "score":0.0,"edge":[x0,z0,x1,z1]},
+         "left_facade":null,"right_facade":null,
          "footprint_hash":"a3f1c9d2"}]}
 
     These are classification *facts* only — Unity chooses templates. ``base_y`` (the
     mass's flat foundation Y) and ``facade_height_m`` (floor_count × floor height) are
-    building-wide; each ``street_facades`` entry adds ``edge`` — the wall edge's two
-    world-XZ endpoints — so the facade-decal importer (#279) can anchor a quad without
-    the per-building mass, which is destroyed at mesh-combine. Records are emitted in
-    ascending ``osm_id`` order so a re-bake of the same inputs produces a byte-identical
-    file (the determinism contract, data-model.md §6). Returns None and writes nothing
-    when the chunk has no classified buildings (e.g. --templates off, or no buildings).
+    building-wide; each facade entry adds ``edge`` — the wall edge's two world-XZ
+    endpoints — so the facade-decal importer (#279) and per-facade backdrop render
+    (#407) can anchor without the per-building mass, which is destroyed at
+    mesh-combine. ``back_facade``/``left_facade``/``right_facade`` are null when the
+    building has no street facade to reason a front from (data-model.md §1: #407).
+    Records are emitted in ascending ``osm_id`` order so a re-bake of the same inputs
+    produces a byte-identical file (the determinism contract, data-model.md §6).
+    Returns None and writes nothing when the chunk has no classified buildings (e.g.
+    --templates off, or no buildings).
     """
     if not chunk.buildings:
         return None
@@ -237,23 +254,17 @@ def write_buildings(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
             "floor_count": b.floor_count,
             "base_y": round(b.base_y, 3),
             "facade_height_m": round(b.facade_height_m, 3),
-            "street_facades": [
-                {
-                    "edge_index": f.edge_index,
-                    "bearing_deg": round(f.bearing_deg, 1),
-                    "street_osm_id": f.street_osm_id,
-                    "score": round(f.score, 2),
-                    "edge": [round(f.x0, 3), round(f.z0, 3), round(f.x1, 3), round(f.z1, 3)],
-                }
-                for f in b.street_facades
-            ],
+            "street_facades": [_facade_json(f) for f in b.street_facades],
+            "back_facade": _facade_json(b.back_facade) if b.back_facade else None,
+            "left_facade": _facade_json(b.left_facade) if b.left_facade else None,
+            "right_facade": _facade_json(b.right_facade) if b.right_facade else None,
             "footprint_hash": b.footprint_hash,
         })
 
     out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_buildings.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
-        json.dumps({"version": 2, "buildings": buildings}, ensure_ascii=False),
+        json.dumps({"version": 3, "buildings": buildings}, ensure_ascii=False),
         encoding="utf-8",
     )
     return out_path

@@ -83,6 +83,12 @@ namespace SFMap.Pipeline.Editor
         const string ServerBaseUrl = "http://localhost:8000";
         const int    ThumbSize     = 512;
 
+        // Facade backdrops (#407): fixed vertical resolution, width derived per building
+        // from the wall's real aspect ratio (see RenderFacadeBackdrop).
+        const int FacadeBackdropHeight   = 768;
+        const int FacadeBackdropMinWidth = 128;
+        const int FacadeBackdropMaxWidth = 1536;
+
         // --------------------------------------------------------------- timing
         // Stage 2 had no instrumentation (#260): it logged only a chunk count, so
         // every guess about what's slow was unverifiable. These accumulate per-op
@@ -393,6 +399,11 @@ namespace SFMap.Pipeline.Editor
                                 // saves the combined per-building mesh asset — so no fallback bake
                                 // here. Just set the mass mesh aside.
                                 templated.Add((osmId, mesh, bFacts, bTpl));
+
+                                // Facade backdrops (#407): needs the sidecar's facade edge geometry,
+                                // which only templated buildings carry (same scope as facade decals
+                                // placed via FacadesFor) — best-effort, mirrors the thumbnail above.
+                                RenderAndUploadFacadeBackdrops(osmId, mesh, bFacts);
                             }
                             else
                             {
@@ -887,6 +898,144 @@ namespace SFMap.Pipeline.Editor
             if (req.result != UnityWebRequest.Result.Success)
                 Debug.LogWarning($"[SFMapImporter] Building {osmId}: thumbnail upload to {url} " +
                                  $"failed ({req.responseCode}): {req.error}");
+        }
+
+        // ------------------------------------------------------- facade backdrops (#407)
+
+        // Best-effort: render a straight-on elevation of every facade this building's
+        // sidecar carries edge geometry for (front/back/left/right) and PUT each to the
+        // canvas backdrop endpoint. Unlike the whole-building thumbnail above (#369, a 3/4
+        // angle over the flat-colour mass), this is an orthographic per-wall capture, so it
+        // can serve as a real drawing reference on every facade instead of only front/street
+        // (the restriction #392 had to add for lack of exactly this). Any failure (server
+        // down, render hiccup) is logged and swallowed per-facade — same reasoning as
+        // RenderAndUploadBuildingThumbnail: a missing backdrop is the "returns nil
+        // gracefully" fallback the client already handles.
+        static void RenderAndUploadFacadeBackdrops(long osmId, Mesh mesh, BuildingFactsJson facts)
+        {
+            void TryOne(Facade facade, StreetFacadeJson f)
+            {
+                if (f == null) return;
+                try
+                {
+                    byte[] jpg = RenderFacadeBackdrop(mesh, osmId, facts, f);
+                    if (jpg == null) return;
+                    UploadFacadeBackdrop(osmId, facade, jpg);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[SFMapImporter] Building {osmId} facade {facade}: " +
+                                     $"backdrop render/upload failed: {e.Message}");
+                }
+            }
+
+            TryOne(Facade.Front, BuildingAssembler.PrimaryFacade(facts));
+            TryOne(Facade.Back,  facts.back_facade);
+            TryOne(Facade.Left,  facts.left_facade);
+            TryOne(Facade.Right, facts.right_facade);
+        }
+
+        // Isolated-preview-scene capture (same reasoning as RenderBuildingThumbnail: a plain
+        // cullingMask can't stop the camera seeing other chunks' geometry at real world
+        // coordinates), but framed orthographically and dead-on to the wall instead of a 3/4
+        // perspective — a true elevation, which is the whole point of #407 over reusing the
+        // thumbnail. The render texture's aspect matches the wall's real width:height so the
+        // building's actual proportions come through instead of being squashed to a square.
+        static byte[] RenderFacadeBackdrop(Mesh mesh, long osmId, BuildingFactsJson facts, StreetFacadeJson f)
+        {
+            if (f.edge == null || f.edge.Length < 4) return null;
+            Vector3 a = new Vector3(f.edge[0], facts.base_y, f.edge[1]);
+            Vector3 b = new Vector3(f.edge[2], facts.base_y, f.edge[3]);
+            float wallLen = Vector3.Distance(a, b);
+            float wallHeight = Mathf.Max(facts.facade_height_m, 1f);
+            if (wallLen < 1e-3f) return null;
+
+            var previewScene   = default(Scene);
+            bool previewOpen   = false;
+            Material   mat     = null;
+            RenderTexture rt   = null;
+            Texture2D  tex     = null;
+            RenderTexture prevActive = RenderTexture.active;
+            try
+            {
+                previewScene = EditorSceneManager.NewPreviewScene();
+                previewOpen  = true;
+
+                var meshGo = new GameObject($"BackdropMesh_{osmId}") { hideFlags = HideFlags.HideAndDontSave };
+                meshGo.AddComponent<MeshFilter>().sharedMesh = mesh;
+                mat = new Material(Shader.Find("Unlit/Color"))
+                {
+                    color = BuildingPalette[(int)(Math.Abs(osmId) % BuildingPalette.Length)],
+                };
+                meshGo.AddComponent<MeshRenderer>().sharedMaterial = mat;
+                SceneManager.MoveGameObjectToScene(meshGo, previewScene);
+
+                var camGo = new GameObject($"BackdropCam_{osmId}") { hideFlags = HideFlags.HideAndDontSave };
+                var cam = camGo.AddComponent<Camera>();
+                cam.scene            = previewScene; // renders ONLY this preview scene's contents
+                cam.clearFlags       = CameraClearFlags.SolidColor;
+                cam.backgroundColor  = new Color(0.82f, 0.82f, 0.82f, 1f);
+                cam.orthographic     = true;
+                cam.orthographicSize = wallHeight * 0.5f; // Unity's orthographicSize is half-height
+                cam.nearClipPlane    = 0.05f;
+                SceneManager.MoveGameObjectToScene(camGo, previewScene);
+
+                // Dead-on to the wall: position along its outward normal (straight from the
+                // sidecar bearing, same convention BuildingAssembler.PlacePart uses), level
+                // (Vector3.up), centred on the wall both along its width and its height.
+                Vector3 center  = (a + b) * 0.5f + Vector3.up * (wallHeight * 0.5f);
+                float br        = f.bearing_deg * Mathf.Deg2Rad;
+                Vector3 outward = new Vector3(Mathf.Sin(br), 0f, Mathf.Cos(br));
+                float distance  = Mathf.Max(wallLen, wallHeight) + 5f;
+                camGo.transform.position = center + outward * distance;
+                camGo.transform.LookAt(center, Vector3.up);
+                cam.farClipPlane = distance + 5f;
+
+                int height = FacadeBackdropHeight;
+                int width  = Mathf.Clamp(Mathf.RoundToInt(height * (wallLen / wallHeight)),
+                                          FacadeBackdropMinWidth, FacadeBackdropMaxWidth);
+                cam.aspect = (float)width / height;
+
+                rt = new RenderTexture(width, height, 24, RenderTextureFormat.ARGB32);
+                cam.targetTexture = rt;
+                cam.Render();
+
+                RenderTexture.active = rt;
+                tex = new Texture2D(width, height, TextureFormat.RGB24, false);
+                tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+                tex.Apply();
+
+                return ImageConversion.EncodeToJPG(tex, 85);
+            }
+            finally
+            {
+                RenderTexture.active = prevActive;
+                if (tex != null) DestroyImmediate(tex);
+                if (rt != null)
+                {
+                    rt.Release();
+                    DestroyImmediate(rt);
+                }
+                if (mat != null) DestroyImmediate(mat);
+                if (previewOpen) EditorSceneManager.ClosePreviewScene(previewScene);
+            }
+        }
+
+        // Blocking PUT, same pattern as UploadBuildingThumbnail. `facade` stringifies to
+        // "Front"/"Back"/"Left"/"Right" — the exact facade key convention the canvas
+        // endpoint and its tests already use (server/tests/test_canvas.py).
+        static void UploadFacadeBackdrop(long osmId, Facade facade, byte[] jpgBytes)
+        {
+            string url = $"{ServerBaseUrl}/canvas/{osmId}/{facade}/backdrop";
+            using var req = UnityWebRequest.Put(url, jpgBytes);
+            req.SetRequestHeader("Content-Type", "image/jpeg");
+            req.timeout = 5; // seconds
+            var op = req.SendWebRequest();
+            while (!op.isDone) { }
+
+            if (req.result != UnityWebRequest.Result.Success)
+                Debug.LogWarning($"[SFMapImporter] Building {osmId}: facade {facade} backdrop upload " +
+                                 $"to {url} failed ({req.responseCode}): {req.error}");
         }
 
         static Vector3[] ReadVec3Array(BinaryReader r, int count)
