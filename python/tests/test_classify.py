@@ -1,9 +1,5 @@
 """Tests for building classification (facts emission) and the buildings sidecar."""
 import json
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
@@ -21,18 +17,15 @@ from sfmap.elevation import HeightmapData
 from sfmap.geometry.building import building_base_y
 from sfmap.serialize import ChunkData, write_buildings
 
-
 # --- footprint_hash: normative algorithm (data-model.md §6.1) ---------------
 
 _SQUARE = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
-
 
 def test_footprint_hash_is_deterministic_and_8_hex():
     h = footprint_hash(_SQUARE)
     assert h == footprint_hash(list(_SQUARE))
     assert len(h) == 8
     int(h, 16)  # valid hex
-
 
 def test_footprint_hash_invariant_to_start_vertex_and_winding():
     base = footprint_hash(_SQUARE)
@@ -44,7 +37,6 @@ def test_footprint_hash_invariant_to_start_vertex_and_winding():
     # A trailing closing-duplicate vertex must not change the hash.
     assert footprint_hash(_SQUARE + [_SQUARE[0]]) == base
 
-
 def test_footprint_hash_quantization_absorbs_subgrid_edits_but_not_larger():
     base = footprint_hash(_SQUARE)
     # A 0.1 m nudge (< 0.25 m grid) snaps back to the same cell → same hash.
@@ -54,7 +46,6 @@ def test_footprint_hash_quantization_absorbs_subgrid_edits_but_not_larger():
     moved = [(0.5, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
     assert footprint_hash(moved) != base
 
-
 # --- oriented bounding box --------------------------------------------------
 
 def test_oriented_bbox_axis_aligned_rect():
@@ -62,7 +53,6 @@ def test_oriented_bbox_axis_aligned_rect():
     long_m, short_m = _oriented_bbox(rect)
     assert round(long_m, 2) == 10.0
     assert round(short_m, 2) == 4.0
-
 
 def test_oriented_bbox_recovers_dims_of_rotated_rect():
     # A 10×4 rectangle rotated 30°: the min-area box must still be ~10×4.
@@ -74,28 +64,23 @@ def test_oriented_bbox_recovers_dims_of_rotated_rect():
     assert abs(long_m - 10.0) < 0.1
     assert abs(short_m - 4.0) < 0.1
 
-
 # --- footprint_shape classifier ---------------------------------------------
 
 def test_shape_square_is_rect():
     assert footprint_shape(_SQUARE) == "rect"
-
 
 def test_shape_l_shape_is_L():
     # 10×10 with a 5×5 notch removed from one corner → fills 75% of its bbox.
     l = [(0, 0), (10, 0), (10, 5), (5, 5), (5, 10), (0, 10)]
     assert footprint_shape(l) == "L"
 
-
 def test_shape_chamfered_square_is_corner():
     chamfered = [(0, 0), (10, 0), (10, 8), (8, 10), (0, 10)]
     assert footprint_shape(chamfered) == "corner"
 
-
 def test_shape_triangle_is_irregular():
     tri = [(0, 0), (10, 0), (0, 10)]
     assert footprint_shape(tri) == "irregular"
-
 
 # --- street facade ranking (data-model.md §1, design D2) --------------------
 
@@ -109,7 +94,6 @@ def test_facade_dedupes_to_strongest_edge_per_street():
     assert facades[0].edge_index == 0           # the bottom edge
     assert facades[0].street_osm_id == 42
 
-
 def test_facade_carries_world_edge_endpoints():
     # The reported facade must carry the two world-XZ endpoints of its footprint
     # edge (#279) so the decal importer can anchor a quad. Edge 0 = v0->v1.
@@ -117,7 +101,6 @@ def test_facade_carries_world_edge_endpoints():
     road = (42, [(-5.0, -8.0), (15.0, -8.0)])
     f = rank_street_facades(rect, [road])[0]
     assert (f.x0, f.z0, f.x1, f.z1) == (0.0, 0.0, 10.0, 0.0)
-
 
 def test_corner_building_faces_two_streets_ranked():
     # Two perpendicular roads → a corner building reports two facades (D2).
@@ -130,12 +113,10 @@ def test_corner_building_faces_two_streets_ranked():
     # Sorted strongest-first, deterministic tie-break by edge_index.
     assert facades == sorted(facades, key=lambda f: (-f.score, f.edge_index))
 
-
 def test_no_facade_when_roads_far_away():
     rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
     far = (1, [(0.0, 500.0), (10.0, 500.0)])
     assert rank_street_facades(rect, [far]) == []
-
 
 # --- opposite_facades: back/left/right relative to front (#407) -------------
 
@@ -154,7 +135,6 @@ def test_opposite_facades_rect_picks_correct_edges():
     # Neither is scored against a real street.
     assert back.street_osm_id == -1 and back.score == 0.0
 
-
 def test_opposite_facades_none_edges_are_not_scored_streets():
     rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
     road = (42, [(-5.0, -8.0), (15.0, -8.0)])
@@ -164,7 +144,6 @@ def test_opposite_facades_none_edges_are_not_scored_streets():
     for f in (back, left, right):
         assert f.street_osm_id == -1
         assert f.score == 0.0
-
 
 def test_classify_building_computes_back_left_right_when_street_facade_exists():
     rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
@@ -177,7 +156,6 @@ def test_classify_building_computes_back_left_right_when_street_facade_exists():
     assert rec.back_facade is not None and rec.back_facade.edge_index == 2
     assert {rec.left_facade.edge_index, rec.right_facade.edge_index} == {1, 3}
 
-
 def test_classify_building_leaves_back_left_right_none_without_street_facade():
     rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 5.0), (0.0, 5.0)]
     rec = classify_building(
@@ -188,7 +166,6 @@ def test_classify_building_leaves_back_left_right_none_without_street_facade():
     assert rec.back_facade is None
     assert rec.left_facade is None
     assert rec.right_facade is None
-
 
 # --- top-level classify_building --------------------------------------------
 
@@ -205,7 +182,6 @@ def test_classify_building_floor_count_and_passthrough():
     assert rec.footprint_shape == "rect"
     assert len(rec.footprint_hash) == 8
 
-
 def test_classify_building_sets_base_y_and_facade_height():
     # base_y is passed through from the caller (the mass foundation Y); facade height
     # is floor_count × 3.0 m — the canvas's facade UV height (#279).
@@ -216,7 +192,6 @@ def test_classify_building_sets_base_y_and_facade_height():
     assert rec.base_y == 42.317
     assert rec.floor_count == 4
     assert rec.facade_height_m == 12.0          # 4 × 3.0
-
 
 def test_building_base_y_mirrors_mass_foundation():
     # A flat heightmap sampling 50 m everywhere → base_y = 50 - 1.0 foundation embed.
@@ -229,7 +204,6 @@ def test_building_base_y_mirrors_mass_foundation():
     # Degenerate (<3 vertices) → None.
     assert building_base_y([(0.0, 0.0), (1.0, 1.0)], hmap) is None
 
-
 def test_classify_building_defaults_missing_height():
     rec = classify_building(
         osm_id=8, footprint=_SQUARE, height=0.0, building_type=None,
@@ -239,11 +213,9 @@ def test_classify_building_defaults_missing_height():
     assert rec.floor_count == 3            # round(10 / 3)
     assert rec.building_type == ""         # None → "" passthrough
 
-
 def test_building_centroid_matches_average():
     cx, cz = classify.building_centroid(_SQUARE)
     assert (round(cx, 3), round(cz, 3)) == (5.0, 5.0)
-
 
 # --- write_buildings sidecar (data-model.md §1) -----------------------------
 
@@ -252,7 +224,6 @@ def _chunk_with(records):
         col=3, row=4, world_x=0.0, world_z=0.0, chunk_size_m=300.0,
         heightmap=None, meshes=[], buildings=records,
     )
-
 
 def test_write_buildings_schema_and_sorted(tmp_path):
     recs = [
@@ -290,7 +261,6 @@ def test_write_buildings_schema_and_sorted(tmp_path):
     assert b20["left_facade"] is None
     assert b20["right_facade"] is None
 
-
 def test_write_buildings_serializes_back_left_right_facades(tmp_path):
     rec = ClassificationRecord(
         osm_id=30, neighborhood="Sunset", building_type="house",
@@ -309,7 +279,6 @@ def test_write_buildings_serializes_back_left_right_facades(tmp_path):
                                  "score": 0.0, "edge": [10.0, 5.0, 0.0, 5.0]}
     assert b["left_facade"]["edge_index"] == 1
     assert b["right_facade"]["edge_index"] == 3
-
 
 def test_write_buildings_none_when_empty(tmp_path):
     assert write_buildings(_chunk_with([]), str(tmp_path)) is None
