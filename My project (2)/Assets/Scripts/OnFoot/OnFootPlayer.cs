@@ -85,6 +85,11 @@ namespace SFMap.OnFoot
             var streamer = FindObjectOfType<ChunkStreamer>();
             if (streamer != null) streamer.target = transform;
 
+            // Stay disabled until we've found ground: a CharacterController is itself a collider,
+            // so an enabled one would be hit by our own downward spawn probe (giving a bogus "ground"
+            // hit on our capsule) and would also fall under gravity before real ground streams in.
+            _cc.enabled = false;
+
             LockCursor(true);
         }
 
@@ -109,15 +114,15 @@ namespace SFMap.OnFoot
             Move();
         }
 
-        // Wait for the chunk under us to stream in, then drop the controller onto it. Teleporting a
-        // CharacterController requires disabling it first, or it fights the move.
+        // Wait for the chunk under us to stream in, then drop the controller onto it. The controller
+        // is kept disabled (see Awake) until now, so this probe can't hit our own capsule and we
+        // don't fall before there's ground. Enabling it after placing avoids it fighting the move.
         void TrySpawn()
         {
             var from = transform.position + Vector3.up * SpawnProbeHeight;
             if (!Physics.Raycast(from, Vector3.down, out var hit, SpawnProbeMax + SpawnProbeHeight))
                 return;
 
-            _cc.enabled = false;
             transform.position = hit.point + Vector3.up * (EyeHeight * 0.5f + 0.1f);
             _cc.enabled = true;
             _vy = 0f;
