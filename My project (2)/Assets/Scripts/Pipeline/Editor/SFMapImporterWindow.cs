@@ -76,10 +76,9 @@ namespace SFMap.Pipeline.Editor
         // match, so spacing stays dense without overlap.
         const float ParkedCarScale = 0.5f;
 
-        // Buildings-tab thumbnails (#369): base URL of the local dev server the
-        // Unity importer PUTs rendered thumbnails to. Matches the default used by
-        // ios/FacadeCanvas/Tests/FacadeCanvasTests/FacadeCanvasTests.swift.
-        const string ServerBaseUrl = "http://localhost:8000";
+        // Authoring-server uploads (#369/#407 thumbnails + backdrops, #266 sidecar) now go
+        // through SFMap.Pipeline.Editor.AuthoringServerClient; its BaseUrl (default
+        // http://localhost:8000) matches ios/FacadeCanvas/Tests/.../FacadeCanvasTests.swift.
         const int    ThumbSize     = 512;
 
         // Facade backdrops (#407): fixed vertical resolution, width derived per building
@@ -778,26 +777,9 @@ namespace SFMap.Pipeline.Editor
             string src = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_buildings.json");
             if (!File.Exists(src)) return;
 
-            try
-            {
-                byte[] body = System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(src));
-                string url = $"{ServerBaseUrl}/buildings/import-sidecar";
-                using var req = new UnityWebRequest(url, "POST");
-                req.uploadHandler = new UploadHandlerRaw(body);
-                req.downloadHandler = new DownloadHandlerBuffer();
-                req.SetRequestHeader("Content-Type", "application/json");
-                req.timeout = 5; // seconds
-                var op = req.SendWebRequest();
-                while (!op.isDone) { }
-
-                if (req.result != UnityWebRequest.Result.Success)
-                    Debug.LogWarning($"[SFMapImporter] {coord}: buildings sidecar import to {url} " +
-                                     $"failed ({req.responseCode}): {req.error}");
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[SFMapImporter] {coord}: buildings sidecar import failed: {e.Message}");
-            }
+            byte[] body = System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(src));
+            AuthoringServerClient.Post("/buildings/import-sidecar", body, "application/json",
+                                       $"{coord}: buildings sidecar import");
         }
 
         // ------------------------------------------------------- building thumbnails (#369)
@@ -908,16 +890,8 @@ namespace SFMap.Pipeline.Editor
         // the Editor UI thread indefinitely with no way to recover short of force-killing Unity.
         static void UploadBuildingThumbnail(long osmId, byte[] jpgBytes)
         {
-            string url = $"{ServerBaseUrl}/buildings/{osmId}/thumb";
-            using var req = UnityWebRequest.Put(url, jpgBytes);
-            req.SetRequestHeader("Content-Type", "image/jpeg");
-            req.timeout = 5; // seconds
-            var op = req.SendWebRequest();
-            while (!op.isDone) { }
-
-            if (req.result != UnityWebRequest.Result.Success)
-                Debug.LogWarning($"[SFMapImporter] Building {osmId}: thumbnail upload to {url} " +
-                                 $"failed ({req.responseCode}): {req.error}");
+            AuthoringServerClient.Put($"/buildings/{osmId}/thumb", jpgBytes, "image/jpeg",
+                                      $"Building {osmId}: thumbnail upload");
         }
 
         // ------------------------------------------------------- facade backdrops (#407)
@@ -1046,16 +1020,8 @@ namespace SFMap.Pipeline.Editor
         // endpoint and its tests already use (server/tests/test_canvas.py).
         static void UploadFacadeBackdrop(long osmId, Facade facade, byte[] jpgBytes)
         {
-            string url = $"{ServerBaseUrl}/canvas/{osmId}/{facade}/backdrop";
-            using var req = UnityWebRequest.Put(url, jpgBytes);
-            req.SetRequestHeader("Content-Type", "image/jpeg");
-            req.timeout = 5; // seconds
-            var op = req.SendWebRequest();
-            while (!op.isDone) { }
-
-            if (req.result != UnityWebRequest.Result.Success)
-                Debug.LogWarning($"[SFMapImporter] Building {osmId}: facade {facade} backdrop upload " +
-                                 $"to {url} failed ({req.responseCode}): {req.error}");
+            AuthoringServerClient.Put($"/canvas/{osmId}/{facade}/backdrop", jpgBytes, "image/jpeg",
+                                      $"Building {osmId}: facade {facade} backdrop upload");
         }
 
         static bool AllZero(Vector3[] vecs)
