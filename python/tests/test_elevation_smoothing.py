@@ -162,11 +162,13 @@ def test_parse_default_smoothing_enabled():
     assert elevation._HMAP_SMOOTH_SIGMA_M > 0.0
 
 def test_cli_default_matches_library_default():
-    # sfmap_bake duplicates the default as a literal (to avoid importing scipy
-    # for --help); guard against the two drifting apart.
+    # The CLI --hmap-smooth default and the library smoothing default both derive
+    # from the single source of truth (sfmap.config.HMAP_SMOOTH_SIGMA_M, #425);
+    # guard against either re-hardcoding a divergent value.
     import sfmap_bake
 
-    assert sfmap_bake._DEFAULT_HMAP_SMOOTH_M == elevation._HMAP_SMOOTH_SIGMA_M
+    cli_default = sfmap_bake.build_parser().get_default("hmap_smooth")
+    assert cli_default == elevation._HMAP_SMOOTH_SIGMA_M
 
 # ---------------------------------------------------------------------------
 # standalone runner

@@ -11,21 +11,13 @@ from scipy.ndimage import gaussian_filter
 from scipy.spatial import Delaunay
 
 from .projection import GeoOrigin, OsmBounds, to_world_xz
+# Single source of truth for the smoothing default (see sfmap/config.py, #425).
+from .config import HMAP_SMOOTH_SIGMA_M as _HMAP_SMOOTH_SIGMA_M
 
 _FEET_TO_METERS = 0.3048
 _CLIP_BUFFER_METERS = 200.0
 _MIN_SPACING_SQ = 8.0 ** 2  # thin contour points to ~8m minimum spacing
 _CACHE_MAGIC = 0x454D4843  # "EMHC" — matches C# cache
-
-# Default source low-pass radius (metres, σ). The rasterizer fills the grid by
-# linear barycentric interpolation per Delaunay triangle, which is only C⁰ — the
-# gradient jumps across every triangle edge, seeding crease lines and the road
-# waviness #230 is about. A small Gaussian low-pass over the rasterized grid
-# attenuates those creases at the source (also smoothing buildings/sidewalks
-# that sample the same field) while leaving real, longer-wavelength relief
-# intact. Kept smaller than the ~8 m contour-point spacing so genuine grade is
-# preserved. 0 disables. Validated/tuned on real terrain in #232. See #233.
-_HMAP_SMOOTH_SIGMA_M = 2.0
 
 
 @dataclass

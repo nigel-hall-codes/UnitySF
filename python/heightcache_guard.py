@@ -36,8 +36,9 @@ def _effective_smooth(explicit):
     """The --hmap-smooth value the bake will actually use (explicit, else CLI default)."""
     if explicit is not None:
         return float(explicit)
-    import sfmap_bake  # cheap: the heavy deps are imported inside main(), not at module load
-    return float(sfmap_bake._DEFAULT_HMAP_SMOOTH_M)
+    # Public single source of truth (scipy-free), shared with the bake CLI (#425).
+    from sfmap.config import HMAP_SMOOTH_SIGMA_M
+    return float(HMAP_SMOOTH_SIGMA_M)
 
 
 def _fingerprint(smooth: float) -> str:
