@@ -2,7 +2,8 @@
     "name": "SFMap.OnFoot",
     "rootNamespace": "SFMap.OnFoot",
     "references": [
-        "SFMap.Pipeline"
+        "SFMap.Pipeline",
+        "Prometeo"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
