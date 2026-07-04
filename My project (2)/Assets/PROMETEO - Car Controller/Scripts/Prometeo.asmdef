@@ -1,11 +1,8 @@
 {
-    "name": "SFMap.Pipeline",
-    "rootNamespace": "SFMap.Pipeline",
+    "name": "Prometeo",
+    "rootNamespace": "",
     "references": [
-        "Unity.Jobs",
-        "Unity.Collections",
-        "Unity.Burst",
-        "Prometeo"
+        "UnityEngine.UI"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

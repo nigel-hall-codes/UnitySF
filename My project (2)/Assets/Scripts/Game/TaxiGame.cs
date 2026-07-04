@@ -116,17 +116,12 @@ namespace SFMap.Game
             if (_player) return _player;
 
             // Prefer the follow camera's target — the car itself (see StreetHUD for the same
-            // resolution order and the cross-assembly CameraFollow fallback).
+            // resolution order and the PROMETEO CameraFollow fallback).
             var follow = FindObjectOfType<PrometeoFollowCamera>();
             if (follow && follow.target) return _player = follow.target;
 
-            var camFollowType = System.Type.GetType("CameraFollow, Assembly-CSharp");
-            if (camFollowType != null)
-            {
-                var comp = FindObjectOfType(camFollowType) as Component;
-                var field = camFollowType.GetField("carTransform");
-                if (comp != null && field?.GetValue(comp) is Transform t) return _player = t;
-            }
+            var cf = FindObjectOfType<CameraFollow>();
+            if (cf != null && cf.carTransform != null) return _player = cf.carTransform;
             return null;
         }
 

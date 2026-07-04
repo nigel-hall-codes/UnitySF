@@ -14,10 +14,9 @@ namespace SFMap.OnFoot
     /// <see cref="ChunkStreamer.target"/>, handing both to whichever mode is active — which is what
     /// stops the walker and the car's follow camera from fighting over the main camera.
     ///
-    /// The car controller (<c>PrometeoCarController</c>) lives in Assembly-CSharp, which this asmdef
-    /// can't reference by type. We only need to toggle its <see cref="Behaviour.enabled"/>, so it's
-    /// grabbed as a <see cref="Behaviour"/> by type name; the car body is a plain
-    /// <see cref="Rigidbody"/>, frozen (kinematic) while you're out so it doesn't roll away.
+    /// We only need to toggle the car controller's (<c>PrometeoCarController</c>)
+    /// <see cref="Behaviour.enabled"/>, so it's held as a <see cref="Behaviour"/>; the car body is a
+    /// plain <see cref="Rigidbody"/>, frozen (kinematic) while you're out so it doesn't roll away.
     /// </summary>
     [DisallowMultipleComponent]
     public class PlayerModeController : MonoBehaviour
@@ -36,7 +35,7 @@ namespace SFMap.OnFoot
         ChunkStreamer _streamer;
         Camera _cam;
         Behaviour _followCam;              // chase cam driving Camera.main — PrometeoFollowCamera or
-                                           // PROMETEO's CameraFollow (Assembly-CSharp, via reflection)
+                                           // the PROMETEO package's CameraFollow
         Transform _car;
         Behaviour _carController;          // PrometeoCarController, toggled via Behaviour.enabled
         Rigidbody _carBody;
@@ -138,8 +137,8 @@ namespace SFMap.OnFoot
         void ResolveCar()
         {
             // Find the chase camera + the car it follows. Prefer the typed PrometeoFollowCamera
-            // (SFMap.Pipeline); fall back to the PROMETEO package's CameraFollow, which lives in
-            // Assembly-CSharp and can only be reached by reflection. Mirrors TaxiGame's resolution.
+            // (SFMap.Pipeline); fall back to the PROMETEO package's CameraFollow (referenced via
+            // its Prometeo asmdef). Mirrors TaxiGame's resolution.
             var prometeo = FindObjectOfType<PrometeoFollowCamera>();
             if (prometeo != null && prometeo.target != null)
             {
@@ -148,11 +147,11 @@ namespace SFMap.OnFoot
             }
             else
             {
-                var t = System.Type.GetType("CameraFollow, Assembly-CSharp");
-                if (t != null && FindObjectOfType(t) is Behaviour cf)
+                var cf = FindObjectOfType<CameraFollow>();
+                if (cf != null)
                 {
                     _followCam = cf;
-                    _car = t.GetField("carTransform")?.GetValue(cf) as Transform;
+                    _car = cf.carTransform;
                 }
             }
 
@@ -165,13 +164,11 @@ namespace SFMap.OnFoot
             _carController = FindCarController(_car);
         }
 
-        // PrometeoCarController is in Assembly-CSharp (unreferenceable from this asmdef); we only need
-        // to enable/disable it, so match it by type name and toggle it through the Behaviour base.
+        // We only need to enable/disable the car controller, so return it through the Behaviour
+        // base (PrometeoCarController is now referenceable via the Prometeo asmdef).
         static Behaviour FindCarController(Transform car)
         {
-            foreach (var b in car.GetComponents<Behaviour>())
-                if (b.GetType().Name == "PrometeoCarController") return b;
-            return null;
+            return car.GetComponent<PrometeoCarController>();
         }
 
         void OnGUI()
