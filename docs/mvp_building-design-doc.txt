@@ -1,0 +1,309 @@
+For an MVP, I think that's absolutely the right decision.
+
+You don't yet have:
+
+Templates
+Assets
+District generation
+Source tracing
+
+So Workflow B would mostly be fake navigation.
+
+MVP Goal
+
+The Buildings tab should answer one question:
+
+"Which building do I want to customize?"
+
+Nothing more.
+
+MVP Workflow
+Open Buildings
+      ↓
+Browse Buildings
+      ↓
+Select Building
+      ↓
+Customize Building
+      ↓
+Save
+
+That's it.
+
+MVP Buildings Page
+Left Sidebar
+Dashboard
+
+Buildings
+
+Nothing else yet.
+
+Keep navigation tiny.
+
+Top Filters
+Search Address
+
+Neighborhood
+
+Building Type
+
+Examples:
+
+Mission
+
+Storefront
+
+Residential
+Building Grid
+
+Each card:
+
+┌─────────────────┐
+│ Building Image  │
+├─────────────────┤
+│ 1234 Valencia   │
+│ Storefront      │
+│ Mission         │
+└─────────────────┘
+
+No template badges.
+
+No override counts.
+
+No generation statistics.
+
+Inspector Panel
+
+Selecting a building shows:
+
+Address
+
+District
+
+Building Type
+
+[Large Preview]
+
+Customize Building
+Customize Building Button
+
+This is the only important action.
+
+Press:
+
+Customize Building
+
+Open:
+
+Building Canvas
+Building Canvas MVP
+
+Tools:
+
+Brush
+
+Image
+
+AI Sign
+
+Text
+
+Erase
+
+That's all.
+
+No procedural tools.
+
+No region tools.
+
+No template concepts.
+
+Save Flow
+Customize Building
+      ↓
+Save
+      ↓
+Building Marked Customized
+Building Card Status
+
+Only one status:
+
+Customized
+
+Visual badge:
+
+● Customized
+
+so you can find buildings you've already touched.
+
+What I Would Remove
+
+For MVP I'd remove:
+
+View Template
+
+3D View
+
+Statistics
+
+Triangles
+
+Draw Calls
+
+Override Count
+
+Bulk Actions
+
+Export
+
+Regenerate
+
+Duplicate
+
+Delete
+
+Those belong in later phases.
+
+MVP Success Criteria
+
+If you can do this:
+
+1. Import Buildings
+
+2. Browse Buildings
+
+3. Search Buildings
+
+4. Open Building
+
+5. Draw On Facade
+
+6. Add Sign
+
+7. Save
+
+you already have a usable creator tool.
+
+Everything else can be layered on later.
+
+The page becomes dramatically simpler:
+
+Buildings
+      ↓
+Select
+      ↓
+Customize
+      ↓
+Save
+
+which is probably exactly where an MVP should start.
+
+The tab style is a clean iPad productivity dashboard, closer to Figma/Notion than Unity.
+
+Overall layout
+
+Three-column structure:
+
+Left navigation sidebar
+Main building grid
+Right inspector panel
+
+The page is designed so the user can browse visually, select one building, and immediately customize it without leaving the screen.
+
+Visual style
+
+The style is:
+
+Modern
+Lightweight
+Rounded
+Soft shadows
+Minimal color
+Large thumbnails
+
+The main background is off-white/light gray. Cards are white with subtle borders and rounded corners. Blue is used only for active states and primary actions, which keeps the interface calm.
+
+Left sidebar
+
+The sidebar is dark navy/black, giving the app a professional tool feel.
+
+It contains:
+
+App name
+Dashboard
+Buildings
+District status card
+Settings
+
+The active tab, Buildings, uses a bright blue pill highlight. This makes navigation obvious without cluttering the screen.
+
+Top filter row
+
+The top row is simple:
+
+Search address
+Neighborhood dropdown
+Type dropdown
+More filters
+
+This supports the MVP goal: find a building quickly without exposing template/debug tools yet.
+
+Building grid
+
+The center is a 4-column grid of large building cards.
+
+Each card includes:
+
+Street-view thumbnail
+Address
+Type + Neighborhood
+Customized status
+Overflow menu
+
+The selected card has a blue border. Customized buildings get a small green dot and label. This is the only status that matters for the MVP.
+
+Right inspector panel
+
+The right panel shows the selected building.
+
+It includes:
+
+Address title
+Customized badge
+Large preview image
+Building details
+Preview toggle
+Actions
+
+The inspector avoids advanced data. It only shows what helps the user decide whether to customize the building.
+
+Primary action
+
+The main call-to-action is:
+
+Customize Building
+
+It is a large blue button near the bottom of the inspector. This clearly establishes the workflow:
+
+Browse → Select → Customize
+
+The secondary action is:
+
+Reset to Generated
+
+This only appears because the selected building has already been customized.
+
+MVP design rule
+
+This page intentionally avoids:
+
+Templates
+Generation stats
+Draw calls
+Bulk export
+Source tracing
+Advanced 3D editing
+
+The whole tab is focused on one job:
+
+Pick a building and open its customization canvas.

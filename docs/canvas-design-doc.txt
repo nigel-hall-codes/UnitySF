@@ -1,0 +1,631 @@
+Building Customization Canvas
+UX Design Specification v1.0
+Purpose
+
+The Building Customization Canvas allows users to create building-specific overrides.
+
+Unlike the Template Editor, this screen is not procedural.
+
+Changes made here affect:
+
+One Building
+One Facade
+One Location
+
+Examples:
+
+Store signs
+Murals
+Artwork
+Decals
+Awnings
+Planters
+Lights
+Custom storefront branding
+
+The goal is to quickly transform a procedurally generated building into a unique landmark without leaving the iPad workflow.
+
+Design Philosophy
+
+This screen should feel closer to:
+
+Procreate
+Figma
+Canva
+
+than:
+
+Blender
+Maya
+Unity
+
+The user is decorating a facade.
+
+They are not editing geometry.
+
+Layout Overview
+
+The screen uses a five-region layout.
+
+Top Toolbar
+
+Left Layers Panel
+
+Center Facade Canvas
+
+Right Properties Panel
+
+Bottom Asset Library
+Top Toolbar
+Purpose
+
+Global editing actions.
+
+Left Section
+Back
+
+Returns to Buildings Browser.
+
+No automatic save.
+
+If changes exist:
+
+Save
+Discard
+Cancel
+
+modal appears.
+
+Building Information
+
+Displays:
+
+Address
+
+District
+
+Example:
+
+3024 24th St
+Mission District
+
+Provides editing context.
+
+Tool Selection
+
+Available tools:
+
+Select
+
+Default tool.
+
+Used to:
+
+Select object
+Move object
+Resize object
+Rotate object
+Brush
+
+Freehand drawing.
+
+Examples:
+
+Graffiti
+
+Paint
+
+Murals
+
+Street Art
+Text
+
+Adds editable text layers.
+
+Examples:
+
+Store Names
+
+Address Numbers
+
+Advertising
+Image
+
+Import image.
+
+Examples:
+
+Logos
+
+Photos
+
+Artwork
+
+Custom Signs
+AI Sign
+
+Generates storefront signs.
+
+Workflow:
+
+Coffee Shop
+      ↓
+
+Generate
+      ↓
+
+Choose Design
+      ↓
+
+Place On Building
+History Controls
+Undo
+
+Reverts last action.
+
+Redo
+
+Restores reverted action.
+
+View Controls
+Fit To Face
+
+Resets:
+
+Zoom
+
+Pan
+
+Returns facade to centered position.
+
+3D Preview
+
+Opens live 3D preview mode.
+
+This does not become editable.
+
+Purpose:
+
+Verify In Game Appearance
+Save
+
+Primary action.
+
+Commits override.
+
+Left Panel — Layers
+Purpose
+
+Manage all elements on the facade.
+
+Similar to:
+
+Figma
+
+Photoshop
+
+Procreate
+Layer Types
+
+Examples:
+
+Store Sign
+
+Awning
+
+Mural
+
+Wall Lights
+
+Planters
+
+Base Facade
+Layer Controls
+
+Each layer supports:
+
+Visibility
+
+Show/hide.
+
+Lock
+
+Prevent editing.
+
+Rename
+
+Custom name.
+
+Example:
+
+Joe's Coffee Sign
+Reorder
+
+Drag to change stacking order.
+
+Layer Opacity
+
+Global layer opacity slider.
+
+Useful for:
+
+Murals
+
+Artwork
+
+Decals
+Tips Section
+
+Persistent learning area.
+
+Examples:
+
+Pinch To Zoom
+
+Two Finger Pan
+
+Double Tap Reset
+
+Helpful for new users.
+
+Center Workspace — Facade Canvas
+Purpose
+
+Primary editing surface.
+
+This is the most important component in the application.
+
+Facade Mode
+
+Unlike previous concepts, this is not a 3D building editor.
+
+The user edits:
+
+One Flat Building Face
+
+Examples:
+
+Front
+
+Left
+
+Right
+
+Rear
+Facade Selection
+
+Buttons:
+
+Front
+
+Left
+
+Right
+
+Rear
+
+Switches editing surface.
+
+Canvas Style
+
+Displayed as:
+
+Architectural Elevation
+
+rather than:
+
+Perspective View
+
+Benefits:
+
+Easier placement
+Easier alignment
+Better Pencil workflow
+Consistent sizing
+Zooming
+
+Supports:
+
+Pinch
+
+Zoom in/out.
+
+Double Tap
+
+Reset zoom.
+
+Fit To Face
+
+Automatic framing.
+
+Panning
+
+Two-finger drag.
+
+Allows close-up editing.
+
+Useful for:
+
+Store Signs
+
+Window Graphics
+
+Murals
+Selection System
+
+Selecting object displays:
+
+Bounding Box
+
+Resize Handles
+
+Action Menu
+
+Actions:
+
+Duplicate
+
+Delete
+
+More
+Asset Placement
+
+User drags asset onto facade.
+
+Example:
+
+Store Sign
+
+appears immediately.
+
+Then:
+
+Move
+
+Scale
+
+Rotate
+Right Panel — Properties
+Purpose
+
+Edit selected object.
+
+Context-sensitive.
+
+Sign Properties
+
+Displays:
+
+Preview
+
+Live preview.
+
+Font
+
+Example:
+
+Playfair
+
+Victorian
+
+Sans Serif
+Text Color
+
+Color picker.
+
+Background Color
+
+Color picker.
+
+Border Color
+
+Color picker.
+
+Width
+
+Physical width.
+
+Example:
+
+8.2m
+Height
+
+Physical height.
+
+Example:
+
+1.1m
+Position
+X
+
+Y
+
+Offsets on facade.
+
+Rotation
+
+Angle control.
+
+Alignment
+Left
+
+Center
+
+Right
+Flip Controls
+
+Horizontal.
+
+Vertical.
+
+Delete
+
+Removes object.
+
+Bottom Asset Library
+Purpose
+
+Fast content placement.
+
+Asset Categories
+
+Examples:
+
+Signs
+
+Artwork
+
+Awnings
+
+Planters
+
+Lights
+
+Decals
+
+Windows
+
+Props
+Asset Cards
+
+Each card contains:
+
+Preview
+
+Name
+Asset Placement Workflow
+Select Asset
+      ↓
+
+Drag To Canvas
+      ↓
+
+Position
+      ↓
+
+Save
+Scroll Behavior
+
+Horizontal scrolling.
+
+Supports hundreds of assets.
+
+3D Preview Panel
+Purpose
+
+Quick validation.
+
+Function
+
+Displays:
+
+Low Poly Building
+
+with all current modifications applied.
+
+Rules
+
+Not editable.
+
+Not interactive.
+
+Not a modeling tool.
+
+Purpose is only:
+
+Does This Look Good In Game?
+Supported Override Types (MVP)
+Signs
+
+Supported.
+
+Text
+
+Supported.
+
+Artwork
+
+Supported.
+
+Murals
+
+Supported.
+
+Images
+
+Supported.
+
+Decals
+
+Supported.
+
+Awnings
+
+Experimental.
+
+Planters
+
+Experimental.
+
+Not Supported Yet
+
+These affect architecture and should remain procedural/template-driven.
+
+Balconies
+
+Fire Escapes
+
+Bay Windows
+
+Roof Shapes
+
+Building Height
+
+Window Placement
+
+Door Placement
+Save Workflow
+Open Building
+      ↓
+
+Select Facade
+      ↓
+
+Place Assets
+      ↓
+
+Zoom/Pan
+      ↓
+
+Adjust Properties
+      ↓
+
+Preview
+      ↓
+
+Save
+Success Criteria
+
+A user should be able to:
+
+Select Building
+      ↓
+
+Open Front Facade
+      ↓
+
+Add Store Sign
+      ↓
+
+Add Mural
+      ↓
+
+Add Awning
+      ↓
+
+Preview In 3D
+      ↓
+
+Save
+
+within 2–3 minutes, without needing any knowledge of Unity, 3D modeling, or procedural generation systems.
