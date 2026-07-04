@@ -178,28 +178,33 @@ namespace SFMap.Pipeline.Editor
             return new BuildingAssembler(facts, templates, partsById, palettes, districtWeights, LoadOverrides());
         }
 
-        // Load Assets/SFBuildingTemplates/Overrides/*.override.json into a dict keyed by osm_id.
-        // The footprint_hash guard is checked at apply time, not here.
-        const string OverridesDir = "Assets/SFBuildingTemplates/Overrides";
-
-        static Dictionary<long, OverrideJson> LoadOverrides()
+        /// <summary>Scan Assets/SFBuildingTemplates/Overrides/ once and yield each parsed
+        /// override.json (unparseable files are logged and skipped). Shared by LoadOverrides here
+        /// and BuildingDecalImporter.LoadDecalOverrides (#430) so the disk scan is defined once.</summary>
+        public static IEnumerable<OverrideJson> ScanOverrides()
         {
-            var map = new Dictionary<long, OverrideJson>();
-            string abs = Path.Combine(Application.dataPath, "SFBuildingTemplates/Overrides");
-            if (!Directory.Exists(abs)) return map;
+            string abs = SFBuildingTemplatePaths.OverridesAbsolute;
+            if (!Directory.Exists(abs)) yield break;
             foreach (string file in Directory.GetFiles(abs, "*.override.json", SearchOption.AllDirectories))
             {
                 if (!file.EndsWith(".override.json", StringComparison.OrdinalIgnoreCase)) continue;  // exclude .meta
-                try
-                {
-                    var ov = JsonUtility.FromJson<OverrideJson>(File.ReadAllText(file));
-                    if (ov != null && ov.osm_id != 0) map[ov.osm_id] = ov;
-                }
+                OverrideJson ov = null;
+                try { ov = JsonUtility.FromJson<OverrideJson>(File.ReadAllText(file)); }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[BuildingAssembler] Failed to parse override {file}: {ex.Message}");
+                    Debug.LogWarning($"[SFBuildingTemplates] Failed to parse override {file}: {ex.Message}");
                 }
+                if (ov != null) yield return ov;
             }
+        }
+
+        // Load Overrides/*.override.json into a dict keyed by osm_id. The footprint_hash guard is
+        // checked at apply time, not here.
+        static Dictionary<long, OverrideJson> LoadOverrides()
+        {
+            var map = new Dictionary<long, OverrideJson>();
+            foreach (var ov in ScanOverrides())
+                if (ov.osm_id != 0) map[ov.osm_id] = ov;
             return map;
         }
 
@@ -588,8 +593,7 @@ namespace SFMap.Pipeline.Editor
 
             // Outward normal straight from the sidecar bearing (winding-independent), so the
             // part faces the street regardless of OSM footprint orientation.
-            float br = f.bearing_deg * Mathf.Deg2Rad;
-            Vector3 outward = new Vector3(Mathf.Sin(br), 0f, Mathf.Cos(br));
+            Vector3 outward = FacadeFrame.OutwardNormal(f.bearing_deg);
 
             // Normalized facade coords → world. x along the real facade width; y up the facade
             // (floor band + within-floor offset), both scaled to this building's real frame.
