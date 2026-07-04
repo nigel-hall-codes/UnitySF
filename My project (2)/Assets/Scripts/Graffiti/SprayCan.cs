@@ -124,10 +124,22 @@ namespace SFMap.Graffiti
             }
         }
 
+        // The view camera is PROMETEO's PrometeoCamera, which the scene never tags "MainCamera",
+        // so Camera.main is null — this used to hand back null every frame and spray silently did
+        // nothing, while look/movement kept working because OnFootPlayer is handed the camera
+        // directly. Resolve by tag when one exists, else fall back to whatever camera is actually
+        // rendering, and re-resolve if the cached one goes inactive (mode switches keep the same
+        // single gameplay camera, so the first enabled camera is the right one).
         Camera ResolveCamera()
         {
-            if (_cam != null) return _cam;
-            return _cam = Camera.main;   // the FP camera OnFootPlayer parents under the walker
+            if (_cam != null && _cam.isActiveAndEnabled) return _cam;
+            _cam = Camera.main;
+            if (_cam == null)
+            {
+                var cams = Camera.allCameras;   // enabled cameras only
+                if (cams.Length > 0) _cam = cams[0];
+            }
+            return _cam;
         }
 
         // Reads an optional joystick axis; returns 0 if it isn't defined in the Input Manager
