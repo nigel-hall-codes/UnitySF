@@ -1,6 +1,6 @@
 """Tests for the shared road centerline vertical-profile smoother (#231).
 
-The smoother (`sfmap.geometry.road._smooth_centerline_profile`) is applied
+The smoother (`sfmap.geometry.primitives.smooth_centerline_profile`) is applied
 identically in the mesh pass and the stamp pass; these tests lock in the
 properties the stamp/mesh consistency (#219) and the smoothing goal (#230)
 depend on:
@@ -24,12 +24,9 @@ from types import SimpleNamespace
 import numpy as np
 
 from sfmap.elevation import HeightmapData
-from sfmap.geometry import road
-from sfmap.geometry.road import (
-    _RAISE,
-    _smooth_centerline_profile,
-    build_road_meshes,
-)
+from sfmap.geometry import primitives
+from sfmap.geometry.primitives import sample_elevation, smooth_centerline_profile
+from sfmap.geometry.road import _RAISE, build_road_meshes
 from sfmap.osm import HighwayType, StreetEdge, StreetNode
 from sfmap.stamping import stamp_roads
 
@@ -57,7 +54,7 @@ def _straight_xz(n, step=2.0):
 def test_endpoints_preserved():
     xz = _straight_xz(20)
     y = [10.0 + math.sin(i) for i in range(20)]
-    out = _smooth_centerline_profile(xz, y, window_m=12.0)
+    out = smooth_centerline_profile(xz, y, window_m=12.0)
     assert out[0] == y[0]
     assert out[-1] == y[-1]
     assert len(out) == len(y)
@@ -67,20 +64,20 @@ def test_input_not_mutated():
     y = [10.0 + math.sin(i) for i in range(20)]
     xz_copy = list(xz)
     y_copy = list(y)
-    _smooth_centerline_profile(xz, y, window_m=12.0)
+    smooth_centerline_profile(xz, y, window_m=12.0)
     assert xz == xz_copy  # XZ untouched
     assert y == y_copy    # operates out-of-place
 
 def test_short_polyline_passthrough():
     # Fewer than 3 points: nothing to smooth, return a copy unchanged.
-    assert _smooth_centerline_profile([(0.0, 0.0), (4.0, 0.0)], [3.0, 5.0]) == [3.0, 5.0]
+    assert smooth_centerline_profile([(0.0, 0.0), (4.0, 0.0)], [3.0, 5.0]) == [3.0, 5.0]
 
 def test_straight_ramp_passthrough_uniform():
     # Constant grade, uniform spacing — must pass through exactly.
     xz = _straight_xz(25, step=2.0)
     slope = 0.12
     y = [5.0 + slope * (2.0 * i) for i in range(25)]
-    out = _smooth_centerline_profile(xz, y, window_m=12.0)
+    out = smooth_centerline_profile(xz, y, window_m=12.0)
     for a, b in zip(out, y):
         assert abs(a - b) < 1e-9
 
@@ -91,7 +88,7 @@ def test_straight_ramp_passthrough_nonuniform():
     xz = [(x, 0.0) for x in xs]
     slope = -0.07
     y = [2.0 + slope * x for x in xs]
-    out = _smooth_centerline_profile(xz, y, window_m=14.0)
+    out = smooth_centerline_profile(xz, y, window_m=14.0)
     for a, b in zip(out, y):
         assert abs(a - b) < 1e-9
 
@@ -101,7 +98,7 @@ def test_noise_attenuated():
     xz = _straight_xz(n, step=2.0)
     noise = [0.30 * math.sin(i * 1.7) + 0.18 * math.sin(i * 3.1) for i in range(n)]
     y = [10.0 + e for e in noise]
-    out = _smooth_centerline_profile(xz, y, window_m=12.0)
+    out = smooth_centerline_profile(xz, y, window_m=12.0)
 
     # Endpoints exact; high-frequency energy strongly reduced.
     assert out[0] == y[0] and out[-1] == y[-1]
@@ -110,7 +107,7 @@ def test_noise_attenuated():
 def test_window_zero_is_noop():
     xz = _straight_xz(10)
     y = [float(i * i % 5) for i in range(10)]
-    assert _smooth_centerline_profile(xz, y, window_m=0.0) == y
+    assert smooth_centerline_profile(xz, y, window_m=0.0) == y
 
 # ---------------------------------------------------------------------------
 # integration: stamp grade and resampled mesh surface stay consistent
@@ -166,7 +163,7 @@ def test_stamp_grade_equals_mesh_surface():
     verts, _normals, _uvs, _idx = next(iter(meshes.values()))
 
     for vx, vy, vz in verts:
-        stamped = road._sample_elevation(hmap, vx, vz)
+        stamped = primitives.sample_elevation(hmap, vx, vz)
         assert abs((vy - _RAISE) - stamped) < 1e-4
 
 def test_stamped_surface_smoother_than_raw_terrain():
@@ -178,13 +175,9 @@ def test_stamped_surface_smoother_than_raw_terrain():
 
     # Profile of the raw terrain along the road centerline (pre-stamp).
     xs = [10.0 + i * 2.0 for i in range(41)]
-    raw_profile = [road._sample_elevation(raw, x, 50.0) for x in xs]
+    raw_profile = [primitives.sample_elevation(raw, x, 50.0) for x in xs]
 
     stamp_roads(stamped, graph)
-    smoothed_profile = [road._sample_elevation(stamped, x, 50.0) for x in xs]
+    smoothed_profile = [primitives.sample_elevation(stamped, x, 50.0) for x in xs]
 
     assert _second_diff_energy(smoothed_profile) < 0.4 * _second_diff_energy(raw_profile)
-
-# ---------------------------------------------------------------------------
-# standalone runner (pytest not yet a project dependency)
-# ---------------------------------------------------------------------------

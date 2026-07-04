@@ -20,7 +20,7 @@ The recommendation is the smallest window that drops flat roughness below
 `_FLAT_TARGET` while keeping >= `_GRADE_FLOOR` of the Lombard grade.
 
 This is a *mathematical* validation of the filter's behaviour and the basis for
-the chosen `road._SMOOTH_WINDOW_M`. It deliberately does NOT cover the in-Unity
+the chosen `road.SMOOTH_WINDOW_M`. It deliberately does NOT cover the in-Unity
 visual smoothness / seam check or the in-engine NWH bounce measurement on a real
 Lombard bake — those need the editor and are the manual residual noted in
 sdlc/#232/validation.md.
@@ -31,14 +31,14 @@ from __future__ import annotations
 
 import math
 
-from sfmap.geometry.road import _MAX_SEG_M, _SMOOTH_WINDOW_M, _smooth_centerline_profile
+from sfmap.geometry.primitives import MAX_SEG_M, SMOOTH_WINDOW_M, smooth_centerline_profile
 
-# Use the real densify spacing (the _MAX_SEG_M cap, #219) as the worst-case
+# Use the real densify spacing (the MAX_SEG_M cap, #219) as the worst-case
 # point spacing. This matters: the tricube window must comfortably exceed 2x the
 # spacing or neighbours fall on/under the zero-weight window edge and the filter
 # is a near no-op. Tuning at an unrealistically fine spacing would recommend a
 # window too small to do anything on real, 4 m-densified centerlines.
-_STEP_M = _MAX_SEG_M
+_STEP_M = MAX_SEG_M
 _N = 41                       # ~160 m of road
 _LOMBARD_GRADE = 0.31        # ~17 deg — Lombard's crooked block is ~27%; steep.
 _NOISE_AMP_M = 0.25          # high-freq terrain wiggle the smoother should kill
@@ -80,8 +80,8 @@ def evaluate():
 
     rows = []
     for w in _WINDOWS:
-        fs = _smooth_centerline_profile(xz, flat, window_m=w)
-        ls = _smooth_centerline_profile(xz, lombard, window_m=w)
+        fs = smooth_centerline_profile(xz, flat, window_m=w)
+        ls = smooth_centerline_profile(xz, lombard, window_m=w)
         rows.append({
             "window_m": w,
             "flat_roughness_frac": (_second_diff_energy(fs) / flat_raw) if flat_raw else 0.0,
@@ -105,7 +105,7 @@ def recommend(rows):
 
 def main():
     rows = evaluate()
-    print(f"Road smoother window sweep  (current default _SMOOTH_WINDOW_M = {_SMOOTH_WINDOW_M} m)")
+    print(f"Road smoother window sweep  (current default SMOOTH_WINDOW_M = {SMOOTH_WINDOW_M} m)")
     print(f"  flat noise amp = {_NOISE_AMP_M} m, Lombard grade = {_LOMBARD_GRADE*100:.0f}%, "
           f"step = {_STEP_M} m, n = {_N}")
     print()

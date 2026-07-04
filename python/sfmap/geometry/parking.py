@@ -26,7 +26,7 @@ from typing import List, Optional, Sequence, Tuple
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
 from ..projection import GeoOrigin, to_world_xz
-from .road import _clip_polyline_to_rect, _cross_up, _sample_elevation
+from .primitives import clip_polyline_to_rect, cross_up, sample_elevation
 
 # The Awb low-poly vehicles are ~4.4 m long, ~2.0 m wide, but they're imported at
 # half scale (see SFMapImporterWindow.ParkedCarScale), so the placement footprint
@@ -330,8 +330,8 @@ def _surface_normal(hmap: HeightmapData, x: float, z: float) -> Tuple[float, flo
     the serialiser can omit it and the runtime keeps the car level.
     """
     e = _NORMAL_EPS
-    dhdx = (_sample_elevation(hmap, x + e, z) - _sample_elevation(hmap, x - e, z)) / (2.0 * e)
-    dhdz = (_sample_elevation(hmap, x, z + e) - _sample_elevation(hmap, x, z - e)) / (2.0 * e)
+    dhdx = (sample_elevation(hmap, x + e, z) - sample_elevation(hmap, x - e, z)) / (2.0 * e)
+    dhdz = (sample_elevation(hmap, x, z + e) - sample_elevation(hmap, x, z - e)) / (2.0 * e)
     # Normal to the height surface y = h(x, z) is (-dh/dx, 1, -dh/dz), then normalised.
     nx, ny, nz = -dhdx, 1.0, -dhdz
     length = math.sqrt(nx * nx + ny * ny + nz * nz)
@@ -424,7 +424,7 @@ def place_parked_cars(
     no_park = [s for s in (segments or ()) if s.no_parking]
 
     for seg in parkable:
-        clipped = _clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
+        clipped = clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:
             continue
         arc = _arc_lengths(clipped)
@@ -467,7 +467,7 @@ def place_parked_cars(
                         cx = rpx + sdx * dist
                         cz = rpz + sdz * dist
 
-                y = _sample_elevation(hmap, cx, cz) + _RAISE
+                y = sample_elevation(hmap, cx, cz) + _RAISE
                 rot_y = math.degrees(math.atan2(fx, fz))  # Unity +Z forward → heading
                 nx, ny, nz = _surface_normal(hmap, cx, cz)
                 cars.append(ParkedCar(
@@ -522,7 +522,7 @@ def _no_park_keepouts(
     x_max, z_max = x_min + size, z_min + size
     pts: List[Tuple[float, float]] = []
     for seg in segments:
-        clipped = _clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
+        clipped = clip_polyline_to_rect(seg.points, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:
             continue
         arc = _arc_lengths(clipped)
@@ -714,7 +714,7 @@ def _place_along_roads(
         # Also skip roads we know ban parking (freeways/trunks, OSM tags, manual list).
         if edge.width <= 0.0 or edge.is_driveway or not _edge_allows_parking(edge, no_parking_roads):
             continue
-        clipped = _clip_polyline_to_rect(edge.centerline, x_min, z_min, x_max, z_max)
+        clipped = clip_polyline_to_rect(edge.centerline, x_min, z_min, x_max, z_max)
         if len(clipped) < 2:
             continue
         arc = _arc_lengths(clipped)
@@ -733,10 +733,10 @@ def _place_along_roads(
             while s < total - _CAR_LENGTH * 0.5:
                 if rng.random() <= fill:
                     x, z, fx, fz = _sample_polyline(clipped, arc, s)
-                    rx, _, rz = _cross_up((fx, 0.0, fz))   # right of travel, unit XZ
+                    rx, _, rz = cross_up((fx, 0.0, fz))   # right of travel, unit XZ
                     cx = x + rx * side * dist
                     cz = z + rz * side * dist
-                    y = _sample_elevation(hmap, cx, cz) + _RAISE
+                    y = sample_elevation(hmap, cx, cz) + _RAISE
                     # Each side faces with its own kerb's traffic → opposite headings.
                     rot_y = math.degrees(math.atan2(fx, fz)) + (180.0 if side < 0 else 0.0)
                     nx, ny, nz = _surface_normal(hmap, cx, cz)

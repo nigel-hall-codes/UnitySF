@@ -9,11 +9,11 @@ import numpy as np
 from shapely.geometry import Polygon
 
 from .elevation import HeightmapData
-from .geometry.road import (
-    _MAX_SEG_M,
-    _clip_polyline_to_rect,
-    _densify_polyline,
-    _smooth_centerline_profile,
+from .geometry.primitives import (
+    MAX_SEG_M,
+    clip_polyline_to_rect,
+    densify_polyline,
+    smooth_centerline_profile,
 )
 from .osm import StreetEdge, StreetGraph
 
@@ -161,7 +161,7 @@ def stamp_roads(
     for edge in graph.edges:
         if edge.width <= 0.0:
             continue
-        cl = _clip_polyline_to_rect(
+        cl = clip_polyline_to_rect(
             edge.centerline,
             hmap.world_x_min, hmap.world_z_min,
             hmap.world_x_min + hmap.world_width,
@@ -172,7 +172,7 @@ def stamp_roads(
         # Match the road mesh's subdivision so the stamped grade follows the
         # heightfield up steep grades instead of ramping linearly between sparse
         # OSM nodes and tearing a seam at the road edge (#219).
-        cl = _densify_polyline(cl, _MAX_SEG_M)
+        cl = densify_polyline(cl, MAX_SEG_M)
         sampled_y = [
             hmap_snap.sample_bilinear(x, z) * (hmap.max_elevation_m - hmap.min_elevation_m) + hmap.min_elevation_m
             for x, z in cl
@@ -183,7 +183,7 @@ def stamp_roads(
         # densified XZ is identical between the two passes, so the smoothed grade
         # is too — keeping stamp and mesh consistent (#219) and welded at the
         # untouched endpoints. See #230/#231.
-        sampled_y = _smooth_centerline_profile(cl, sampled_y)
+        sampled_y = smooth_centerline_profile(cl, sampled_y)
         edge_data.append((edge.osm_way_id, edge.width * 0.5, cl, sampled_y))
 
     # Pass 1: determine which road's centerline is closest to each cell.

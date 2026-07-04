@@ -6,15 +6,15 @@ from typing import Dict, List, Optional, Tuple
 
 from ..elevation import HeightmapData
 from ..osm import StreetEdge, StreetGraph
-from .road import (
-    _MAX_SEG_M,
+from .primitives import (
+    MAX_SEG_M,
     MeshArrays,
-    _anchor_centerline,
-    _clip_polyline_to_rect,
-    _cross_up,
-    _densify_polyline,
-    _forward,
-    _sample_elevation,
+    anchor_centerline,
+    clip_polyline_to_rect,
+    cross_up,
+    densify_polyline,
+    forward,
+    sample_elevation,
 )
 
 _WIDTH = 1.5    # metres per sidewalk strip (left and right)
@@ -63,26 +63,26 @@ def _build_single_sidewalk(
     bx1 = hmap.world_x_min + hmap.world_width
     bz1 = hmap.world_z_min + hmap.world_height
 
-    cl_xz = _clip_polyline_to_rect(edge.centerline, bx0, bz0, bx1, bz1)
+    cl_xz = clip_polyline_to_rect(edge.centerline, bx0, bz0, bx1, bz1)
 
     # Subdivide long segments to match the road mesh and stamp, so the sidewalk
     # strips track the heightfield up steep grades instead of faceting beside the
     # smoothly-conforming carriageway (#219).
-    cl_xz = _densify_polyline(cl_xz, _MAX_SEG_M)
+    cl_xz = densify_polyline(cl_xz, MAX_SEG_M)
 
     sampled = [
-        (x, _sample_elevation(hmap, x, z), z)
+        (x, sample_elevation(hmap, x, z), z)
         for x, z in cl_xz
     ]
 
     from_pt = None
     to_pt = None
     if bd_from is not None and bx0 <= bd_from[0] <= bx1 and bz0 <= bd_from[1] <= bz1:
-        from_pt = (bd_from[0], _sample_elevation(hmap, bd_from[0], bd_from[1]), bd_from[1])
+        from_pt = (bd_from[0], sample_elevation(hmap, bd_from[0], bd_from[1]), bd_from[1])
     if bd_to is not None and bx0 <= bd_to[0] <= bx1 and bz0 <= bd_to[1] <= bz1:
-        to_pt = (bd_to[0], _sample_elevation(hmap, bd_to[0], bd_to[1]), bd_to[1])
+        to_pt = (bd_to[0], sample_elevation(hmap, bd_to[0], bd_to[1]), bd_to[1])
 
-    centerline = _anchor_centerline(sampled, from_pt, to_pt)
+    centerline = anchor_centerline(sampled, from_pt, to_pt)
     n = len(centerline)
     if n < 2:
         return None
@@ -103,8 +103,8 @@ def _build_single_sidewalk(
     uvs: List[Tuple[float, float]] = []
 
     for i, (cx, cy, cz) in enumerate(centerline):
-        fwd = _forward(centerline, i)
-        rx, _, rz = _cross_up(fwd)
+        fwd = forward(centerline, i)
+        rx, _, rz = cross_up(fwd)
         length = math.hypot(rx, rz)
         if length > 1e-6:
             rx, rz = rx / length, rz / length
@@ -116,16 +116,16 @@ def _build_single_sidewalk(
         ro_x, ro_z = cx + rx * outer_offset, cz + rz * outer_offset
 
         # left-outer (index i*4) — ramps down toward terrain (just above it), no cliff
-        verts.append((lo_x, _sample_elevation(hmap, lo_x, lo_z) + _OUTER_RAISE, lo_z))
+        verts.append((lo_x, sample_elevation(hmap, lo_x, lo_z) + _OUTER_RAISE, lo_z))
         uvs.append((1.0, v_coord))
         # left-inner (index i*4 + 1) — flush with the road surface (+_RAISE)
-        verts.append((li_x, _sample_elevation(hmap, li_x, li_z) + _RAISE, li_z))
+        verts.append((li_x, sample_elevation(hmap, li_x, li_z) + _RAISE, li_z))
         uvs.append((0.0, v_coord))
         # right-inner (index i*4 + 2) — flush with the road surface (+_RAISE)
-        verts.append((ri_x, _sample_elevation(hmap, ri_x, ri_z) + _RAISE, ri_z))
+        verts.append((ri_x, sample_elevation(hmap, ri_x, ri_z) + _RAISE, ri_z))
         uvs.append((0.0, v_coord))
         # right-outer (index i*4 + 3) — ramps down toward terrain (just above it), no cliff
-        verts.append((ro_x, _sample_elevation(hmap, ro_x, ro_z) + _OUTER_RAISE, ro_z))
+        verts.append((ro_x, sample_elevation(hmap, ro_x, ro_z) + _OUTER_RAISE, ro_z))
         uvs.append((1.0, v_coord))
 
     # 2 strips × (n-1) quads × 2 tris × 3 indices = (n-1) * 12
