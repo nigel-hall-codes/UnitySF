@@ -63,7 +63,6 @@ namespace SFMap.Pipeline
 
         // ---- Manifest / grid ----
         ChunkManifest _manifest;
-        float _chunkSize, _originX, _originZ;
         bool _ready;
 
         // ---- Position data ----
@@ -115,11 +114,6 @@ namespace SFMap.Pipeline
                 enabled = false;
                 return;
             }
-
-            _chunkSize = _manifest.chunkSizeMeters;
-            var a = _manifest.chunks[0];
-            _originX = a.worldX - a.col * _chunkSize;
-            _originZ = a.worldZ - a.row * _chunkSize;
 
             _heightField = HeightField.Load(heightCacheAsset);
             if (_heightField != null)
@@ -333,35 +327,9 @@ namespace SFMap.Pipeline
             var rootRb = fresh.GetComponent<Rigidbody>();
             if (rootRb == null) rootRb = fresh.AddComponent<Rigidbody>();
             rootRb.isKinematic = true;
-            EnsureSolidCollider(fresh);
+            // Fitted at Rent, before Spawn applies carScale/rotation, so the box maps axis-for-axis.
+            ColliderUtil.EnsureSolid(fresh);
             return fresh;
-        }
-
-        // Guarantees the parked car is solid: keeps every collider the prefab ships with enabled
-        // and non-trigger; a car that ships none gets a BoxCollider on the root fitted to its
-        // combined visible bounds, mapped into the root's local space (via worldToLocalMatrix) so
-        // it scales with the car when Spawn applies carScale. Fitted at Rent, before that scale and
-        // the spawn rotation are applied, so the matrix is pure translation+scale and size maps
-        // axis-for-axis. Mirrors TrafficManager.EnsureCollider — parked cars need solidity but not
-        // the pull-over reaction, so the logic is kept local rather than shared.
-        static void EnsureSolidCollider(GameObject go)
-        {
-            var cols = go.GetComponentsInChildren<Collider>();
-            bool hasCollider = cols.Length > 0;
-            foreach (var col in cols) { col.enabled = true; col.isTrigger = false; }
-            if (hasCollider) return;
-
-            var renderers = go.GetComponentsInChildren<Renderer>();
-            if (renderers.Length == 0) return; // nothing visible to fit a box to
-
-            Bounds world = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++) world.Encapsulate(renderers[i].bounds);
-
-            var box = go.AddComponent<BoxCollider>();
-            var w2l = go.transform.worldToLocalMatrix;
-            box.center = w2l.MultiplyPoint3x4(world.center);
-            Vector3 size = w2l.MultiplyVector(world.size);
-            box.size = new Vector3(Mathf.Abs(size.x), Mathf.Abs(size.y), Mathf.Abs(size.z));
         }
 
         void Return(GameObject go, int idx)
@@ -383,9 +351,7 @@ namespace SFMap.Pipeline
             return Camera.main != null ? Camera.main.transform : null;
         }
 
-        ChunkCoord WorldToChunk(Vector3 world) => new ChunkCoord(
-            Mathf.FloorToInt((world.x - _originX) / _chunkSize),
-            Mathf.FloorToInt((world.z - _originZ) / _chunkSize));
+        ChunkCoord WorldToChunk(Vector3 world) => _manifest.WorldToChunk(world);
 
         static int Chebyshev(ChunkCoord a, ChunkCoord b) =>
             Mathf.Max(Mathf.Abs(a.Col - b.Col), Mathf.Abs(a.Row - b.Row));
