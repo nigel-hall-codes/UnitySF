@@ -8,8 +8,9 @@ namespace SFMap.OnFoot
     /// <b>Driving</b> the Prometeo car and being <b>OnFoot</b> as the <see cref="OnFootPlayer"/>
     /// walker. Self-bootstraps after the scene loads, no scene wiring.
     ///
-    /// Press <c>F</c> while stopped in the car to step out beside it; press <c>F</c> on foot near a
-    /// car to get back in. The coordinator is the single owner of the shared camera and the
+    /// Press <c>Y</c> (gamepad) or <c>F</c> (keyboard) while stopped in the car to step out beside
+    /// it; press it again on foot near a car to get back in. The coordinator owns the shared camera
+    /// and the
     /// <see cref="ChunkStreamer.target"/>, handing both to whichever mode is active — which is what
     /// stops the walker and the car's follow camera from fighting over the main camera.
     ///
@@ -34,7 +35,8 @@ namespace SFMap.OnFoot
 
         ChunkStreamer _streamer;
         Camera _cam;
-        PrometeoFollowCamera _follow;
+        Behaviour _followCam;              // chase cam driving Camera.main — PrometeoFollowCamera or
+                                           // PROMETEO's CameraFollow (Assembly-CSharp, via reflection)
         Transform _car;
         Behaviour _carController;          // PrometeoCarController, toggled via Behaviour.enabled
         Rigidbody _carBody;
@@ -60,9 +62,7 @@ namespace SFMap.OnFoot
         void Start()
         {
             _streamer = FindObjectOfType<ChunkStreamer>();
-            _cam = Camera.main;
-            _follow = FindObjectOfType<PrometeoFollowCamera>();
-            ResolveCar();
+            ResolveCar();                  // resolves _followCam, _car, _cam, _carController, _carBody
 
             _walker = OnFootPlayer.EnsureInstance();
 
@@ -85,16 +85,19 @@ namespace SFMap.OnFoot
         {
             if (_car == null) return;
 
+            // Keyboard F or gamepad Y (Xbox Y == JoystickButton3) toggles between driving and foot.
+            bool toggle = Input.GetKeyDown(ToggleKey) || Input.GetKeyDown(KeyCode.JoystickButton3);
+
             if (Current == Mode.Driving)
             {
-                if (Input.GetKeyDown(ToggleKey) && CarNearlyStopped())
+                if (toggle && CarNearlyStopped())
                     ExitToFoot();
             }
             else // OnFoot
             {
                 _nearCar = _walker != null &&
                            Vector3.Distance(_walker.transform.position, _car.position) <= EntryRadius;
-                if (_nearCar && Input.GetKeyDown(ToggleKey))
+                if (_nearCar && toggle)
                     EnterCar();
             }
         }
@@ -104,7 +107,7 @@ namespace SFMap.OnFoot
             // Freeze and hand off the car so it sits parked while you're out.
             if (_carController != null) _carController.enabled = false;
             if (_carBody != null) _carBody.isKinematic = true;
-            if (_follow != null) _follow.enabled = false;      // stop the chase cam driving the camera
+            if (_followCam != null) _followCam.enabled = false;   // stop the chase cam driving the camera
 
             var door = _car.position + _car.right * DoorOffset + Vector3.up * DoorLift;
             EnterOnFoot(door);
@@ -120,7 +123,7 @@ namespace SFMap.OnFoot
         {
             _walker.Deactivate();                               // releases the camera (keeps world pose)
 
-            if (_follow != null) _follow.enabled = true;        // chase cam resumes driving the camera
+            if (_followCam != null) _followCam.enabled = true;    // chase cam resumes driving the camera
             if (_carBody != null) _carBody.isKinematic = false;
             if (_carController != null) _carController.enabled = true;
             if (_streamer != null) _streamer.target = _car;
@@ -134,8 +137,29 @@ namespace SFMap.OnFoot
 
         void ResolveCar()
         {
-            // The player's car is the one the follow camera targets (matches TaxiGame's resolution).
-            _car = _follow != null ? _follow.target : null;
+            // Find the chase camera + the car it follows. Prefer the typed PrometeoFollowCamera
+            // (SFMap.Pipeline); fall back to the PROMETEO package's CameraFollow, which lives in
+            // Assembly-CSharp and can only be reached by reflection. Mirrors TaxiGame's resolution.
+            var prometeo = FindObjectOfType<PrometeoFollowCamera>();
+            if (prometeo != null && prometeo.target != null)
+            {
+                _followCam = prometeo;
+                _car = prometeo.target;
+            }
+            else
+            {
+                var t = System.Type.GetType("CameraFollow, Assembly-CSharp");
+                if (t != null && FindObjectOfType(t) is Behaviour cf)
+                {
+                    _followCam = cf;
+                    _car = t.GetField("carTransform")?.GetValue(cf) as Transform;
+                }
+            }
+
+            // The chase-cam Behaviour lives on the camera GameObject, so take the camera from it.
+            if (_followCam != null) _cam = _followCam.GetComponent<Camera>();
+            if (_cam == null) _cam = Camera.main;
+
             if (_car == null) return;
             _carBody = _car.GetComponent<Rigidbody>();
             _carController = FindCarController(_car);
@@ -161,7 +185,7 @@ namespace SFMap.OnFoot
                 alignment = TextAnchor.MiddleCenter,
             };
 
-            const string prompt = "Press F to get in";
+            const string prompt = "Press Y / F to get in";
             var rect = new Rect(0f, Screen.height * 0.62f, Screen.width, 40f);
 
             _promptStyle.normal.textColor = new Color(0f, 0f, 0f, 0.7f);   // drop shadow

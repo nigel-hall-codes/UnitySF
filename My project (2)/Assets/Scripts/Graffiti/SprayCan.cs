@@ -38,6 +38,11 @@ namespace SFMap.Graffiti
          Tooltip("Max dabs emitted in a single frame's sweep, so one fast flick can't spawn thousands.")]
         int _maxDabsPerFrame = 24;
 
+        // Gamepad RT/R2 reads on the combined-trigger axis; on Windows the right trigger is the
+        // negative direction, so we spray past this magnitude. If LT sprays instead of RT, flip
+        // 'invert' on the SprayTrigger axis in Project Settings > Input Manager.
+        const float TriggerThreshold = 0.4f;
+
         int _mask;
         Camera _cam;
         bool _wasSpraying;                // were we laying paint last frame? drives stroke continuity
@@ -58,9 +63,11 @@ namespace SFMap.Graffiti
             var cam = ResolveCamera();
             if (cam == null) { _wasSpraying = false; return; }
 
-            // Only while actually playing (cursor captured) and holding the trigger. When the
-            // cursor is free the same button re-captures it (OnFootPlayer), so we stay off then.
-            bool spraying = Cursor.lockState == CursorLockMode.Locked && Input.GetMouseButton(0);
+            // Only while actually playing (cursor captured) and holding the trigger — left mouse or
+            // the gamepad's right trigger (RT/R2). When the cursor is free the same mouse button
+            // re-captures it (OnFootPlayer), so we stay off then.
+            bool trigger = Input.GetMouseButton(0) || SafeAxis("SprayTrigger") <= -TriggerThreshold;
+            bool spraying = Cursor.lockState == CursorLockMode.Locked && trigger;
             if (!spraying) { _wasSpraying = false; return; }
 
             var ray = new Ray(cam.transform.position, cam.transform.forward);
@@ -113,7 +120,7 @@ namespace SFMap.Graffiti
             for (int i = 1; i <= steps; i++)
             {
                 var p = Vector3.Lerp(from, to, (float)i / steps);
-                store.AddDab(p, normal, DabSize);
+                store.AddDab(p, normal, _dabSize);
             }
         }
 
@@ -121,6 +128,14 @@ namespace SFMap.Graffiti
         {
             if (_cam != null) return _cam;
             return _cam = Camera.main;   // the FP camera OnFootPlayer parents under the walker
+        }
+
+        // Reads an optional joystick axis; returns 0 if it isn't defined in the Input Manager
+        // (legacy Input throws for undefined axes), so a missing mapping never breaks mouse spray.
+        static float SafeAxis(string name)
+        {
+            try { return Input.GetAxis(name); }
+            catch { return 0f; }
         }
 
         static int BuildMask(params string[] layers)

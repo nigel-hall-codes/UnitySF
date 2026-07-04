@@ -27,6 +27,7 @@ namespace SFMap.OnFoot
         const float RunSpeed = 8f;            // while holding Left Shift
         const float Gravity = -20f;           // snappier than real g so drops feel game-y
         const float MouseSensitivity = 2.2f;
+        const float StickLookSpeed = 200f;    // right-stick look rate (degrees/second)
         const float PitchLimit = 85f;         // clamp look up/down (degrees)
         const float EyeHeight = 1.7f;
         const float BodyRadius = 0.3f;
@@ -142,11 +143,24 @@ namespace SFMap.OnFoot
 
         void Look()
         {
-            float mx = Input.GetAxisRaw("Mouse X") * MouseSensitivity;
-            float my = Input.GetAxisRaw("Mouse Y") * MouseSensitivity;
+            // Mouse is a per-frame delta; the right stick (CameraLookX/Y) is a rate, so scale it by
+            // dt. Right stick X turns the body, Y pitches the view. If stick look feels inverted,
+            // flip 'invert' on CameraLookX/CameraLookY in Project Settings > Input Manager.
+            float mx = Input.GetAxisRaw("Mouse X") * MouseSensitivity
+                     + SafeAxis("CameraLookX") * StickLookSpeed * Time.deltaTime;
+            float my = Input.GetAxisRaw("Mouse Y") * MouseSensitivity
+                     + SafeAxis("CameraLookY") * StickLookSpeed * Time.deltaTime;
             transform.Rotate(0f, mx, 0f, Space.Self);                       // yaw the body
             _pitch = Mathf.Clamp(_pitch - my, -PitchLimit, PitchLimit);     // pitch the camera
             _cam.localRotation = Quaternion.Euler(_pitch, 0f, 0f);
+        }
+
+        // Reads an optional joystick axis; returns 0 if it isn't defined in the Input Manager
+        // (legacy Input throws for undefined axes), so a missing mapping never breaks movement.
+        static float SafeAxis(string name)
+        {
+            try { return Input.GetAxis(name); }
+            catch { return 0f; }
         }
 
         void Move()

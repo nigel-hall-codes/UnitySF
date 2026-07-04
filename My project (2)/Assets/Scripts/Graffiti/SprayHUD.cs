@@ -15,6 +15,8 @@ namespace SFMap.Graffiti
     [AddComponentMenu("UI/Spray HUD")]
     public class SprayHUD : MonoBehaviour
     {
+        GameObject _canvasGO;              // toggled with the cursor-capture (on-foot) state
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Bootstrap()
         {
@@ -26,12 +28,22 @@ namespace SFMap.Graffiti
 
         void Awake() => Build();
 
+        void Update()
+        {
+            // The reticle/can only make sense while on foot and aiming — i.e. when the cursor is
+            // captured. While driving (cursor free) it's hidden, so no spray dot sits over the road.
+            bool show = Cursor.lockState == CursorLockMode.Locked;
+            if (_canvasGO != null && _canvasGO.activeSelf != show)
+                _canvasGO.SetActive(show);
+        }
+
         void Build()
         {
             var white = Sprite.Create(Texture2D.whiteTexture, new Rect(0, 0, 1, 1),
                 new Vector2(0.5f, 0.5f), 1f);
 
             var canvasGO = new GameObject("SprayHUDCanvas");
+            _canvasGO = canvasGO;
             canvasGO.transform.SetParent(transform, false);
             var canvas = canvasGO.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
@@ -62,6 +74,9 @@ namespace SFMap.Graffiti
             var lRt = (RectTransform)label.transform;
             lRt.anchorMin = Vector2.zero; lRt.anchorMax = new Vector2(1f, 0.4f);
             lRt.offsetMin = lRt.offsetMax = Vector2.zero;
+
+            // Start hidden if we begin with a free cursor (e.g. driving), so it doesn't flash on.
+            _canvasGO.SetActive(Cursor.lockState == CursorLockMode.Locked);
         }
 
         // Anchored, pivot-centred image helper. `anchor` is the shared anchor+pivot, `pos` the
