@@ -777,9 +777,17 @@ namespace SFMap.Pipeline.Editor
             string src = Path.Combine(chunkDir, $"chunk_{coord.Col:00}_{coord.Row:00}_buildings.json");
             if (!File.Exists(src)) return;
 
-            byte[] body = System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(src));
-            AuthoringServerClient.Post("/buildings/import-sidecar", body, "application/json",
-                                       $"{coord}: buildings sidecar import");
+            try
+            {
+                byte[] body = System.Text.Encoding.UTF8.GetBytes(File.ReadAllText(src));
+                AuthoringServerClient.Post("/buildings/import-sidecar", body, "application/json",
+                                           $"{coord}: buildings sidecar import");
+            }
+            catch (Exception e)
+            {
+                // Reading the sidecar must never abort the import (matches pre-#427 behaviour).
+                Debug.LogWarning($"[SFMapImporter] {coord}: buildings sidecar import failed: {e.Message}");
+            }
         }
 
         // ------------------------------------------------------- building thumbnails (#369)
