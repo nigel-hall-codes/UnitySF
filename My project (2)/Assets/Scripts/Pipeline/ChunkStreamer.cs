@@ -71,6 +71,32 @@ namespace SFMap.Pipeline
         /// <see cref="IsReady"/>, since the grid origin isn't known before then.
         public ChunkCoord ChunkAt(Vector3 world) => _ready ? WorldToChunk(world) : default;
 
+        // ---- Streaming lifecycle events ----
+        // Generic per-chunk load/unload hooks. The session paint store (#390) uses these to
+        // re-emit a chunk's dabs when it (re)loads and to drop them on unload, but they're
+        // intentionally generic — any consumer that needs to react to chunk residency can subscribe.
+
+        /// Raised after a chunk instance has spawned and been committed as resident.
+        /// The GameObject is the streamed instance, already parented under this streamer.
+        public event Action<ChunkCoord, GameObject> ChunkLoaded;
+
+        /// Raised after a chunk instance has been unloaded (destroyed and dropped from residency).
+        public event Action<ChunkCoord> ChunkUnloaded;
+
+        // Streaming runs as a fire-and-forget async loop, so a throwing subscriber must not be
+        // allowed to escape and tear the loop down — log it and keep streaming.
+        void RaiseChunkLoaded(ChunkCoord coord, GameObject go)
+        {
+            try { ChunkLoaded?.Invoke(coord, go); }
+            catch (Exception e) { Debug.LogException(e, this); }
+        }
+
+        void RaiseChunkUnloaded(ChunkCoord coord)
+        {
+            try { ChunkUnloaded?.Invoke(coord); }
+            catch (Exception e) { Debug.LogException(e, this); }
+        }
+
         async void OnEnable()
         {
             _cts = CancellationTokenSource.CreateLinkedTokenSource(destroyCancellationToken);
@@ -177,6 +203,7 @@ namespace SFMap.Pipeline
                 _loaded.Remove(c);
                 if (go != null)
                     Destroy(go);
+                RaiseChunkUnloaded(c);
             }
 
             // Queue missing chunks within the load radius, nearest first, up to the concurrency cap.
@@ -234,6 +261,7 @@ namespace SFMap.Pipeline
                 go.transform.SetParent(transform, false);
                 go.name = coord.ToString();
                 _loaded[coord] = go; // a now-stale chunk is reclaimed by the next Tick's unload pass
+                RaiseChunkLoaded(coord, go);
             }
             catch (OperationCanceledException)
             {
