@@ -1,0 +1,20 @@
+{
+  "_comment": "SF landmark gazetteer for `/baker around <name>`. Keys are display names (matched case- and spacing-insensitively); coords are approximate centre points — fine for 300 m chunk selection. All must fall inside full_sf_map bounds (lat 37.709..37.813, lon -122.528..-122.349). Add your own freely.",
+  "Dolores Park": {"lat": 37.7596, "lon": -122.4269},
+  "Mission Dolores": {"lat": 37.7644, "lon": -122.4269},
+  "Twin Peaks": {"lat": 37.7544, "lon": -122.4477},
+  "Castro": {"lat": 37.7625, "lon": -122.4350},
+  "Haight-Ashbury": {"lat": 37.7699, "lon": -122.4469},
+  "Alamo Square": {"lat": 37.7762, "lon": -122.4329},
+  "Union Square": {"lat": 37.7880, "lon": -122.4074},
+  "Ferry Building": {"lat": 37.7955, "lon": -122.3937},
+  "Coit Tower": {"lat": 37.8024, "lon": -122.4058},
+  "Pier 39": {"lat": 37.8087, "lon": -122.4098},
+  "Lombard Street": {"lat": 37.8021, "lon": -122.4187},
+  "Chinatown": {"lat": 37.7908, "lon": -122.4056},
+  "Oracle Park": {"lat": 37.7786, "lon": -122.3893},
+  "Dogpatch": {"lat": 37.7576, "lon": -122.3877},
+  "Golden Gate Park Bandshell": {"lat": 37.7702, "lon": -122.4685},
+  "Bernal Heights Summit": {"lat": 37.7430, "lon": -122.4156},
+  "Glen Park BART": {"lat": 37.7331, "lon": -122.4337}
+}

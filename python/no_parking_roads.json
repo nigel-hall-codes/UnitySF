@@ -1,0 +1,8 @@
+{
+  "_comment": "Manual no-parking street list for `sfmap_bake --no-parking-roads`. This bans parked cars along the ENTIRE named road, so it lists only SF roads with essentially no on-street parking anywhere along their length. Freeways/trunks (US-101, I-280, Central Freeway, Presidio Parkway, Park Presidio Blvd, and the freeway segments of Junipero Serra) and OSM `parking:*=no` kerbs are already excluded automatically — they are NOT repeated here. Major arterials (Geary, 19th Ave, Van Ness, Sunset, Marina, Bayshore) are intentionally OMITTED: they only have time-limited tow-away zones and carry parked cars most of the day. Names match the OSM `name` tag, case- and spacing-insensitive. Verified against full_sf_map.osm (2026-06).",
+  "streets": [
+    "Great Highway",
+    "Crossover Drive",
+    "Skyline Boulevard"
+  ]
+}
