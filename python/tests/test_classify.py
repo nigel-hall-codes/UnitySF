@@ -15,7 +15,8 @@ from sfmap.classify import (
 )
 from sfmap.elevation import HeightmapData
 from sfmap.geometry.building import building_base_y
-from sfmap.serialize import ChunkData, write_buildings
+from sfmap.types import ChunkData
+from sfmap.serialize import write_buildings
 
 # --- footprint_hash: normative algorithm (data-model.md §6.1) ---------------
 

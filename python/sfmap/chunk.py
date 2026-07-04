@@ -20,7 +20,7 @@ from .geometry.parking import place_parked_cars
 from .geometry.road import build_road_meshes
 from .geometry.sidewalk import build_sidewalk_meshes
 from .osm import StreetGraph
-from .serialize import ChunkData, MeshEntry, MeshType
+from .types import ChunkData, MeshEntry, MeshType
 from .stamping import stamp_all
 
 # Boundaries dict type: (way_id, from_node, to_node) -> (from_xz, to_xz)
