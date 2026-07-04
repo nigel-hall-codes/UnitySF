@@ -172,7 +172,10 @@ namespace SFMap.OnFoot
             var wish = Vector3.ClampMagnitude(transform.forward * fwd + transform.right * str, 1f);
             float speed = Input.GetKey(KeyCode.LeftShift) ? RunSpeed : WalkSpeed;
 
-            if (_cc.isGrounded && Input.GetButtonDown("Jump")) _vy = JumpSpeed;
+            // Space or gamepad A (Xbox A == JoystickButton0) — explicit binding, not the stock "Jump"
+            // axis, whose default gamepad button (3 / Y) collides with the car-toggle button.
+            bool jumpPressed = Input.GetKeyDown(KeyCode.Space) || Input.GetKeyDown(KeyCode.JoystickButton0);
+            if (_cc.isGrounded && jumpPressed) _vy = JumpSpeed;
             else if (_cc.isGrounded && _vy < 0f) _vy = GroundStick;
             _vy += Gravity * Time.deltaTime;
 
