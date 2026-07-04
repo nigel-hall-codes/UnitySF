@@ -348,6 +348,11 @@ namespace SFMap.Pipeline.Editor
             SaveMeshAsset(combined, GeneratedAssets.BuildingMesh(coord, osmId));
             root.AddComponent<MeshFilter>().sharedMesh = combined;
             root.AddComponent<MeshRenderer>().sharedMaterial = massMaterial;
+            // Templated buildings need collision too, exactly like the merged path (#415): a
+            // non-convex MeshCollider over the combined mass mesh so on-foot spray raycasts hit
+            // the facade and cars/player stop at the wall. `root` stays on the Default layer the
+            // spray mask and character/vehicle collision expect (new GameObject defaults to it).
+            root.AddComponent<MeshCollider>().sharedMesh = combined;
         }
 
         NeighborhoodPalette ResolvePalette(string neighborhood)
