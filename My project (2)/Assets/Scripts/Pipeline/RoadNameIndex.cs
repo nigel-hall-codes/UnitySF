@@ -103,8 +103,8 @@ namespace SFMap.Pipeline
                 float segBest = float.MaxValue;
                 for (int i = 0; i + 3 < xz.Length; i += 2)
                 {
-                    float d2 = SegDistSq(px, pz, xz[i], xz[i + 1], xz[i + 2], xz[i + 3]);
-                    if (d2 < segBest) segBest = d2;
+                    float sd = SegDistSq(px, pz, xz[i], xz[i + 1], xz[i + 2], xz[i + 3]);
+                    if (sd < segBest) segBest = sd;
                 }
                 if (segBest > r2) continue;
                 if (!nearest.TryGetValue(seg.name, out float cur) || segBest < cur)
