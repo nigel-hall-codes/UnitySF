@@ -41,6 +41,15 @@ namespace SFMap.Pipeline.Editor
         [SerializeField] string presetName  = "default";
         [SerializeField] bool   bakeParkedCars = true;
 
+        // Authoring-asset uploads (#447): per-building thumbnail (#369) + facade backdrop (#407)
+        // renders and their PUTs, plus the per-chunk buildings sidecar POST (#384). Default OFF —
+        // city-wide these are O(10^5) GPU readbacks + blocking HTTP round-trips repeated every
+        // re-import, and the server/iOS app already fall back gracefully on missing assets. The
+        // iPad-authoring workflow turns it on. When on, RunImport probes the server ONCE up front
+        // and clears _uploadAuthoring for the whole run if it's unreachable, so a down server
+        // costs one warning instead of a render+encode+failed-PUT stall per building.
+        [SerializeField] bool   uploadAuthoringAssets = false;
+
         // 7-color pastel palette for buildings. Each building picks one by hashing
         // its osm_id and the colour is baked into the building's vertex colors, so
         // a whole chunk of buildings shares one material (and one draw call) while
@@ -120,6 +129,11 @@ namespace SFMap.Pipeline.Editor
         ImportTimings      _timings;
         readonly Stopwatch _opWatch = new Stopwatch();
 
+        // Resolved once per run from uploadAuthoringAssets AND a live server probe (#447): the
+        // gate on every render/upload site below, so "toggle off" and "server down" both skip
+        // the render+encode, not just the PUT.
+        bool _uploadAuthoring;
+
         // One shared op-watch is enough: the timed regions never overlap in time
         // (each chunk runs parse → terrain → mesh → collider → cars → save in turn).
         void StartOp() => _opWatch.Restart();
@@ -181,6 +195,12 @@ namespace SFMap.Pipeline.Editor
 
             presetName = EditorGUILayout.TextField("Preset Name", presetName);
             bakeParkedCars = EditorGUILayout.Toggle("Bake Parked Cars into Prefab", bakeParkedCars);
+            uploadAuthoringAssets = EditorGUILayout.Toggle(
+                new GUIContent("Upload Building Authoring Assets",
+                    "Render + upload per-building thumbnails and facade backdrops and POST the " +
+                    "buildings sidecar to the authoring server. Off for normal bakes; on for the " +
+                    "iPad-authoring workflow. Skipped entirely if the server is unreachable."),
+                uploadAuthoringAssets);
 
             EditorGUILayout.Space();
             if (GUILayout.Button("Import Chunks"))
@@ -209,6 +229,19 @@ namespace SFMap.Pipeline.Editor
 
             _timings = new ImportTimings();
             var totalWatch = Stopwatch.StartNew();
+
+            // Resolve the authoring-upload gate ONCE for the whole run (#447): only if the toggle
+            // is on AND a single probe finds the server listening. A down server here means we
+            // skip the renders too, not just the doomed PUTs — the expensive part is the GPU
+            // readback + JPEG encode, which is pointless with nowhere to send the result.
+            _uploadAuthoring = uploadAuthoringAssets && AuthoringServerClient.IsReachable();
+            if (!uploadAuthoringAssets)
+                Debug.Log("[SFMapImporter] Building authoring uploads OFF — skipping thumbnail/" +
+                          "backdrop renders and sidecar POST this run.");
+            else if (!_uploadAuthoring)
+                Debug.LogWarning($"[SFMapImporter] Authoring server unreachable at " +
+                                 $"{AuthoringServerClient.BaseUrl} — skipping all building renders/" +
+                                 $"uploads this run (toggle is on, server is down).");
 
             EnsureTopLevelFolders();
             EnsureMaterials();
@@ -338,10 +371,15 @@ namespace SFMap.Pipeline.Editor
             // Buildings-tab thumbnails (#384): the server only accepts a building's thumbnail PUT
             // once that building's facts row exists in its DB (#318 guard) — so the chunk's sidecar
             // must be imported before any RenderAndUploadBuildingThumbnail call below runs. This was
-            // previously never wired up, so every thumbnail PUT 404'd silently.
-            StartOp();
-            UploadBuildingsSidecar(Path.GetDirectoryName(binPath), coord);
-            StopOp(ref _timings.sidecarPostMs);
+            // previously never wired up, so every thumbnail PUT 404'd silently. Gated with the
+            // thumbnail/backdrop uploads (#447): the sidecar only exists to seed the server's
+            // facts rows for those uploads, so there's nothing to POST when they're skipped.
+            if (_uploadAuthoring)
+            {
+                StartOp();
+                UploadBuildingsSidecar(Path.GetDirectoryName(binPath), coord);
+                StopOp(ref _timings.sidecarPostMs);
+            }
 
             // Building Assembler (design #266): if this chunk has a classification sidecar AND a
             // template library exists, buildings that match a template fork off into individual
@@ -398,20 +436,26 @@ namespace SFMap.Pipeline.Editor
                             // mesh (world-space per the comment above CombineParts) and bounds are
                             // still available per-building, before it forks below or gets merged.
                             // Best-effort: never aborts the import (see the try/catch inside).
-                            RenderAndUploadBuildingThumbnail(osmId, mesh, _timings);
+                            // Gated by _uploadAuthoring (#447) so the render+encode is skipped, not
+                            // just the PUT, on a normal (upload-off / server-down) bake.
+                            if (_uploadAuthoring)
+                                RenderAndUploadBuildingThumbnail(osmId, mesh, _timings);
 
                             if (assembler != null &&
                                 assembler.TryMatch(osmId, out var bFacts, out var bTpl))
                             {
                                 // Templated: the assembler resolves role colours, bakes them, and
                                 // saves the combined per-building mesh asset — so no fallback bake
-                                // here. Just set the mass mesh aside.
+                                // here. Just set the mass mesh aside. (This is unconditional — the
+                                // templated geometry is built regardless of authoring uploads; only
+                                // the backdrop render/upload below is gated.)
                                 templated.Add((osmId, mesh, bFacts, bTpl));
 
                                 // Facade backdrops (#407): needs the sidecar's facade edge geometry,
                                 // which only templated buildings carry (same scope as facade decals
                                 // placed via FacadesFor) — best-effort, mirrors the thumbnail above.
-                                RenderAndUploadFacadeBackdrops(osmId, mesh, bFacts, _timings);
+                                if (_uploadAuthoring)
+                                    RenderAndUploadFacadeBackdrops(osmId, mesh, bFacts, _timings);
                             }
                             else
                             {
