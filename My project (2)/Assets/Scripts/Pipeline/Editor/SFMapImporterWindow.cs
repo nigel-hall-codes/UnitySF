@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -49,6 +51,12 @@ namespace SFMap.Pipeline.Editor
         // and clears _uploadAuthoring for the whole run if it's unreachable, so a down server
         // costs one warning instead of a render+encode+failed-PUT stall per building.
         [SerializeField] bool   uploadAuthoringAssets = false;
+
+        // Incremental-import generator version (#261). Folded into every chunk fingerprint, so
+        // BUMP THIS whenever an import-code change alters a chunk's baked output (mesh build,
+        // collider setup, terrain, prefab layout, palette maths, …). A bump invalidates every
+        // stored fingerprint, forcing a one-time full re-import that re-establishes the baseline.
+        const int GeneratorVersion = 1;
 
         // 7-color pastel palette for buildings. Each building picks one by hashing
         // its osm_id and the colour is baked into the building's vertex colors, so
@@ -254,6 +262,18 @@ namespace SFMap.Pipeline.Editor
             var coordList  = new List<ChunkManifestEntry>();
             float globalMinElev = float.MaxValue;
 
+            // Incremental import (#261): reuse chunks whose inputs are byte-for-byte unchanged since
+            // the last import. The preamble folds in everything map-wide that shapes output — the
+            // generator version, preset, the parked-car and authoring toggles (both change per-chunk
+            // work), and a hash of the whole SFBuildingTemplates authoring library — so a change to
+            // any of them re-imports every chunk. Per-chunk inputs (.bin + sidecars) are hashed in
+            // the loop. Any uncertainty (no prior fingerprint, changed input, missing prefab) falls
+            // through to a full import, so the worst case is a redundant rebuild, never a stale asset.
+            var priorEntries = LoadPriorChunkEntries();
+            string fpPreamble = $"v{GeneratorVersion}|preset={presetName}|park={bakeParkedCars}" +
+                                $"|auth={uploadAuthoringAssets}|lib={HashAuthoringLibrary()}";
+            int skippedChunks = 0;
+
             try
             {
                 for (int i = 0; i < manifest.chunks.Length; i++)
@@ -267,6 +287,32 @@ namespace SFMap.Pipeline.Editor
                     if (!File.Exists(binPath))
                     {
                         Debug.LogWarning($"[SFMapImporter] Missing .bin: {binPath}");
+                        continue;
+                    }
+
+                    // Incremental skip (#261): reuse this chunk if its inputs are unchanged since the
+                    // last import AND its prefab is still on disk. Carry the prior entry forward so
+                    // the manifest stays complete, then continue — skipping the mesh/terrain/collider
+                    // bake, the prefab save, AND the #447 authoring uploads (no re-render of unchanged
+                    // buildings). mapRoot is torn down at the end, so nothing needs instantiating.
+                    string fingerprint = ComputeChunkFingerprint(chunkDir, coord, fpPreamble);
+                    if (priorEntries.TryGetValue((mc.col, mc.row), out var priorEntry)
+                        && !string.IsNullOrEmpty(priorEntry.fingerprint)
+                        && priorEntry.fingerprint == fingerprint
+                        && File.Exists(GeneratedAssets.ChunkPrefabPath(coord)))
+                    {
+                        coordList.Add(new ChunkManifestEntry
+                        {
+                            col     = mc.col,
+                            row     = mc.row,
+                            worldX  = mc.worldX,
+                            worldZ  = mc.worldZ,
+                            minElev = priorEntry.minElev,
+                            fingerprint = fingerprint,
+                        });
+                        if (priorEntry.minElev < globalMinElev)
+                            globalMinElev = priorEntry.minElev;
+                        skippedChunks++;
                         continue;
                     }
 
@@ -301,10 +347,12 @@ namespace SFMap.Pipeline.Editor
 
                     coordList.Add(new ChunkManifestEntry
                     {
-                        col    = mc.col,
-                        row    = mc.row,
-                        worldX = mc.worldX,
-                        worldZ = mc.worldZ,
+                        col     = mc.col,
+                        row     = mc.row,
+                        worldX  = mc.worldX,
+                        worldZ  = mc.worldZ,
+                        minElev = chunkMinElev,
+                        fingerprint = fingerprint,
                     });
                 }
 
@@ -316,7 +364,8 @@ namespace SFMap.Pipeline.Editor
                 AssetDatabase.Refresh();
                 StopOp(ref _timings.finalSaveMs);
 
-                Debug.Log($"[SFMapImporter] Imported {coordList.Count} chunk(s) for preset '{presetName}'.");
+                Debug.Log($"[SFMapImporter] Imported {coordList.Count} chunk(s) for preset " +
+                          $"'{presetName}' ({skippedChunks} unchanged, reused).");
 
                 totalWatch.Stop();
                 _timings.chunks = coordList.Count;
@@ -678,6 +727,70 @@ namespace SFMap.Pipeline.Editor
 
             string path = GeneratedAssets.ChunkManifestPath();
             CreateOrReplaceAsset(asset, path);
+        }
+
+        // -------------------------------------------- incremental-import fingerprints (#261)
+
+        // Prior run's chunk entries keyed by (col,row), from the ChunkManifest asset written last
+        // time for the CURRENT preset (ActivePreset is already set). Empty on a first import or when
+        // the manifest is absent — every chunk then falls through to a full import.
+        static Dictionary<(int, int), ChunkManifestEntry> LoadPriorChunkEntries()
+        {
+            var map = new Dictionary<(int, int), ChunkManifestEntry>();
+            var prior = AssetDatabase.LoadAssetAtPath<ChunkManifest>(GeneratedAssets.ChunkManifestPath());
+            if (prior?.chunks != null)
+                foreach (var e in prior.chunks)
+                    map[(e.col, e.row)] = e;
+            return map;
+        }
+
+        // Hash of every file under Assets/SFBuildingTemplates/ (templates, overrides, palettes,
+        // parts, signs, library.json) — the map-wide authoring inputs that shape templated output
+        // without living in any chunk's .bin. Conservative on purpose: a change to any one of them
+        // re-imports the whole map. .meta files are excluded (Unity import metadata, not bake input).
+        static string HashAuthoringLibrary()
+        {
+            using var sha = SHA256.Create();
+            string root = SFBuildingTemplatePaths.LibraryRoot;
+            if (Directory.Exists(root))
+            {
+                foreach (string file in Directory
+                             .EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                             .Where(f => !f.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                             .OrderBy(f => f, StringComparer.Ordinal))
+                {
+                    byte[] rel = System.Text.Encoding.UTF8.GetBytes(file.Replace('\\', '/'));
+                    sha.TransformBlock(rel, 0, rel.Length, null, 0);
+                    byte[] data = File.ReadAllBytes(file);
+                    sha.TransformBlock(data, 0, data.Length, null, 0);
+                }
+            }
+            sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+            return BitConverter.ToString(sha.Hash).Replace("-", "");
+        }
+
+        // SHA-256 over a chunk's own inputs — its .bin and the three sidecars that shape its output
+        // (buildings classification, parked cars, road names) — prefixed with the map-wide preamble.
+        // A one-byte presence marker per file makes "sidecar absent" hash differently from "present
+        // but empty", so adding or deleting a sidecar always dirties the chunk.
+        static string ComputeChunkFingerprint(string chunkDir, ChunkCoord coord, string preamble)
+        {
+            using var sha = SHA256.Create();
+            void Feed(byte[] b) { sha.TransformBlock(b, 0, b.Length, null, 0); }
+            void FeedFile(string path)
+            {
+                if (File.Exists(path)) { Feed(new byte[] { 1 }); Feed(File.ReadAllBytes(path)); }
+                else Feed(new byte[] { 0 });
+            }
+
+            Feed(System.Text.Encoding.UTF8.GetBytes(preamble));
+            string stem = $"chunk_{coord.Col:00}_{coord.Row:00}";
+            FeedFile(Path.Combine(chunkDir, $"{stem}.bin"));
+            FeedFile(Path.Combine(chunkDir, $"{stem}_buildings.json"));
+            FeedFile(Path.Combine(chunkDir, $"{stem}_parked.json"));
+            FeedFile(Path.Combine(chunkDir, $"{stem}_names.json"));
+            sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+            return BitConverter.ToString(sha.Hash).Replace("-", "");
         }
 
         // ------------------------------------------------------------------ helpers

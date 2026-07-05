@@ -10,6 +10,16 @@ namespace SFMap.Pipeline
         public int   row;
         public float worldX;
         public float worldZ;
+
+        // Per-chunk min elevation (the terrain GameObject's Y offset). Stored so an
+        // incremental re-import (#261) can carry a skipped chunk's contribution into the
+        // map-wide minElevation without re-parsing its .bin.
+        public float minElev;
+
+        // SHA-256 over this chunk's inputs (.bin + sidecars) plus the generator version,
+        // preset, and authoring library, written by the importer (#261). On the next import
+        // an unchanged fingerprint (and a still-present prefab) lets the chunk be skipped.
+        public string fingerprint;
     }
 
     [CreateAssetMenu(menuName = "SFMap/Chunk Manifest", fileName = "ChunkManifest")]
