@@ -101,6 +101,20 @@ namespace SFMap.Pipeline.Editor
             public double parkedCarsMs;  // parked-car prefab instantiation
             public double savePrefabMs;  // SaveAsPrefabAsset
             public double finalSaveMs;   // closing SaveAssets + Refresh
+
+            // Authoring/templated-bake stages added after #260 (#446). These were all
+            // untimed, so on a templated bake they hid inside "unaccounted" — the likely
+            // #1 cost (per-building thumbnail/backdrop renders + blocking HTTP uploads)
+            // was invisible. Render and upload are split so a server-down bake (render
+            // only, uploads fail fast) vs server-up bake are separable in the breakdown.
+            public double jsonSidecarMs;    // _names.json / _parked.json copy + ImportAsset
+            public double sidecarPostMs;    // buildings sidecar POST (UploadBuildingsSidecar, #384)
+            public double thumbRenderMs;    // building thumbnail render (#369)
+            public double thumbUploadMs;    // building thumbnail upload PUT (#369)
+            public double backdropRenderMs; // facade backdrop render (#407)
+            public double backdropUploadMs; // facade backdrop upload PUT (#407)
+            public double assembleMs;       // BuildingAssembler.Assemble templated pass (#266)
+            public double decalImportMs;    // BuildingDecalImporter.Import (#280)
         }
 
         ImportTimings      _timings;
@@ -118,7 +132,10 @@ namespace SFMap.Pipeline.Editor
         {
             int    n = Math.Max(t.chunks, 1);
             double accounted = t.binParseMs + t.terrainMs + t.meshBuildMs + t.colliderMs +
-                               t.parkedCarsMs + t.savePrefabMs + t.finalSaveMs;
+                               t.parkedCarsMs + t.savePrefabMs + t.finalSaveMs +
+                               t.jsonSidecarMs + t.sidecarPostMs + t.thumbRenderMs +
+                               t.thumbUploadMs + t.backdropRenderMs + t.backdropUploadMs +
+                               t.assembleMs + t.decalImportMs;
             double unaccounted = Math.Max(totalMs - accounted, 0.0);
 
             string Row(string label, double ms) =>
@@ -132,6 +149,14 @@ namespace SFMap.Pipeline.Editor
             sb.AppendLine(Row("mesh build",      t.meshBuildMs));
             sb.AppendLine(Row("collider cook",   t.colliderMs));
             sb.AppendLine(Row("parked cars",     t.parkedCarsMs));
+            sb.AppendLine(Row("json sidecars",   t.jsonSidecarMs));
+            sb.AppendLine(Row("sidecar POST",    t.sidecarPostMs));
+            sb.AppendLine(Row("thumb render",    t.thumbRenderMs));
+            sb.AppendLine(Row("thumb upload",    t.thumbUploadMs));
+            sb.AppendLine(Row("backdrop render", t.backdropRenderMs));
+            sb.AppendLine(Row("backdrop upload", t.backdropUploadMs));
+            sb.AppendLine(Row("assemble",        t.assembleMs));
+            sb.AppendLine(Row("decal import",    t.decalImportMs));
             sb.AppendLine(Row("save prefab",     t.savePrefabMs));
             sb.AppendLine(Row("final save",      t.finalSaveMs));
             sb.Append    (Row("unaccounted",     unaccounted));
@@ -216,8 +241,10 @@ namespace SFMap.Pipeline.Editor
                     if (chunkMinElev < globalMinElev)
                         globalMinElev = chunkMinElev;
 
+                    StartOp();
                     ImportRoadNames(chunkDir, coord);
                     ImportParkedCarsJson(chunkDir, coord);
+                    StopOp(ref _timings.jsonSidecarMs);
 
                     var chunkRootGo = mapRoot.transform.Find(coord.ToString()).gameObject;
                     if (bakeParkedCars)
@@ -230,7 +257,9 @@ namespace SFMap.Pipeline.Editor
                     // Facade decals (#280): alpha-textured quads from building-specific overrides,
                     // nested like parked cars so they bake into the chunk prefab. No-op without a
                     // sidecar or facadeDecals. Overrides are loaded once above and batched internally.
+                    StartOp();
                     BuildingDecalImporter.Import(chunkDir, coord, chunkRootGo, decalOverrides);
+                    StopOp(ref _timings.decalImportMs);
 
                     StartOp();
                     PrefabUtility.SaveAsPrefabAsset(chunkRootGo,
@@ -310,7 +339,9 @@ namespace SFMap.Pipeline.Editor
             // once that building's facts row exists in its DB (#318 guard) — so the chunk's sidecar
             // must be imported before any RenderAndUploadBuildingThumbnail call below runs. This was
             // previously never wired up, so every thumbnail PUT 404'd silently.
+            StartOp();
             UploadBuildingsSidecar(Path.GetDirectoryName(binPath), coord);
+            StopOp(ref _timings.sidecarPostMs);
 
             // Building Assembler (design #266): if this chunk has a classification sidecar AND a
             // template library exists, buildings that match a template fork off into individual
@@ -367,7 +398,7 @@ namespace SFMap.Pipeline.Editor
                             // mesh (world-space per the comment above CombineParts) and bounds are
                             // still available per-building, before it forks below or gets merged.
                             // Best-effort: never aborts the import (see the try/catch inside).
-                            RenderAndUploadBuildingThumbnail(osmId, mesh);
+                            RenderAndUploadBuildingThumbnail(osmId, mesh, _timings);
 
                             if (assembler != null &&
                                 assembler.TryMatch(osmId, out var bFacts, out var bTpl))
@@ -380,7 +411,7 @@ namespace SFMap.Pipeline.Editor
                                 // Facade backdrops (#407): needs the sidecar's facade edge geometry,
                                 // which only templated buildings carry (same scope as facade decals
                                 // placed via FacadesFor) — best-effort, mirrors the thumbnail above.
-                                RenderAndUploadFacadeBackdrops(osmId, mesh, bFacts);
+                                RenderAndUploadFacadeBackdrops(osmId, mesh, bFacts, _timings);
                             }
                             else
                             {
@@ -482,6 +513,7 @@ namespace SFMap.Pipeline.Editor
                 // imported one-by-one — the #295 hotspot on dense template chunks.
                 if (templated.Count > 0)
                 {
+                    StartOp();
                     AssetDatabase.StartAssetEditing();
                     try
                     {
@@ -492,6 +524,7 @@ namespace SFMap.Pipeline.Editor
                     {
                         AssetDatabase.StopAssetEditing();
                     }
+                    StopOp(ref _timings.assembleMs);
                 }
                 assembler.LogCoverage(coord, buildingParts.Count);   // fallback = merged buildings
             }
@@ -797,13 +830,20 @@ namespace SFMap.Pipeline.Editor
         // logged as a warning and swallowed — most local bakes run without the server up,
         // and a missing thumbnail is exactly the placeholder-swatch fallback the iOS app
         // and server already handle correctly.
-        static void RenderAndUploadBuildingThumbnail(long osmId, Mesh mesh)
+        // `timings` splits the render cost from the blocking upload PUT (#446): on a
+        // server-down bake the render still runs but the PUT fails fast, so keeping them
+        // in separate buckets tells #259 how much of this stage is CPU vs. network.
+        static void RenderAndUploadBuildingThumbnail(long osmId, Mesh mesh, ImportTimings timings)
         {
+            var sw = Stopwatch.StartNew();
             try
             {
                 byte[] jpg = RenderBuildingThumbnail(mesh, osmId);
+                timings.thumbRenderMs += sw.Elapsed.TotalMilliseconds;
                 if (jpg == null) return;
+                sw.Restart();
                 UploadBuildingThumbnail(osmId, jpg);
+                timings.thumbUploadMs += sw.Elapsed.TotalMilliseconds;
             }
             catch (Exception e)
             {
@@ -913,16 +953,23 @@ namespace SFMap.Pipeline.Editor
         // down, render hiccup) is logged and swallowed per-facade — same reasoning as
         // RenderAndUploadBuildingThumbnail: a missing backdrop is the "returns nil
         // gracefully" fallback the client already handles.
-        static void RenderAndUploadFacadeBackdrops(long osmId, Mesh mesh, BuildingFactsJson facts)
+        // `timings` splits render from the blocking upload PUT, accumulated across all
+        // four facades — same server-up/down separation as the thumbnail path (#446).
+        static void RenderAndUploadFacadeBackdrops(long osmId, Mesh mesh, BuildingFactsJson facts, ImportTimings timings)
         {
+            var sw = new Stopwatch();
             void TryOne(Facade facade, StreetFacadeJson f)
             {
                 if (f == null) return;
                 try
                 {
+                    sw.Restart();
                     byte[] jpg = RenderFacadeBackdrop(mesh, osmId, facts, f);
+                    timings.backdropRenderMs += sw.Elapsed.TotalMilliseconds;
                     if (jpg == null) return;
+                    sw.Restart();
                     UploadFacadeBackdrop(osmId, facade, jpg);
+                    timings.backdropUploadMs += sw.Elapsed.TotalMilliseconds;
                 }
                 catch (Exception e)
                 {
