@@ -1,0 +1,41 @@
+{
+  "id": "garage_noe_flush",
+  "category": "Garage",
+  "generatorId": "garage.sectional",
+  "parameters": [
+    { "name": "leafW", "value": 2.35 },
+    { "name": "leafH", "value": 2.15 },
+    { "name": "revealDepth", "value": 0.20 },
+    { "name": "trackReveal", "value": 0.22 },
+
+    { "name": "doorStyle", "text": "Flush" },
+    { "name": "panelCols", "value": 1 },
+    { "name": "panelRows", "value": 1 },
+    { "name": "panelBevel", "value": 0.0 },
+    { "name": "panelInset", "value": 0.025 },
+    { "name": "railW", "value": 0.05 },
+    { "name": "railD", "value": 0.03 },
+    { "name": "frameW", "value": 0.075 },
+    { "name": "frameD", "value": 0.045 },
+
+    { "name": "head", "text": "Flat" },
+    { "name": "headerProfile", "text": "Ogee" },
+    { "name": "headerProjection", "value": 0.14 },
+    { "name": "headerH", "value": 0.13 },
+    { "name": "headerOverhang", "value": 0.09 },
+    { "name": "headerRole", "text": "Accent2" },
+
+    { "name": "apronProjection", "value": 0.18 },
+    { "name": "apronSlope", "value": 0.15 },
+    { "name": "apronH", "value": 0.09 },
+    { "name": "apronOverhang", "value": 0.08 },
+    { "name": "apronRole", "text": "Base" },
+
+    { "name": "leafRole", "text": "Accent1" },
+    { "name": "panelRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 2.53, "h": 2.37, "d": 0.43 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.25,
+  "version": 2
+}

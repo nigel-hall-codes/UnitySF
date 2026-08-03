@@ -1,0 +1,42 @@
+{
+  "id": "garage_sunset_arch",
+  "category": "Garage",
+  "generatorId": "garage.sectional",
+  "parameters": [
+    { "name": "leafW", "value": 2.75 },
+    { "name": "leafH", "value": 2.25 },
+    { "name": "revealDepth", "value": 0.14 },
+    { "name": "trackReveal", "value": 0.18 },
+
+    { "name": "doorStyle", "text": "Sectional" },
+    { "name": "panelCols", "value": 4 },
+    { "name": "panelRows", "value": 4 },
+    { "name": "panelBevel", "value": 0.025 },
+    { "name": "panelInset", "value": 0.03 },
+    { "name": "railW", "value": 0.045 },
+    { "name": "railD", "value": 0.028 },
+    { "name": "frameW", "value": 0.06 },
+    { "name": "frameD", "value": 0.035 },
+
+    { "name": "head", "text": "Segmental" },
+    { "name": "headerRise", "value": 0.45 },
+    { "name": "headerProfile", "text": "Bullnose" },
+    { "name": "headerProjection", "value": 0.07 },
+    { "name": "headerH", "value": 0.16 },
+    { "name": "headerOverhang", "value": 0.06 },
+    { "name": "headerRole", "text": "Base" },
+
+    { "name": "apronProjection", "value": 0.35 },
+    { "name": "apronSlope", "value": 0.35 },
+    { "name": "apronH", "value": 0.12 },
+    { "name": "apronOverhang", "value": 0.12 },
+    { "name": "apronRole", "text": "Base" },
+
+    { "name": "leafRole", "text": "Accent1" },
+    { "name": "panelRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 2.99, "h": 2.98, "d": 0.56 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.22,
+  "version": 2
+}
