@@ -1,9 +1,13 @@
 {
   "id": "noe_valley_victorian",
-  "displayName": "Noe Valley Victorian",
+  "displayName": "Noe Valley Victorian (south-central Victorian/Edwardian belt)",
   "compatibility": {
     "neighborhoods": [
-      "Noe Valley"
+      "Noe Valley",
+      "Glen Park",
+      "West of Twin Peaks",
+      "Outer Mission",
+      "Twin Peaks"
     ],
     "building_types": [],
     "footprint_shapes": [],
