@@ -1,0 +1,33 @@
+{
+  "id": "cornice_noe_bracketed",
+  "category": "Roof",
+  "generatorId": "cornice.banded",
+  "parameters": [
+    { "name": "profileFamily", "text": "Bracketed" },
+    { "name": "projection", "value": 0.34 },
+    { "name": "heightM", "value": 0.32 },
+
+    { "name": "dentilPitch", "value": 0.30 },
+    { "name": "dentilW", "value": 0.13 },
+    { "name": "dentilH", "value": 0.11 },
+    { "name": "dentilProjection", "value": 0.17 },
+
+    { "name": "bracketSpacing", "value": 1.30 },
+    { "name": "bracketW", "value": 0.11 },
+    { "name": "bracketD", "value": 0.40 },
+    { "name": "bracketH", "value": 0.55 },
+    { "name": "bracketProfile", "text": "Ogee" },
+
+    { "name": "returnEnds", "value": 1 },
+    { "name": "returnDepth", "value": 0.34 },
+
+    { "name": "corniceRole", "text": "Accent2" },
+    { "name": "bracketRole", "text": "Accent2" },
+
+    { "name": "runLengthM", "value": 8.0 }
+  ],
+  "size_m": { "w": 8.00, "h": 0.98, "d": 0.40 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.05,
+  "version": 2
+}

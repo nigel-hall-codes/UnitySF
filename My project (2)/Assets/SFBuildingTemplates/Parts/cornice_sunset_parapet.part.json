@@ -1,0 +1,31 @@
+{
+  "id": "cornice_sunset_parapet",
+  "category": "Roof",
+  "generatorId": "cornice.banded",
+  "parameters": [
+    { "name": "profileFamily", "text": "Parapet" },
+    { "name": "projection", "value": 0.24 },
+    { "name": "heightM", "value": 0.14 },
+
+    { "name": "parapetRise", "value": 0.85 },
+    { "name": "parapetShape", "text": "Scalloped" },
+    { "name": "parapetThickness", "value": 0.18 },
+    { "name": "scallopWidth", "value": 1.30 },
+    { "name": "scallopRise", "value": 0.22 },
+
+    { "name": "dentilPitch", "value": 0.0 },
+    { "name": "bracketSpacing", "value": 0.0 },
+
+    { "name": "returnEnds", "value": 1 },
+    { "name": "returnDepth", "value": 0.18 },
+
+    { "name": "corniceRole", "text": "Accent2" },
+    { "name": "parapetRole", "text": "Base" },
+
+    { "name": "runLengthM", "value": 7.5 }
+  ],
+  "size_m": { "w": 7.50, "h": 0.92, "d": 0.26 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.03,
+  "version": 2
+}
