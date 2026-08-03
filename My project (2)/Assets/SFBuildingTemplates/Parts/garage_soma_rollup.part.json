@@ -1,0 +1,36 @@
+{
+  "id": "garage_soma_rollup",
+  "category": "Garage",
+  "generatorId": "garage.sectional",
+  "parameters": [
+    { "name": "leafW", "value": 4.4 },
+    { "name": "leafH", "value": 2.6 },
+    { "name": "revealDepth", "value": 0.06 },
+    { "name": "trackReveal", "value": 0.08 },
+
+    { "name": "doorStyle", "text": "Slat" },
+    { "name": "slatRows", "value": 16 },
+    { "name": "panelBevel", "value": 0.012 },
+    { "name": "panelInset", "value": 0.015 },
+    { "name": "railW", "value": 0.02 },
+    { "name": "railD", "value": 0.014 },
+    { "name": "frameW", "value": 0.05 },
+    { "name": "frameD", "value": 0.03 },
+
+    { "name": "head", "text": "Flat" },
+    { "name": "headerProfile", "text": "Flat" },
+    { "name": "headerProjection", "value": 0.05 },
+    { "name": "headerH", "value": 0.22 },
+    { "name": "headerOverhang", "value": 0.10 },
+    { "name": "headerRole", "text": "Metal" },
+
+    { "name": "apronProjection", "value": 0.0 },
+
+    { "name": "leafRole", "text": "Metal" },
+    { "name": "panelRole", "text": "Metal" }
+  ],
+  "size_m": { "w": 4.60, "h": 2.82, "d": 0.15 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.10,
+  "version": 2
+}
