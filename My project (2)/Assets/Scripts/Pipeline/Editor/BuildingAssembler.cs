@@ -117,10 +117,23 @@ namespace SFMap.Pipeline.Editor
         readonly Dictionary<string, NeighborhoodTemplateWeights> _districtWeights;
         readonly Dictionary<long, OverrideJson> _overrides;
 
-        // Exact placement positions of the building currently being assembled, keyed by
-        // (facade edge_index, floor) → normalized x's, so procedural rules with avoidExact can
-        // skip slots that land on an Exact part. Reset per building in Assemble.
-        readonly Dictionary<long, List<float>> _exactMarks = new Dictionary<long, List<float>>();
+        // What every facade of the building currently being assembled is already wearing (#491),
+        // as real along-facade and vertical extents taken off the generated meshes. Written by
+        // Exact and Procedural placements alike and consulted by every procedural one, so two
+        // rules can see each other and an artifact that spans two floors is felt on both. Replaces
+        // the exact-only (edge, floor) → normalized-x point marks. Reset per building in Assemble.
+        readonly FacadeOccupancy _occupancy = new FacadeOccupancy();
+
+        // Parameter blocks with one entry overwritten to a facade-sized value (#487), keyed by
+        // (part, parameter, 5 mm bucket). Two facades in the same bucket share a block, and
+        // therefore a PartKey, and therefore a mesh. Snapping to the bucket rather than keeping
+        // the first facade's exact width is what makes the generated geometry a pure function of
+        // the bucket instead of of import order. Lives for the whole chunk, like the mesh cache.
+        readonly Dictionary<string, PartParams> _stretchedParams =
+            new Dictionary<string, PartParams>(StringComparer.Ordinal);
+        // Counts parts SIZED, not parts kept: a stretched part is resolved before the corner and
+        // occupancy rules get a say, so a refused shopfront still shows up here.
+        int _stretchedParts;
 
         // Parts placed for the current building, collected so BakeAndCombine can colour and fold
         // the non-sign ones into one mesh. Reset per building.
@@ -306,7 +319,7 @@ namespace SFMap.Pipeline.Editor
             root.transform.SetParent(buildingsParent, false);
 
             _placed.Clear();
-            _exactMarks.Clear();
+            _occupancy.Clear();
             // Corner buildings dress every street edge (design D2), and until #459 nothing
             // reconciled two facades meeting at a corner. This table is what does.
             _corners = FacadeCornerTable.Build(facts);
@@ -484,7 +497,9 @@ namespace SFMap.Pipeline.Editor
         {
             Debug.Log($"[BuildingAssembler] {coord}: {_templated} templated, {fallback} fallback " +
                       $"(merged) of {_templated + fallback} buildings; {_partMeshes.Generated} part " +
-                      $"mesh(es) generated, {_partMeshes.Hits} served from cache.");
+                      $"mesh(es) generated, {_partMeshes.Hits} served from cache; " +
+                      $"{_stretchedParts} facade-sized part(s) resolved over " +
+                      $"{_stretchedParams.Count} distinct width bucket(s) (#487).");
         }
 
         // ---- building-specific overrides (#273, design §Placement Model) -------
@@ -637,25 +652,15 @@ namespace SFMap.Pipeline.Editor
             return nums;
         }
 
+        // Exact placements are the fixed bones of a style: they claim their space (so rules keep
+        // clear of them) but never yield it, which is the stated precedence Exact > Procedural.
+        // Two exacts on one floor are still separated by the author's own x values —
+        // TemplateWiringTests.GroundFloorExactsClearEachOtherOnARealFacade is the guard.
         void PlaceExact(Transform parent, ExactPlacement p, BuildingFactsJson facts)
         {
             foreach (var f in FacadesFor(p.facade, facts))
-            {
-                long key = ExactKey(f.edge_index, p.floor);
-                if (!_exactMarks.TryGetValue(key, out var marks)) { marks = new List<float>(); _exactMarks[key] = marks; }
-                marks.Add(Mathf.Clamp01(p.x));
-                PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, p.facade);
-            }
-        }
-
-        static long ExactKey(int edgeIndex, int floor) => ((long)edgeIndex << 16) | (uint)(floor & 0xFFFF);
-
-        bool NearExactMark(int edgeIndex, int floor, float nx, float radius)
-        {
-            if (_exactMarks.TryGetValue(ExactKey(edgeIndex, floor), out var marks))
-                foreach (var ex in marks)
-                    if (Mathf.Abs(ex - nx) < radius) return true;
-            return false;
+                PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, p.facade,
+                          recordOccupancy: true);
         }
 
         // The facade(s) a placement targets: Front → primary street facade; Back/Left/Right →
@@ -699,9 +704,26 @@ namespace SFMap.Pipeline.Editor
         // `respectCorners` is the #459 exclusion. It is on for everything the template drives and
         // off for building-specific overrides, matching the stated precedence (Building-Specific >
         // Exact > Procedural): a human who placed a part at a corner on purpose meant it.
+        //
+        // `consultOccupancy` / `recordOccupancy` are the two halves of the #491 occupancy table,
+        // and the defaults encode the same precedence:
+        //   • procedural  — consults and records (it must dodge everything and be dodged);
+        //   • exact       — records only (fixed bones: always placed, never displaced);
+        //   • roof parts  — neither. They sit at the roofline above the facade band, and a
+        //                   per-facade cornice fallback claiming the top floor would start
+        //                   suppressing top-floor windows, which no issue asks for;
+        //   • override    — neither, for the same reason it ignores corners.
+        // `sourceRule` is the rule index behind a procedural placement, so a rule never excludes
+        // against its own slots — spacing within one family is the repeat pitch's job.
+        //
+        // `stretchMeters` > 0 rebuilds the part at that width by overwriting one named parameter
+        // (#487) instead of scaling it.
         void PlacePart(Transform parent, StreetFacadeJson f, BuildingFactsJson facts,
                        string partId, int floor, float nx, float ny, float scale, float rotationDeg,
-                       Facade facadeEnum, bool isSign = false, bool respectCorners = true)
+                       Facade facadeEnum, bool isSign = false, bool respectCorners = true,
+                       int sourceRule = FacadeOccupancy.NotARule,
+                       bool consultOccupancy = false, bool recordOccupancy = false,
+                       float stretchMeters = 0f, string stretchParam = null)
         {
             if (f.edge == null || f.edge.Length < 4) return;
 
@@ -725,18 +747,36 @@ namespace SFMap.Pipeline.Editor
             float mountDepth = part != null ? part.mountDepthMeters : 0f;
             pos += outward * mountDepth;   // outward is horizontal, so this leaves pos.y intact
 
-            if (!TryPartMesh(part, partId, out PartMesh mesh)) return;   // no generator → nothing to place (#454)
+            if (!TryPartMesh(part, partId, stretchMeters, stretchParam, out PartMesh mesh))
+                return;   // no generator → nothing to place (#454)
 
-            // Corner reconciliation (#459). The part's real extents come off the generated mesh, so
-            // the rule needs no authored parameter and follows whatever a family actually builds:
-            // half-width along the facade for the overhang, mount depth + outward extent for how
-            // far it stands proud. Cheap — the mesh is already cached by this point — and, crucially,
-            // it draws no random numbers, so rejecting a slot cannot shift any other slot's seeded
-            // choices (each slot's Rng is seeded independently by hash(osm_id, ruleIndex, slot)).
+            // Corner reconciliation (#459/#488). The part's real extents come off the generated
+            // mesh, so the rule needs no authored parameter and follows whatever a family actually
+            // builds: half-width along the facade for the overhang, mount depth + outward extent
+            // for how far it stands proud. Cheap — the mesh is already cached by this point — and,
+            // crucially, it draws no random numbers, so rejecting a slot cannot shift any other
+            // slot's seeded choices (each slot's Rng is seeded independently by
+            // hash(osm_id, ruleIndex, slot)).
             float s = scale <= 0f ? 1f : scale;
+            Bounds bounds = mesh.mesh.bounds;
             if (respectCorners && _corners != null &&
-                _corners.Blocked(f, nx, mesh.mesh.bounds.min.x * s, mesh.mesh.bounds.max.x * s,
-                                 mesh.mesh.bounds.max.z * s + Mathf.Max(mountDepth, 0f)))
+                _corners.Blocked(f, nx, bounds.min.x * s, bounds.max.x * s,
+                                 bounds.max.z * s + Mathf.Max(mountDepth, 0f)))
+                return;
+
+            // Occupancy (#491), read off the same mesh for the same reason: what matters is what
+            // the family actually built, not what a preset says it is. The along-facade interval is
+            // in metres from the facade's start, so nothing here is capped by a rule's repeat
+            // pitch; the vertical interval is world Y, so an artifact that rises through two floors
+            // is felt on both without anyone authoring a floorsSpanned anywhere.
+            float alongCenter = Mathf.Clamp01(nx) * len;
+            float spanMin = alongCenter + bounds.min.x * s;
+            float spanMax = alongCenter + bounds.max.x * s;
+            float spanBottom = pos.y + bounds.min.y * s;
+            float spanTop = pos.y + bounds.max.y * s;
+
+            if (consultOccupancy &&
+                _occupancy.Occupied(f.edge_index, sourceRule, spanMin, spanMax, spanBottom, spanTop))
                 return;
 
             var child = InstantiatePart(part, mesh);
@@ -751,6 +791,9 @@ namespace SFMap.Pipeline.Editor
             // Scale = the placement scale only: the generated mesh already carries its real size,
             // built from the part's own parameters.
             child.transform.localScale = Vector3.one * s;
+
+            if (recordOccupancy)
+                _occupancy.Add(f.edge_index, sourceRule, spanMin, spanMax, spanBottom, spanTop);
 
             _placed.Add(new Placed { go = child, part = part, roles = roles, partId = partId, facade = facadeEnum, floor = floor, isSign = isSign });
         }
@@ -817,9 +860,16 @@ namespace SFMap.Pipeline.Editor
                 if (rule.repeat.countMax > 0) count = Mathf.Min(count, rule.repeat.countMax);
                 if (count <= 0) continue;
 
-                // Exclusion radius (normalized) for avoidExact: keep a procedural part this far
-                // from any Exact placement on the same facade edge + floor.
-                float exclusion = Mathf.Max(rule.constraints.minSpacingMeters, spacing * 0.5f) / facadeLen;
+                // Size the part to the facade rather than to its authored width (#487). The span is
+                // the rule's own, after edgeMargin, so a rule that stretches also decides how much
+                // of the facade it is entitled to. With countMax = 1 the single slot sits at the
+                // span's centre, which is exactly where a part of this width belongs.
+                //
+                // `rule.constraints.minSpacingMeters` no longer sets an exclusion radius: the
+                // occupancy table (#491) compares the parts' real extents instead, which is what
+                // lifts the old ceiling (the radius could not exceed the repeat pitch without also
+                // changing the slot count). It keeps its other job, as a floor under `spacing`.
+                float stretchMeters = rule.stretchToFacade ? (x1 - x0) * facadeLen : 0f;
 
                 for (int floor = floorMin; floor <= floorMax; floor++)
                 {
@@ -839,9 +889,6 @@ namespace SFMap.Pipeline.Editor
                             nx += rng.Range(-rule.jitter.x, rule.jitter.x) / facadeLen;  // metres → normalized
                         nx = Mathf.Clamp(nx, x0, x1);
 
-                        if (rule.constraints.avoidExact && NearExactMark(f.edge_index, floor, nx, exclusion))
-                            continue;
-
                         // align-to-floor-line → sit on the floor line; else mid-floor.
                         float ny = rule.constraints.alignToFloorLine ? 0f : 0.5f;
 
@@ -854,7 +901,15 @@ namespace SFMap.Pipeline.Editor
                         float rot = rule.jitter.rotation != 0f
                             ? rng.Range(-rule.jitter.rotation, rule.jitter.rotation) : 0f;
 
-                        PlacePart(parent, f, facts, partId, floor, nx, ny, scale, rot, rule.facade);
+                        // Every procedural placement both dodges and joins the occupancy table, so
+                        // the exclusion is no longer exact → procedural only: rule N sees the
+                        // exacts AND rules 0..N-1, and is itself seen by rules N+1... The check
+                        // happens inside PlacePart, where the generated mesh's real extents are
+                        // known — and draws no random numbers, so a refused slot cannot shift any
+                        // other slot's seeded choices.
+                        PlacePart(parent, f, facts, partId, floor, nx, ny, scale, rot, rule.facade,
+                                  sourceRule: ruleIndex, consultOccupancy: true, recordOccupancy: true,
+                                  stretchMeters: stretchMeters, stretchParam: rule.StretchParamName);
                     }
                 }
             }
@@ -876,7 +931,8 @@ namespace SFMap.Pipeline.Editor
         /// <para>Split out from <see cref="InstantiatePart"/> for #459: the corner rule needs the
         /// mesh's real extents to decide whether the placement fits, which has to happen before a
         /// GameObject is made for it.</para></summary>
-        bool TryPartMesh(BuildingPart part, string partId, out PartMesh mesh)
+        bool TryPartMesh(BuildingPart part, string partId, float stretchMeters, string stretchParam,
+                         out PartMesh mesh)
         {
             mesh = default;
 
@@ -888,12 +944,41 @@ namespace SFMap.Pipeline.Editor
                                         $"'{part.generatorId}' (known: {string.Join(", ", PartGenerators.Ids)})");
 
             var parameters = part.parameters ?? PartParams.Empty;
+            if (stretchMeters > 0f)
+                parameters = StretchedParams(part, parameters, stretchParam, stretchMeters);
+
             mesh = _partMeshes.GetOrCreate(parameters.KeyFor(part.generatorId),
                                            mb => generator.Generate(parameters, mb));
             if (!mesh.IsValid)
                 return WarnOnce(partId, $"generator '{part.generatorId}' produced no mesh for part '{partId}'");
 
             return true;
+        }
+
+        /// <summary>The part's parameters with its span-wise dimension overwritten by the facade's
+        /// own metres (#487), snapped to <see cref="PartKey.QuantumMeters"/>.
+        /// <para>Snapping before the override — rather than letting <see cref="PartKey"/> quantise
+        /// only the hash — is what makes a stretched part's geometry a pure function of its 5 mm
+        /// bucket. Quantise only the key and the mesh a bucket ends up holding is whichever
+        /// building in that bucket was assembled first; that is deterministic today, but it makes
+        /// the geometry depend on the order buildings appear in the sidecar, which no other part of
+        /// the placement model does.</para>
+        /// <para>Blocks are memoised per (part, parameter, bucket) so a chunk-wide sweep of
+        /// storefronts allocates one block per distinct width, not one per placement.</para></summary>
+        PartParams StretchedParams(BuildingPart part, PartParams source, string stretchParam,
+                                   float stretchMeters)
+        {
+            string name = string.IsNullOrEmpty(stretchParam)
+                ? ProceduralRule.DefaultStretchParam : stretchParam;
+            int bucket = Mathf.RoundToInt(stretchMeters / PartKey.QuantumMeters);
+
+            _stretchedParts++;
+            string key = $"{part.id}|{name}|{bucket}";
+            if (_stretchedParams.TryGetValue(key, out var cached)) return cached;
+
+            var made = source.WithOverride(name, bucket * PartKey.QuantumMeters);
+            _stretchedParams[key] = made;
+            return made;
         }
 
         /// <summary>A GameObject carrying an already-generated part mesh.</summary>

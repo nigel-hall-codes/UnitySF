@@ -647,25 +647,31 @@ namespace SFMap.Tests
         }
 
         [Test]
-        public void AReflexCornerIsWhereTheRightAngleAssumptionActuallyBites()
+        public void AReflexCornerHoldsAtEveryAngleThisFamilyIsSweptAt()
         {
-            // The reflex clearance is the neighbour's projection measured ALONG this facade, which
-            // is exact at 270° and short by 1/sin(reflex) elsewhere. This test states where it
-            // holds and where it does not, rather than asserting a number that was never measured.
+            // Was AReflexCornerIsWhereTheRightAngleAssumptionActuallyBites. #459's clearance was
+            // the neighbour's projection measured ALONG this facade — exact at 270° and short
+            // elsewhere — and this sweep is what found it admitting overlapping pairs at 290° and
+            // 315°. #488 replaced the assumption with the corner's true turn angle, so the sweep
+            // that characterised the defect now guards the fix, from the bay family's side and
+            // against a real generated bay rather than a synthetic footprint.
             var b = BayBounds("bay_noe_slanted");
             var failures = new List<string>();
 
-            foreach (float interior in new[] { 200f, 225f, 250f, 270f, 290f, 315f })
+            foreach (float interior in new[] { 200f, 225f, 250f, 270f, 290f, 315f, 330f })
             {
                 var (accepted, _, worst) = SweepCorner(CornerAt(interior), b);
                 if (accepted) failures.Add($"{interior}° (first accepted overlap at nx {worst:F2})");
             }
-            Debug.Log($"[#473/#459] reflex corners where the clearance is insufficient for a " +
+            Debug.Log($"[#473/#488] reflex corners where the clearance is insufficient for a " +
                       $"{b.max.z:F2} m projecting bay: " +
                       (failures.Count == 0 ? "none" : string.Join(", ", failures)));
 
-            var (rightAngle, _, _) = SweepCorner(CornerAt(270f), b);
+            Assert.IsEmpty(failures, "the reflex clearance admits an overlapping pair");
+
+            var (rightAngle, rejected, _) = SweepCorner(CornerAt(270f), b);
             Assert.IsFalse(rightAngle, "the 270° L-notch #459 was written against still holds");
+            Assert.IsTrue(rejected, "…and is still not vacuous there");
         }
 
         [Test]

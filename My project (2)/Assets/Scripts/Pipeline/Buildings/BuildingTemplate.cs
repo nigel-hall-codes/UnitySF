@@ -97,9 +97,18 @@ namespace SFMap.Pipeline.Buildings
     [Serializable]
     public struct PlacementConstraints
     {
+        /// <summary>A floor under the rule's repeat pitch (<c>spacing = max(spacingMeters,
+        /// minSpacingMeters, 0.1)</c>), and so a ceiling on its slot count.
+        /// <para>It used to double as the exclusion radius around an Exact placement, which is
+        /// what made the radius uncrossable past the repeat pitch (#491). Since the occupancy
+        /// table compares the parts' real extents, this no longer sets any exclusion.</para></summary>
         public float minSpacingMeters;
         public float edgeMargin;
         public bool alignToFloorLine;
+        /// <summary>Retained for schema compatibility and still asserted by
+        /// <c>TemplateWiringTests</c>, but no longer a gate: every procedural placement consults
+        /// the shared occupancy table (#491), because a rule that would place inside another
+        /// artifact's shell has nothing to gain from doing so.</summary>
         public bool avoidExact;
     }
 
@@ -126,6 +135,36 @@ namespace SFMap.Pipeline.Buildings
         public PlacementConstraints constraints;
         public Jitter jitter;
         public string[] variants;   // part-id variants picked per slot
+
+        /// <summary>Size the part to the facade instead of leaving it at its authored width
+        /// (#487). The placement overwrites <see cref="stretchParam"/> in the part's parameter bag
+        /// with the rule's span in metres — <c>(x1 − x0) · facadeLength</c>, after
+        /// <c>edgeMargin</c> — before the generator runs, so the part is <i>rebuilt</i> at that
+        /// width rather than scaled to it.
+        ///
+        /// <para><b>Why not <c>scale</c>.</b> <c>PlacePart</c>'s scale is uniform, so widening a
+        /// 7.2 m shopfront to 20 m would also make its bulkhead and mullions 2.8× taller and
+        /// thicker. A wider shopfront wants more bays, not fatter trim — which is what
+        /// <c>StorefrontGenerator</c> already does when it is told the width, since it derives bay
+        /// count from <c>bayPitch</c>. The placement layer needs to know nothing about storefronts
+        /// to say this: the parameter block is a flat name-keyed bag (#454), so overwriting one
+        /// entry is family-agnostic.</para>
+        ///
+        /// <para>Only meaningful for a rule that places one part across its span
+        /// (<c>countMax = 1</c>); with several slots each would be handed the whole span.</para></summary>
+        public bool stretchToFacade;
+
+        /// <summary>Which parameter <see cref="stretchToFacade"/> overwrites. Empty →
+        /// <see cref="DefaultStretchParam"/>. Authorable rather than hard-wired so a family whose
+        /// span-wise dimension is not called <c>w</c> can still opt in.</summary>
+        public string stretchParam;
+
+        /// <summary>The width parameter every family shipped so far uses.</summary>
+        public const string DefaultStretchParam = "w";
+
+        /// <summary>The parameter name this rule stretches, resolved.</summary>
+        public string StretchParamName =>
+            string.IsNullOrEmpty(stretchParam) ? DefaultStretchParam : stretchParam;
     }
 
     /// <summary>

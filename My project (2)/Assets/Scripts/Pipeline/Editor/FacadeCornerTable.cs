@@ -56,17 +56,35 @@ namespace SFMap.Pipeline.Editor
             /// face into each other and artifacts intrude much further into each other's space.</summary>
             public readonly bool convex;
 
+            /// <summary>The angle the building's <b>interior</b> subtends at this vertex, in
+            /// degrees: 90° at a square street corner, 270° at an L-plan notch, &gt; 270° at a
+            /// notch that closes on itself. Convex ⇔ below 180°.</summary>
+            public readonly float interiorAngleDeg;
+
+            /// <summary>Reflex clearance per metre of projection (#488). Multiply by the part's
+            /// projection to get the metres along this facade, measured from the vertex, that the
+            /// neighbour's projecting volume can reach. 0 at a convex corner; exactly 1 at 270°
+            /// (which is what #459 assumed everywhere); unbounded as the notch closes.
+            /// <para>Derived once here so <see cref="Blocked"/> stays two multiplies per
+            /// placement — the exact rule costs no more per placement than the 90° approximation
+            /// it replaces.</para></summary>
+            public readonly float reflexClearancePerProjection;
+
             /// <summary>The shared footprint vertex, in world metres at y = 0.</summary>
             public readonly Vector3 point;
 
-            public Corner(int facadeA, bool farEndA, int facadeB, bool farEndB, bool convex, Vector3 point)
+            public Corner(int facadeA, bool farEndA, int facadeB, bool farEndB, bool convex,
+                          float interiorAngleDeg, Vector3 point)
             {
                 this.facadeA = facadeA;
                 this.farEndA = farEndA;
                 this.facadeB = facadeB;
                 this.farEndB = farEndB;
                 this.convex = convex;
+                this.interiorAngleDeg = interiorAngleDeg;
                 this.point = point;
+                this.reflexClearancePerProjection =
+                    convex ? 0f : ReflexClearanceFactor(interiorAngleDeg);
             }
 
             /// <summary>Which end of <paramref name="facade"/> this corner sits at, or false with
@@ -77,6 +95,48 @@ namespace SFMap.Pipeline.Editor
                 if (facade == facadeB) { found = true; return farEndB; }
                 found = false;
                 return false;
+            }
+
+            /// <summary>
+            /// The exact reflex clearance, per metre of projection, at interior angle
+            /// <paramref name="thetaDeg"/> (#488).
+            ///
+            /// <para><b>The frame.</b> Put the vertex at the origin, this facade along <c>+s</c>
+            /// with its outward normal along <c>+d</c>. The neighbouring wall then runs along
+            /// <c>v = (cos θ, −sin θ)</c> with outward normal <c>m = (−sin θ, −cos θ)</c>. This
+            /// facade's part occupies <c>s ≥ a</c>, <c>d ∈ [0, D]</c>; the neighbour's projecting
+            /// volume is contained in the half-strip <c>0 ≤ q·m ≤ N</c>, <c>q·v ≥ 0</c>. Because
+            /// <i>both</i> facades apply this rule, keeping each part out of the other's half-strip
+            /// is sufficient for the parts themselves to be disjoint.</para>
+            ///
+            /// <para>Solving for the smallest <c>a</c> that separates them, with
+            /// <c>A = −sin θ</c> and <c>B = −cos θ</c>, and taking the neighbour's projection to be
+            /// this part's own (<c>N = D = P</c>, the estimate #459 makes and #488 does not
+            /// change), gives two regimes:</para>
+            /// <list type="bullet">
+            /// <item><description><c>B ≤ 0</c> (θ ≥ 270°): the neighbour's strip runs away from
+            /// this wall and only the slab binds → <c>a = P·(1 + cos θ) / (−sin θ)</c>.</description></item>
+            /// <item><description><c>B &gt; 0</c> (θ &lt; 270°): the neighbour's wall folds back
+            /// behind the vertex, so its half-plane binds first →
+            /// <c>a = P·(−sin θ)·min(1, 1/B)</c>.</description></item>
+            /// </list>
+            ///
+            /// <para>Both agree at exactly 270° (factor 1 — the number #459 hard-coded for every
+            /// reflex angle), fall to 0 as the corner straightens toward 180°, and diverge as the
+            /// notch closes toward 360°, where the factor exceeds any real facade and the whole
+            /// facade is refused. That divergence is the "reject the placement" fallback #488 asks
+            /// for, arrived at by the arithmetic rather than bolted on.</para>
+            /// </summary>
+            public static float ReflexClearanceFactor(float thetaDeg)
+            {
+                float t = thetaDeg * Mathf.Deg2Rad;
+                float a = -Mathf.Sin(t);
+                float b = -Mathf.Cos(t);
+                if (b > 0f) return Mathf.Max(a * Mathf.Min(1f, 1f / b), 0f);   // → 0 at 180°
+                // θ ≥ 270°. a → 0 only as the notch pinches shut at 360°, where no finite
+                // clearance separates the two walls: refuse the whole facade instead of dividing
+                // by zero. `Blocked` clamps the resulting clearance to the facade's own length.
+                return a <= 1e-4f ? float.MaxValue : (1f - b) / a;
             }
         }
 
@@ -145,8 +205,17 @@ namespace SFMap.Pipeline.Editor
             Vector3 outwardJ = FacadeFrame.OutwardNormal(facades[j].bearing_deg);
             bool convex = Vector3.Dot(towardCorner, outwardJ) > 0f;
 
+            // The interior angle the two walls subtend (#488). The wedge between the directions
+            // leading AWAY from the vertex along each facade is the interior one at a convex
+            // corner and the exterior one at a reflex corner, so convexity picks which of the two
+            // supplementary readings is the building's own.
+            Vector3 awayI = AlongToward(facades[i], !bestFarI);
+            Vector3 awayJ = AlongToward(facades[j], !bestFarJ);
+            float raw = Mathf.Acos(Mathf.Clamp(Vector3.Dot(awayI, awayJ), -1f, 1f)) * Mathf.Rad2Deg;
+            float interior = convex ? raw : 360f - raw;
+
             Vector3 p = (Endpoint(facades[i], bestFarI) + Endpoint(facades[j], bestFarJ)) * 0.5f;
-            corner = new Corner(i, bestFarI, j, bestFarJ, convex, p);
+            corner = new Corner(i, bestFarI, j, bestFarJ, convex, interior, p);
             return true;
         }
 
@@ -163,15 +232,23 @@ namespace SFMap.Pipeline.Editor
         /// is sufficient, and the clearance is just its overhang.</para>
         ///
         /// <para><b>Reflex corner</b> (an L-plan notch): the walls face into each other, so the
-        /// neighbour's projection reaches <paramref name="projectionMeters"/> along this facade past
-        /// the vertex and the clearance has to absorb that as well. The neighbour's projection is
-        /// estimated as this part's own — right whenever both facades are dressed by the same
-        /// <c>Facade.Street</c> rule, which is the overwhelming case, and conservative-ish
-        /// otherwise.</para>
+        /// neighbour's projection reaches along this facade past the vertex and the clearance has
+        /// to absorb that as well. How far it reaches follows from the corner's true turn angle —
+        /// <see cref="Corner.ReflexClearanceFactor"/> — rather than from #459's assumption that
+        /// every reflex corner is a right angle, which #473 measured to fail at 290° and 315°
+        /// (#488). The neighbour's projection is still estimated as this part's own: right whenever
+        /// both facades are dressed by the same <c>Facade.Street</c> rule, which is the
+        /// overwhelming case, and conservative-ish otherwise.
+        /// <para>Where the notch closes so far that no finite clearance separates the two walls,
+        /// the clearance saturates at the facade's own length and every placement on it is refused
+        /// — the explicit rejection #488 asks for, reached by the same arithmetic instead of by a
+        /// special case.</para></para>
         ///
-        /// <para>Both figures assume a right-angle corner; SF's grid makes that nearly always true,
-        /// and an acute prow would want more clearance than this gives. Stated rather than
-        /// silently approximated.</para>
+        /// <para>The convex figure needs no angle: a compliant part's plan footprint lies inside
+        /// the 90° cone spanned by (back along its own facade, its own outward normal), and at a
+        /// convex vertex the two cones are separated by exactly the exterior turn — which is why
+        /// #473 found convex corners hold at every angle from 45° to 160°, and why #459's worry
+        /// about acute prows was unfounded.</para>
         /// </summary>
         /// <param name="facade">The facade being dressed; matched into this table by reference and
         /// then by <c>edge_index</c>, so a Front/Left/Right placement resolving onto a street edge
@@ -200,7 +277,9 @@ namespace SFMap.Pipeline.Editor
                 bool far = _corners[c].EndOf(index, out bool onThisFacade);
                 if (!onThisFacade) continue;
 
-                float clearance = _corners[c].convex ? 0f : intrusion;
+                float clearance = _corners[c].convex
+                    ? 0f
+                    : Mathf.Min(_corners[c].reflexClearancePerProjection * intrusion, len);
                 if (far)
                 {
                     if (x + partMaxX > len - clearance) return true;
