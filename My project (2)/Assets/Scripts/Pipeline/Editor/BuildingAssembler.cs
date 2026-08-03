@@ -351,18 +351,35 @@ namespace SFMap.Pipeline.Editor
             combined.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
             combined.CombineMeshes(combines.ToArray(), true, true);   // computes bounds itself
             foreach (var ci in combines) UnityEngine.Object.DestroyImmediate(ci.mesh);  // temp sources
-            // The importer's mass mesh is now folded into `combined` and referenced by nothing
-            // else (it's no longer saved as a standalone asset) — free it.
-            UnityEngine.Object.DestroyImmediate(massMesh);
+            // NOTE: `massMesh` itself is deliberately NOT freed here (it used to be, once it had
+            // been folded into `combined`). The collider below needs the undecorated mass volume,
+            // so it is saved as its own asset instead — see the collider comment (#455). The
+            // combine folded in a *clone* (CloneSolidColor instantiates), so `massMesh` is
+            // untouched by the vertex-colour bake and can be persisted as-is.
 
             SaveMeshAsset(combined, GeneratedAssets.BuildingMesh(coord, osmId));
             root.AddComponent<MeshFilter>().sharedMesh = combined;
             root.AddComponent<MeshRenderer>().sharedMaterial = massMaterial;
+
             // Templated buildings need collision too, exactly like the merged path (#415): a
-            // non-convex MeshCollider over the combined mass mesh so on-foot spray raycasts hit
-            // the facade and cars/player stop at the wall. `root` stays on the Default layer the
-            // spray mask and character/vehicle collision expect (new GameObject defaults to it).
-            root.AddComponent<MeshCollider>().sharedMesh = combined;
+            // non-convex MeshCollider so on-foot spray raycasts hit the facade and cars/player
+            // stop at the wall. `root` stays on the Default layer the spray mask and
+            // character/vehicle collision expect (new GameObject defaults to it).
+            //
+            // The collider cooks the MASS mesh, not `combined` (#455). Nothing in the gameplay
+            // contract wants the decoration: colliding with a window's individual muntin bars is
+            // strictly worse than colliding with the wall plane, and once #452's generated
+            // geometry lands `combined` carries every bar, bracket and sill profile — per-building
+            // collider cook is already a measured import bottleneck (#263). Cooking the mass keeps
+            // the collider's triangle count independent of how decorated the building is.
+            //
+            // It has to be a saved asset, not the in-memory mesh: the chunk is written out as a
+            // prefab, and a prefab reference to an unpersisted Mesh serialises as null. Cost is one
+            // extra small .mesh per templated building on disk, and the mass hull resident in
+            // memory alongside `combined` at runtime instead of only `combined`.
+            massMesh.name = $"building_{osmId}_collision";
+            SaveMeshAsset(massMesh, GeneratedAssets.BuildingCollisionMesh(coord, osmId));
+            root.AddComponent<MeshCollider>().sharedMesh = massMesh;
         }
 
         NeighborhoodPalette ResolvePalette(string neighborhood)
