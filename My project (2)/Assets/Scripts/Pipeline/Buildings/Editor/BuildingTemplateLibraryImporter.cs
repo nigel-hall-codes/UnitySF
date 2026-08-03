@@ -217,6 +217,7 @@ namespace SFMap.Pipeline.Buildings.Editor
                 neighborhoods = c.neighborhoods ?? Array.Empty<string>(),
                 buildingTypes = c.building_types ?? Array.Empty<string>(),
                 footprintShapes = c.footprint_shapes ?? Array.Empty<string>(),
+                uses = c.uses ?? Array.Empty<string>(),
                 widthM = new FloatRange { min = c.width_m.min, max = c.width_m.max },
                 depthM = new FloatRange { min = c.depth_m.min, max = c.depth_m.max },
                 floorCount = new IntRange { min = c.floor_count.min, max = c.floor_count.max },

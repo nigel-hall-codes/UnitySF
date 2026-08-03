@@ -27,19 +27,27 @@ namespace SFMap.Pipeline.Buildings
         public string[] neighborhoods;
         public string[] buildingTypes;
         public string[] footprintShapes;
+        /// <summary>Commercial-use axis (#486): any of <c>residential | commercial | mixed |
+        /// unknown</c>. This is the axis a storefront template gates on — <c>buildingTypes</c>
+        /// cannot, because the raw OSM <c>building=*</c> tag is <c>yes</c> for 93% of San
+        /// Francisco. Empty = unconstrained, as with every other axis.</summary>
+        public string[] uses;
         public FloatRange widthM;
         public FloatRange depthM;
         public IntRange floorCount;
 
         /// <summary>True when this template admits a building with the given classification facts
         /// (from the bake sidecar #268). Each axis passes when unconstrained or when it contains
-        /// the building's value.</summary>
+        /// the building's value. <paramref name="use"/> is optional so callers predating the
+        /// commercial signal (#486) still compile; omitting it means only templates that
+        /// constrain <see cref="uses"/> are excluded.</summary>
         public bool Admits(string neighborhood, string buildingType, string footprintShape,
-                           float widthMeters, float depthMeters, int floors)
+                           float widthMeters, float depthMeters, int floors, string use = "unknown")
         {
             return AxisAdmits(neighborhoods, neighborhood)
                 && AxisAdmits(buildingTypes, buildingType)
                 && AxisAdmits(footprintShapes, footprintShape)
+                && AxisAdmits(uses, use)
                 && widthM.Contains(widthMeters)
                 && depthM.Contains(depthMeters)
                 && floorCount.Contains(floors);

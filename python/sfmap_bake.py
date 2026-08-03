@@ -50,7 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--templates", action="store_true",
                    help="Emit the per-chunk building classification sidecar "
                         "chunk_CC_RR_buildings.json (design #266; facts only: neighborhood, "
-                        "footprint shape/size, floor count, ranked street facades, footprint hash). "
+                        "footprint shape/size, floor count, commercial use signal, ranked street "
+                        "facades, footprint hash). "
                         "Off = legacy bake, no sidecar.")
     p.add_argument("--no-parking-roads", default=None, metavar="FILE",
                    help="JSON list of street names that never allow parked cars (manual override; "
