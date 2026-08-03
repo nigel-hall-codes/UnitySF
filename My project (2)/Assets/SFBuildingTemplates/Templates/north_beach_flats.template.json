@@ -1,0 +1,114 @@
+{
+  "id": "north_beach_flats",
+  "displayName": "North Beach flats (shallow squared bay over a street door)",
+  "_comment": [
+    "#492. Makes bay_northbeach_squared (#473, design #452 §3's 'shallow squared bay - rectangular,",
+    "not slanted, which is what distinguishes it from Noe') reachable; it was one of the last two",
+    "shipped presets no template placed.",
+    "",
+    "ONE TEMPLATE, NOT TWO. Unlike the Mission this district needs no commercial companion, because",
+    "it places no shopfront: §3's other North Beach piece is the corner-entry chamfer storefront,",
+    "which has no generator yet. Nothing here can turn the neighborhood commercial, so the",
+    "residential/shopfront ratio the Mission needs weights for does not arise. library.json still",
+    "authors a weights row, to exclude trivial_window (see below).",
+    "",
+    "GROUND FLOOR: the door alone, centred, and NO garage. North Beach flats are dense and narrow",
+    "with almost no curb cuts, and it also keeps floor 0 to a single exact - so the width-gating",
+    "arithmetic that door-vs-garage needs in the Victorian templates does not apply here.",
+    "",
+    "THE BAY IS AN EXACT AT FLOOR 1, centred over the entry - the flats' signature. Unlike Noe's,",
+    "this one is fully cleared by the window rule beside it: bay_northbeach_squared is 3.05 m wide",
+    "against bay_noe_slanted's 3.80 m, so a window clears it at 1.525 + 0.55 = 2.075 m, under the",
+    "2.20 m the window rule already excludes (and under its 2.20 m repeat pitch, which",
+    "RaisingTheExclusionRadiusNeverChangesTheRepeatRhythm makes the ceiling). The known gap that",
+    "remains is the one #491 tracks and Noe shares: _exactMarks is keyed (edge_index, floor) with no",
+    "notion of floorsSpanned, so the bay's SECOND floor carries no mark and a window can sit inside",
+    "the shell there - occluded by it, not interpenetrating it. It costs triangles, not looks.",
+    "",
+    "NO roofPart: design #452 §3 marks all three shipped cornices exclusive to Noe Valley,",
+    "Sunset/Parkside and South of Market, and borrowing one would read as that district. North",
+    "Beach's own roofline is not built.",
+    "",
+    "NOT RENDERED. `North Beach` is outside the play-area map.osm bbox (chunks_wintest is 1002",
+    "buildings, all Glen Park), so this template has never been looked at in the Editor - the same",
+    "reason #475 declined to add it. What is verified is the authored data: TemplateWiringTests."
+  ],
+  "compatibility": {
+    "neighborhoods": [
+      "North Beach"
+    ],
+    "building_types": [],
+    "footprint_shapes": [],
+    "width_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "depth_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "floor_count": {
+      "min": 1,
+      "max": 100
+    }
+  },
+  "exact": [
+    {
+      "part": "door_noe_victorian",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.5,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    },
+    {
+      "part": "bay_northbeach_squared",
+      "facade": "Front",
+      "floor": 1,
+      "x": 0.5,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
+  "rules": [
+    {
+      "part": "window_noe_2over2",
+      "facade": "Street",
+      "floorRange": {
+        "min": 1,
+        "max": 8
+      },
+      "span": [
+        0.05,
+        0.95
+      ],
+      "repeat": {
+        "spacingMeters": 2.2,
+        "countMin": 1,
+        "countMax": 6
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.2,
+        "edgeMargin": 0.04,
+        "alignToFloorLine": false,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.05,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    }
+  ],
+  "roofParts": [],
+  "version": 1
+}
