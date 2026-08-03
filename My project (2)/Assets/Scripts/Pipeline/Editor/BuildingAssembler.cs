@@ -133,6 +133,10 @@ namespace SFMap.Pipeline.Editor
         // log once per placement.
         readonly HashSet<string> _warnedParts = new HashSet<string>(StringComparer.Ordinal);
 
+        // Where the current building's street facades meet (#459). Rebuilt per building in Assemble;
+        // empty (and therefore inert) for the single-street-facade majority.
+        FacadeCornerTable _corners;
+
         int _templated;
 
         public int Templated => _templated;
@@ -296,6 +300,9 @@ namespace SFMap.Pipeline.Editor
 
             _placed.Clear();
             _exactMarks.Clear();
+            // Corner buildings dress every street edge (design D2), and until #459 nothing
+            // reconciled two facades meeting at a corner. This table is what does.
+            _corners = FacadeCornerTable.Build(facts);
 
             // Roof first (design #266 generation order: Create Mass → Apply Roof → Doors → …).
             PlaceRoofParts(root.transform, template, facts);
@@ -507,7 +514,8 @@ namespace SFMap.Pipeline.Editor
                     // sign-texture path (#275/#278); here it renders as a placeholder.
                     bool isSign = !string.IsNullOrEmpty(p.signAsset);
                     foreach (var f in FacadesFor(facade, facts))
-                        PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, facade, isSign);
+                        PlacePart(parent, f, facts, p.part, p.floor, p.x, p.y, p.scale, p.rotation, facade,
+                                  isSign, respectCorners: false);
                 }
         }
 
@@ -540,15 +548,86 @@ namespace SFMap.Pipeline.Editor
         // facade (corner buildings dress every street edge, design D2), centred, at the roofline:
         // floor = facts.floor_count / ny = 1 overshoots the top floor band, which PlacePart clamps
         // to the building's real facade_height_m (the #279 fact), landing exactly on the roofline.
+        //
+        // Unless the part's generator is path-aware, in which case the whole point is that it does
+        // NOT stop at each facade's end: a cornice on a corner building is one mitred run around the
+        // corner, not two runs butted against it (#459).
         void PlaceRoofParts(Transform parent, BuildingTemplate template, BuildingFactsJson facts)
         {
             if (template.roofParts == null) return;
             foreach (var part in template.roofParts)
             {
                 if (part == null || string.IsNullOrEmpty(part.id)) continue;
+                if (TryPlaceWrapped(parent, part, facts)) continue;
                 foreach (var f in FacadesFor(Facade.Street, facts))
                     PlacePart(parent, f, facts, part.id, facts.floor_count, 0.5f, 1f, 1f, 0f, Facade.Roof);
             }
+        }
+
+        /// <summary>The continuity half of #459: place a banding part <b>once</b>, swept along the
+        /// polyline that chains every street facade through its corners, instead of once per facade.
+        /// <para>False — and the caller falls back to per-facade placement — when the part's
+        /// generator is not an <see cref="IPathPartGenerator"/>, or the sidecar carried no usable
+        /// facade geometry to chain. Since no path-aware family exists yet, this returns false for
+        /// every part in the library today and the roofline is placed exactly as it was.</para></summary>
+        bool TryPlaceWrapped(Transform parent, BuildingPart part, BuildingFactsJson facts)
+        {
+            if (part == null || _corners == null) return false;
+            if (string.IsNullOrEmpty(part.generatorId)) return false;
+            if (!PartGenerators.TryResolve(part.generatorId, out var generator)) return false;
+            if (!(generator is IPathPartGenerator pathGenerator)) return false;
+
+            float y = PlacementY(facts, facts.floor_count, 1f);
+            if (!_corners.TryBuildRun(y, part.mountDepthMeters, out FacadeRun world)) return false;
+
+            // World → part-local: the run has no single bearing, so its frame is world-aligned with
+            // the origin at its first point (FacadeRun's frame contract) and the GameObject carries
+            // no rotation or scale.
+            Vector3 anchor = world.points[0];
+            FacadeRun run = world.Rebased(anchor);
+
+            var parameters = part.parameters ?? PartParams.Empty;
+            // A wrapped run is this building's own geometry, so the run itself has to be in the
+            // cache key or two differently-shaped corners would share one mesh. Buildings whose
+            // runs agree to the cache's 5 mm quantum still share, which is the most sharing that is
+            // correct here.
+            var mesh = _partMeshes.GetOrCreate(
+                PartKey.From($"{part.generatorId}|wrap|{part.id}", parameters.Detail, RunKeyNumbers(run)),
+                mb => pathGenerator.GenerateAlong(parameters, run, mb));
+            if (!mesh.IsValid)
+            {
+                WarnOnce(part.id, $"generator '{part.generatorId}' produced no mesh for the wrapped run");
+                return false;   // fall back to per-facade placement rather than losing the part
+            }
+
+            var child = new GameObject(part.id);
+            child.AddComponent<MeshFilter>().sharedMesh = mesh.mesh;
+            child.AddComponent<MeshRenderer>();
+            child.transform.SetParent(parent, false);
+            child.transform.position = anchor;
+            child.transform.localScale = Vector3.one;
+
+            _placed.Add(new Placed
+            {
+                go = child, part = part, roles = mesh.submeshRoles, partId = part.id,
+                facade = Facade.Roof, floor = facts.floor_count, isSign = part.isSign,
+            });
+            return true;
+        }
+
+        // Flatten a run into cache-key material: every point plus a closed flag well outside the
+        // coordinate range so an open and a closed run of the same points never collide.
+        static float[] RunKeyNumbers(FacadeRun run)
+        {
+            var nums = new float[run.points.Length * 3 + 1];
+            for (int i = 0; i < run.points.Length; i++)
+            {
+                nums[i * 3] = run.points[i].x;
+                nums[i * 3 + 1] = run.points[i].y;
+                nums[i * 3 + 2] = run.points[i].z;
+            }
+            nums[nums.Length - 1] = run.closed ? 1e6f : -1e6f;
+            return nums;
         }
 
         void PlaceExact(Transform parent, ExactPlacement p, BuildingFactsJson facts)
@@ -609,9 +688,13 @@ namespace SFMap.Pipeline.Editor
 
         // Place one part on one facade at normalized (nx, ny) on floor `floor`. Shared by the
         // Exact and Procedural paths; all the facade-frame math lives here.
+        //
+        // `respectCorners` is the #459 exclusion. It is on for everything the template drives and
+        // off for building-specific overrides, matching the stated precedence (Building-Specific >
+        // Exact > Procedural): a human who placed a part at a corner on purpose meant it.
         void PlacePart(Transform parent, StreetFacadeJson f, BuildingFactsJson facts,
                        string partId, int floor, float nx, float ny, float scale, float rotationDeg,
-                       Facade facadeEnum, bool isSign = false)
+                       Facade facadeEnum, bool isSign = false, bool respectCorners = true)
         {
             if (f.edge == null || f.edge.Length < 4) return;
 
@@ -629,18 +712,28 @@ namespace SFMap.Pipeline.Editor
             // Normalized facade coords → world. x along the real facade width; y up the facade
             // (floor band + within-floor offset), both scaled to this building's real frame.
             Vector3 pos = a + along * (Mathf.Clamp01(nx) * len);
-            pos.y = facts.base_y + (floor + Mathf.Clamp01(ny)) * FloorHeightMeters;
-            // Don't let a too-high floor index float the part above the roof: clamp to the
-            // building's real facade height (the #279 facade_height_m fact).
-            float facadeTop = facts.base_y + Mathf.Max(facts.facade_height_m, FloorHeightMeters);
-            pos.y = Mathf.Min(pos.y, facadeTop);
+            pos.y = PlacementY(facts, floor, ny);
 
             BuildingPart part = ResolvePart(partId);
             float mountDepth = part != null ? part.mountDepthMeters : 0f;
             pos += outward * mountDepth;   // outward is horizontal, so this leaves pos.y intact
 
-            var child = InstantiatePart(part, partId, out MaterialRole[] roles);
-            if (child == null) return;     // no generator → nothing to place (#454)
+            if (!TryPartMesh(part, partId, out PartMesh mesh)) return;   // no generator → nothing to place (#454)
+
+            // Corner reconciliation (#459). The part's real extents come off the generated mesh, so
+            // the rule needs no authored parameter and follows whatever a family actually builds:
+            // half-width along the facade for the overhang, mount depth + outward extent for how
+            // far it stands proud. Cheap — the mesh is already cached by this point — and, crucially,
+            // it draws no random numbers, so rejecting a slot cannot shift any other slot's seeded
+            // choices (each slot's Rng is seeded independently by hash(osm_id, ruleIndex, slot)).
+            float s = scale <= 0f ? 1f : scale;
+            if (respectCorners && _corners != null &&
+                _corners.Blocked(f, nx, mesh.mesh.bounds.min.x * s, mesh.mesh.bounds.max.x * s,
+                                 mesh.mesh.bounds.max.z * s + Mathf.Max(mountDepth, 0f)))
+                return;
+
+            var child = InstantiatePart(part, mesh);
+            MaterialRole[] roles = mesh.submeshRoles;
 
             child.transform.SetParent(parent, false);
             child.transform.position = pos;
@@ -650,9 +743,21 @@ namespace SFMap.Pipeline.Editor
                                        Quaternion.LookRotation(outward, Vector3.up);
             // Scale = the placement scale only: the generated mesh already carries its real size,
             // built from the part's own parameters.
-            child.transform.localScale = Vector3.one * (scale <= 0f ? 1f : scale);
+            child.transform.localScale = Vector3.one * s;
 
             _placed.Add(new Placed { go = child, part = part, roles = roles, partId = partId, facade = facadeEnum, floor = floor, isSign = isSign });
+        }
+
+        /// <summary>World Y for a placement on <paramref name="floor"/> at within-floor offset
+        /// <paramref name="ny"/>, clamped to the building's real facade height (the #279
+        /// <c>facade_height_m</c> fact) so a too-high floor index cannot float a part above the
+        /// roof. Shared by <see cref="PlacePart"/> and the wrapped-run roofline so the two agree on
+        /// where the roofline is.</summary>
+        static float PlacementY(BuildingFactsJson facts, int floor, float ny)
+        {
+            float y = facts.base_y + (floor + Mathf.Clamp01(ny)) * FloorHeightMeters;
+            float facadeTop = facts.base_y + Mathf.Max(facts.facade_height_m, FloorHeightMeters);
+            return Mathf.Min(y, facadeTop);
         }
 
         // ---- procedural rule engine (#271) -------------------------------------
@@ -755,20 +860,18 @@ namespace SFMap.Pipeline.Editor
             return rule.part;
         }
 
-        static float FacadeLength(StreetFacadeJson f)
-        {
-            if (f.edge == null || f.edge.Length < 4) return 0f;
-            float dx = f.edge[2] - f.edge[0], dz = f.edge[3] - f.edge[1];
-            return Mathf.Sqrt(dx * dx + dz * dz);
-        }
+        static float FacadeLength(StreetFacadeJson f) => FacadeCornerTable.EdgeLength(f);
 
-        /// <summary>The seam (design #452 D2, #454): resolve the part's generator, build (or reuse)
-        /// its mesh, and hand back a GameObject carrying it plus the generator's own submesh roles.
-        /// Null when the part cannot be generated — there is deliberately no fallback geometry, so
-        /// a missing generator is visibly missing rather than quietly a grey quad.</summary>
-        GameObject InstantiatePart(BuildingPart part, string partId, out MaterialRole[] roles)
+        /// <summary>The seam (design #452 D2, #454): resolve the part's generator and build (or
+        /// reuse) its mesh. False when the part cannot be generated — there is deliberately no
+        /// fallback geometry, so a missing generator is visibly missing rather than quietly a grey
+        /// quad.
+        /// <para>Split out from <see cref="InstantiatePart"/> for #459: the corner rule needs the
+        /// mesh's real extents to decide whether the placement fits, which has to happen before a
+        /// GameObject is made for it.</para></summary>
+        bool TryPartMesh(BuildingPart part, string partId, out PartMesh mesh)
         {
-            roles = null;
+            mesh = default;
 
             if (part == null) return WarnOnce(partId, $"no BuildingPart with id '{partId}'");
             if (string.IsNullOrEmpty(part.generatorId))
@@ -778,27 +881,31 @@ namespace SFMap.Pipeline.Editor
                                         $"'{part.generatorId}' (known: {string.Join(", ", PartGenerators.Ids)})");
 
             var parameters = part.parameters ?? PartParams.Empty;
-            var mesh = _partMeshes.GetOrCreate(parameters.KeyFor(part.generatorId),
-                                               mb => generator.Generate(parameters, mb));
+            mesh = _partMeshes.GetOrCreate(parameters.KeyFor(part.generatorId),
+                                           mb => generator.Generate(parameters, mb));
             if (!mesh.IsValid)
                 return WarnOnce(partId, $"generator '{part.generatorId}' produced no mesh for part '{partId}'");
 
+            return true;
+        }
+
+        /// <summary>A GameObject carrying an already-generated part mesh.</summary>
+        static GameObject InstantiatePart(BuildingPart part, PartMesh mesh)
+        {
             var go = new GameObject(part.id);
             go.AddComponent<MeshFilter>().sharedMesh = mesh.mesh;
             // Renderer for the same reason the placeholder quad had one: sign parts survive
             // BakeAndCombine as live GameObjects and need to draw. Its material is owned by the
             // sign/texture path (#274/#275), not by this seam.
             go.AddComponent<MeshRenderer>();
-
-            roles = mesh.submeshRoles;
             return go;
         }
 
-        GameObject WarnOnce(string partId, string reason)
+        bool WarnOnce(string partId, string reason)
         {
             if (_warnedParts.Add(partId ?? string.Empty))
                 Debug.LogWarning($"[BuildingAssembler] skipping placements of '{partId}': {reason}.");
-            return null;
+            return false;
         }
 
         /// <summary>Destroy the meshes generated for this chunk, once its buildings are assembled
