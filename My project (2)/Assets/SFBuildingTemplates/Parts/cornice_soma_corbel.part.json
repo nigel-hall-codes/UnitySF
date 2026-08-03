@@ -1,0 +1,28 @@
+{
+  "id": "cornice_soma_corbel",
+  "category": "Roof",
+  "generatorId": "cornice.banded",
+  "parameters": [
+    { "name": "profileFamily", "text": "Corbel" },
+    { "name": "projection", "value": 0.28 },
+    { "name": "heightM", "value": 0.40 },
+
+    { "name": "dentilPitch", "value": 0.24 },
+    { "name": "dentilW", "value": 0.16 },
+    { "name": "dentilH", "value": 0.14 },
+    { "name": "dentilProjection", "value": 0.13 },
+
+    { "name": "bracketSpacing", "value": 0.0 },
+
+    { "name": "returnEnds", "value": 1 },
+    { "name": "returnDepth", "value": 0.28 },
+
+    { "name": "corniceRole", "text": "Base" },
+
+    { "name": "runLengthM", "value": 12.0 }
+  ],
+  "size_m": { "w": 12.00, "h": 0.54, "d": 0.28 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.04,
+  "version": 2
+}
