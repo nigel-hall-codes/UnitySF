@@ -1,0 +1,63 @@
+{
+  "id": "bay_northbeach_squared",
+  "category": "BayWindow",
+  "generatorId": "bay.projecting",
+  "parameters": [
+    { "name": "plan", "text": "Squared" },
+    { "name": "projection", "value": 0.42 },
+    { "name": "widthAtWall", "value": 2.9 },
+
+    { "name": "floorsSpanned", "value": 2 },
+    { "name": "floorHeight", "value": 3.0 },
+    { "name": "sillHeight", "value": 0.90 },
+    { "name": "revealDepth", "value": 0.06 },
+
+    { "name": "skirtProfile", "text": "Chamfer" },
+    { "name": "skirtDepth", "value": 0.16 },
+    { "name": "skirtRun", "value": 0.30 },
+
+    { "name": "capProfile", "text": "Cove" },
+    { "name": "capDepth", "value": 0.18 },
+    { "name": "capProjection", "value": 0.07 },
+
+    { "name": "shellRole", "text": "Base" },
+    { "name": "trimRole", "text": "Accent2" },
+
+    { "name": "faceWindowGenerator", "text": "window.double_hung" },
+    { "name": "faceMargin", "value": 0.08 },
+    { "name": "faceGap", "value": 0.15 },
+    { "name": "faceWindowsPerFacet", "value": 2 },
+
+    { "name": "face.w", "value": 1.0 },
+    { "name": "face.h", "value": 1.7 },
+    { "name": "face.revealDepth", "value": 0.06 },
+    { "name": "face.sashCount", "value": 2 },
+    { "name": "face.meetingRailH", "value": 0.05 },
+    { "name": "face.lowerCols", "value": 1 },
+    { "name": "face.lowerRows", "value": 1 },
+    { "name": "face.upperCols", "value": 1 },
+    { "name": "face.upperRows", "value": 1 },
+    { "name": "face.frameW", "value": 0.05 },
+    { "name": "face.frameD", "value": 0.035 },
+    { "name": "face.muntinW", "value": 0.025 },
+    { "name": "face.muntinD", "value": 0.02 },
+    { "name": "face.glassInset", "value": 0.03 },
+    { "name": "face.casingProfile", "text": "Ogee" },
+    { "name": "face.casingW", "value": 0.07 },
+    { "name": "face.casingD", "value": 0.025 },
+    { "name": "face.head", "text": "Flat" },
+    { "name": "face.headProfile", "text": "Cove" },
+    { "name": "face.headProjection", "value": 0.07 },
+    { "name": "face.headH", "value": 0.09 },
+    { "name": "face.headOverhang", "value": 0.04 },
+    { "name": "face.sillProfile", "text": "Bullnose" },
+    { "name": "face.sillProjection", "value": 0.05 },
+    { "name": "face.sillH", "value": 0.06 },
+    { "name": "face.sillOverhang", "value": 0.05 },
+    { "name": "face.frameRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 3.05, "h": 6.34, "d": 0.60 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.0,
+  "version": 2
+}
