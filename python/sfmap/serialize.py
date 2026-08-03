@@ -164,18 +164,28 @@ def write_buildings(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     """Write chunk_CC_RR_buildings.json — the per-building classification sidecar.
 
     JSON schema (data-model.md §1; version 2 adds the #279 facade edge geometry,
-    version 3 adds the #407 back/left/right facade edges). Unity reads this as a
+    version 3 adds the #407 back/left/right facade edges, version 4 adds the #486
+    commercial signal ``use``/``commercial_poi_count``). Unity reads this as a
     TextAsset at import time:
-      {"version":3,"buildings":[
+      {"version":4,"buildings":[
         {"osm_id":65307880,"neighborhood":"Mission","building_type":"retail",
          "footprint_shape":"corner","width_m":11.4,"depth_m":18.2,"height_m":12.0,
-         "floor_count":4,"base_y":42.3,"facade_height_m":12.0,
+         "floor_count":4,"use":"mixed","commercial_poi_count":2,
+         "base_y":42.3,"facade_height_m":12.0,
          "street_facades":[{"edge_index":2,"bearing_deg":117.0,"street_osm_id":8412731,
                             "score":0.94,"edge":[x0,z0,x1,z1]}],
          "back_facade":{"edge_index":0,"bearing_deg":297.0,"street_osm_id":-1,
                         "score":0.0,"edge":[x0,z0,x1,z1]},
          "left_facade":null,"right_facade":null,
          "footprint_hash":"a3f1c9d2"}]}
+
+    ``use`` is the coarse commercial signal (#486): ``residential`` | ``commercial`` |
+    ``mixed`` | ``unknown``, derived by ``classify.building_use`` from the way's tags
+    plus the commercial POI nodes inside the footprint. ``commercial`` and ``mixed``
+    both mean floor 0 is commercial (they differ in what is above), and ``unknown``
+    is the honest answer for a bare ``building=yes`` with nothing inside it — the 93%
+    case in San Francisco. ``commercial_poi_count`` is the raw evidence behind it: how
+    many distinct shop/amenity/office premises the footprint contains.
 
     These are classification *facts* only — Unity chooses templates. ``base_y`` (the
     mass's flat foundation Y) and ``facade_height_m`` (floor_count × floor height) are
@@ -203,6 +213,8 @@ def write_buildings(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
             "depth_m": round(b.depth_m, 1),
             "height_m": round(b.height_m, 1),
             "floor_count": b.floor_count,
+            "use": b.use,
+            "commercial_poi_count": b.commercial_poi_count,
             "base_y": round(b.base_y, 3),
             "facade_height_m": round(b.facade_height_m, 3),
             "street_facades": [_facade_json(f) for f in b.street_facades],
@@ -215,7 +227,7 @@ def write_buildings(chunk: "ChunkData", out_dir: str) -> Optional[Path]:
     out_path = Path(out_dir) / f"chunk_{chunk.col:02d}_{chunk.row:02d}_buildings.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(
-        json.dumps({"version": 3, "buildings": buildings}, ensure_ascii=False),
+        json.dumps({"version": 4, "buildings": buildings}, ensure_ascii=False),
         encoding="utf-8",
     )
     return out_path

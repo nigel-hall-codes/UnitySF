@@ -76,6 +76,7 @@ namespace SFMap.Pipeline.Buildings
         public string[] neighborhoods;
         public string[] building_types;
         public string[] footprint_shapes;
+        public string[] uses;              // residential | commercial | mixed | unknown (#486)
         public RangeJson width_m;
         public RangeJson depth_m;
         public IntRangeJson floor_count;

@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from .projection import GeoOrigin, OsmBounds, to_world_xz
-from . import tags
+from . import poi, tags
 # Re-exported so existing consumers can keep importing HighwayType from sfmap.osm.
 from .tags import HighwayType
 
@@ -60,6 +60,12 @@ class BuildingWay:
     height: float
     building_type: Optional[str] = None   # OSM building=* value (residential, apartments, …)
     footprint_hash: str = ""              # set in chunk.py after classification (data-model.md §6.1)
+    # Commercial-use signal inputs (#486). ``way_use`` is what this way's own tags
+    # assert ("commercial" | "residential" | ""); ``commercial_poi_count`` is how many
+    # shop/amenity/office nodes sit inside the footprint — the signal that actually
+    # carries SF ground-floor retail (see sfmap.poi).
+    way_use: str = ""
+    commercial_poi_count: int = 0
 
 
 @dataclass
@@ -377,7 +383,22 @@ def _build_graph(
         buildings.append(BuildingWay(
             osm_id=w.way_id, footprint=footprint, height=height,
             building_type=w.tags.get("building"),
+            way_use=tags.building_use_tag(w.tags),
         ))
+
+    # Commercial POI nodes → containing building (#486). SF maps ground-floor retail
+    # as a shop/amenity node inside the footprint far more often than as a tag on the
+    # building way, so this association is where most of the signal comes from. Done
+    # once on the full graph (not per chunk) so a building near a chunk seam can't
+    # lose the POIs a chunk-cropped node set would have dropped.
+    poi_points = [
+        to_world_xz(n.lon, n.lat, origin)
+        for n in raw_nodes.values() if n.tags and tags.is_commercial_poi(n.tags)
+    ]
+    for b, count in zip(buildings, poi.commercial_poi_counts(
+        [b.footprint for b in buildings], poi_points
+    )):
+        b.commercial_poi_count = count
 
     return StreetGraph(
         source_bounds=bounds,

@@ -82,8 +82,26 @@ character — the bake passes `nhood` straight through, and several carry slashe
 > use `revealDepth + glassInset + 0.01`. This is an authoring convention, not something the
 > generator enforces, and it has **not** been checked in the Editor.
 
-> **No palettes ship for the four neighborhoods.** #457 was scoped to leave palettes alone, so
-> `Noe Valley` / `Sunset/Parkside` / `South of Market` / `Marina` currently fall back rather than
-> resolving their own colours. Note that a palette for `Sunset/Parkside` cannot simply be added:
-> the importer writes `Generated/Palettes/<neighborhood>.asset`, and the slash makes that an
-> invalid asset path.
+## Palettes and slashed neighborhood names (#464)
+
+A neighborhood is a **fact**, not an authored id — the bake copies the geojson `nhood` string
+through into `BuildingFactsJson.neighborhood`, and five real SF neighborhoods contain a forward
+slash (`Sunset/Parkside`, `Financial District/South Beach`, `Castro/Upper Market`,
+`Oceanview/Merced/Ingleside`, `Lone Mountain/USF`). Two generated asset families are keyed by it:
+`Generated/Palettes/` and `Generated/DistrictWeights/`.
+
+- The `neighborhood` **field** always stays the slashed string verbatim. That is the lookup key —
+  `BuildingAssembler.ResolvePalette` compares it ordinally against the bake's fact.
+- Only the generated **file name** is sanitised, by `AssetFileName.Encode`, which percent-encodes
+  anything illegal: `Sunset/Parkside` → `Generated/Palettes/Sunset%2FParkside.asset`. The encoding
+  is collision-free (`%` is itself escaped, so the output is uniquely decodable) and leaves legal
+  names such as `Noe Valley` untouched, so re-importing an existing library produces no churn.
+- A **source** `*.palette.json` file's own name is arbitrary — the importer globs the folder and
+  reads `neighborhood` from inside the file. By convention it is spelt the way
+  `server/app/export.py`'s `_safe()` spells it (`Sunset_Parkside.palette.json`), so a later
+  `POST /export/unity` overwrites the file instead of adding a second source for the same
+  neighborhood. `_safe()` is lossy and must not be used for the generated asset path.
+
+Palettes still ship for only some neighborhoods (`Sunset/Parkside`, plus the `Sunset` MVP sample);
+the rest fall back to `BuildingAssembler`'s neutral per-role defaults rather than resolving their
+own colours.

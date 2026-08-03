@@ -103,7 +103,7 @@ namespace SFMap.Pipeline.Buildings.Editor
 
         private static BuildingPart BuildPart(PartDefJson def, ref int warnings)
         {
-            var so = LoadOrCreate<BuildingPart>($"{GeneratedRoot}/Parts/{def.id}.asset");
+            var so = LoadOrCreate<BuildingPart>($"{GeneratedRoot}/Parts/{SafeId(def.id, "part", ref warnings)}.asset");
             so.id = def.id;
             so.category = ParseEnum(def.category, PartCategory.Window, ref warnings, $"part '{def.id}' category");
             so.sizeMeters = new Vector3(def.size_m.w, def.size_m.h, def.size_m.d);
@@ -153,7 +153,11 @@ namespace SFMap.Pipeline.Buildings.Editor
 
         private static void BuildPalette(PaletteDefJson def, ref int warnings)
         {
-            var so = LoadOrCreate<NeighborhoodPalette>($"{GeneratedRoot}/Palettes/{def.neighborhood}.asset");
+            // File name percent-encoded, lookup key verbatim (#464): five real SF neighborhoods
+            // carry a slash, and BuildingAssembler.ResolvePalette matches `neighborhood` ordinally
+            // against the string the bake copied out of the geojson.
+            var so = LoadOrCreate<NeighborhoodPalette>(
+                $"{GeneratedRoot}/Palettes/{AssetFileName.Encode(def.neighborhood)}.asset");
             so.neighborhood = def.neighborhood;
 
             var roles = new List<RolePalette>();
@@ -180,26 +184,46 @@ namespace SFMap.Pipeline.Buildings.Editor
 
         private static void BuildDistrictWeights(NeighborhoodTemplateWeightsJson row, ref int warnings)
         {
+            // Same slash exposure as the palettes (#464) — this table is keyed by neighborhood too,
+            // and "Sunset/Parkside" is already in the shipped library.json.
             var so = LoadOrCreate<NeighborhoodTemplateWeights>(
-                $"{GeneratedRoot}/DistrictWeights/{row.neighborhood}.asset");
+                $"{GeneratedRoot}/DistrictWeights/{AssetFileName.Encode(row.neighborhood)}.asset");
             so.neighborhood = row.neighborhood;
 
             if (row.weights == null) { so.weights = Array.Empty<TemplateWeight>(); EditorUtility.SetDirty(so); return; }
 
-            var weights = new TemplateWeight[row.weights.Length];
-            for (int i = 0; i < row.weights.Length; i++)
+            // Built as a list, not a fixed-length array: a malformed entry used to leave a
+            // default-initialised TemplateWeight (null id, weight 0) in the table, which now that a
+            // 0 excludes rather than defaults (#475) would be a live hole rather than an inert one.
+            var weights = new List<TemplateWeight>(row.weights.Length);
+            foreach (var w in row.weights)
             {
-                if (string.IsNullOrEmpty(row.weights[i].template)) { warnings++; continue; }
-                weights[i] = new TemplateWeight { templateId = row.weights[i].template, weight = row.weights[i].weight };
+                if (string.IsNullOrEmpty(w.template)) { warnings++; continue; }
+                if (w.weight < 0f)
+                {
+                    warnings++;
+                    Debug.LogWarning($"[SFBuildingTemplates] District '{row.neighborhood}': template " +
+                                     $"'{w.template}' has negative weight {w.weight}; treated as 0 (excluded).");
+                }
+                else if (w.weight == 0f)
+                {
+                    // Deliberate under the #475 semantics, but also what a JSON row that simply
+                    // omits "weight" deserializes to — so it is logged, not silent.
+                    Debug.Log($"[SFBuildingTemplates] District '{row.neighborhood}' excludes template " +
+                              $"'{w.template}' (weight 0). Omit the entry instead to let it compete " +
+                              "at the default weight.");
+                }
+                weights.Add(new TemplateWeight { templateId = w.template, weight = w.weight });
             }
-            so.weights = weights;
+            so.weights = weights.ToArray();
             EditorUtility.SetDirty(so);
         }
 
         private static void BuildTemplate(TemplateDefJson def, Dictionary<string, BuildingPart> partsById,
                                           ref int warnings)
         {
-            var so = LoadOrCreate<BuildingTemplate>($"{GeneratedRoot}/Templates/{def.id}.asset");
+            var so = LoadOrCreate<BuildingTemplate>(
+                $"{GeneratedRoot}/Templates/{SafeId(def.id, "template", ref warnings)}.asset");
             so.id = def.id;
             so.displayName = string.IsNullOrEmpty(def.displayName) ? def.id : def.displayName;
             so.compatibility = BuildCompatibility(def.compatibility);
@@ -217,6 +241,7 @@ namespace SFMap.Pipeline.Buildings.Editor
                 neighborhoods = c.neighborhoods ?? Array.Empty<string>(),
                 buildingTypes = c.building_types ?? Array.Empty<string>(),
                 footprintShapes = c.footprint_shapes ?? Array.Empty<string>(),
+                uses = c.uses ?? Array.Empty<string>(),
                 widthM = new FloatRange { min = c.width_m.min, max = c.width_m.max },
                 depthM = new FloatRange { min = c.depth_m.min, max = c.depth_m.max },
                 floorCount = new IntRange { min = c.floor_count.min, max = c.floor_count.max },
@@ -338,6 +363,22 @@ namespace SFMap.Pipeline.Buildings.Editor
         }
 
         // ---- asset / path helpers --------------------------------------------
+
+        /// <summary>Part and template ids are *authored*, not facts, so unlike a neighborhood name
+        /// (#464) an id that cannot be a file name is a mistake rather than data. Encoding it keeps
+        /// the import from throwing, but it is warned about: the id is the key the whole library
+        /// cross-references by, and TemplateWiringTests requires a template's file to be named
+        /// after it. Every id shipped today is already legal — PaletteAssetPathTests asserts that,
+        /// so this path is a guard, not a transformation anything relies on.</summary>
+        private static string SafeId(string id, string kind, ref int warnings)
+        {
+            string encoded = AssetFileName.Encode(id);
+            if (encoded == id) return id;
+            warnings++;
+            Debug.LogWarning($"[SFBuildingTemplates] {kind} id '{id}' cannot be an asset file name; " +
+                             $"writing it as '{encoded}.asset'. Rename the id.");
+            return encoded;
+        }
 
         private static T LoadOrCreate<T>(string assetPath) where T : ScriptableObject
         {

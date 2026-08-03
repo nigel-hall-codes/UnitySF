@@ -47,25 +47,22 @@ namespace SFMap.Tests
         const string SampleTemplateId = "trivial_window";
 
         /// <summary>Presets that no template reaches yet, and why. Asserted as an exact set (not a
-        /// skip list) so that standing up a Mission or North Beach template — or deleting either
-        /// preset — fails here and forces this note to be updated.
-        /// <para><c>storefront_mission_tiled</c> and <c>bay_northbeach_squared</c> are the Mission
-        /// and North Beach signature pieces from design #452 §3. Neither neighborhood has a
-        /// template at all, and neither is inside the play-area <c>map.osm</c> bbox, so wiring them
-        /// would be unverifiable and would also need a residential companion template plus weights
-        /// to stop 100% of the neighborhood becoming commercial. Tracked as #492.</para>
-        /// <para>The three <c>stoop_*</c> presets (#495) are unwired <b>by instruction</b>: a stoop
-        /// is a floor-0, front-facade, projecting artifact that must line up with the door, so it
-        /// lands in exactly the ground-floor contention #475 resolved, and #495 says to ship the
-        /// generator and presets only and let a wiring pass apply the rule — the same split the five
-        /// families before it took. The rule shape is an <c>exact</c> placement at the door's own
-        /// <c>nx</c>, floor 0, <c>facade: "Front"</c>; wiring it also has to raise that door by
-        /// <c>stepCount·rise</c>, which nothing expresses yet (#487).</para></summary>
+        /// skip list), so wiring one — or deleting it — fails here and forces this note to be
+        /// updated.
+        /// <para>#492 emptied this list by standing up <c>mission_storefront</c>,
+        /// <c>mission_victorian</c> and <c>north_beach_flats</c>. The three <c>stoop_*</c> presets
+        /// (#495) refill it, for a different and temporary reason: a stoop is a floor-0,
+        /// front-facade, projecting artifact that must line up with the door, so it lands in exactly
+        /// the ground-floor contention #475 resolved. The rule shape is settled — an <c>exact</c>
+        /// placement at the door's own <c>nx</c>, floor 0, <c>facade: "Front"</c> — but wiring it
+        /// also has to raise that door by <c>stepCount·rise</c> (1.05 m for
+        /// <c>stoop_noe_victorian</c>), and nothing expresses that yet. Wiring them before that
+        /// lands would leave every door floating at grade behind its own steps.</para></summary>
         static readonly string[] PresetsAwaitingANeighborhoodTemplate =
         {
-            "bay_northbeach_squared", "stoop_glenpark_short", "stoop_noe_victorian",
-            "stoop_soma_flush", "storefront_mission_tiled",
+            "stoop_glenpark_short", "stoop_noe_victorian", "stoop_soma_flush",
         };
+
 
         /// <summary>One generator per family (#457, #470–#474). Every one must be reachable from
         /// some template, or that family renders on nothing.</summary>
@@ -173,16 +170,81 @@ namespace SFMap.Tests
         }
 
         [Test]
-        public void TheOnlyUnwiredPresetsAreTheOnesWithNoNeighborhoodTemplate()
+        public void EveryShippedPresetIsReachableFromSomeTemplate()
         {
+            // #492's acceptance, and the guard for every preset added after it. Until #492 this was
+            // an exact-set assertion with two documented exceptions — storefront_mission_tiled and
+            // bay_northbeach_squared, whose neighborhoods (Mission, North Beach) had no template at
+            // all. mission_storefront and north_beach_flats close that, so the exception list is
+            // gone: a preset that no template places renders on nothing, and there is no longer a
+            // standing reason for one to exist.
+            //
+            // Note the bar is REACHABILITY, not visibility. Neither Mission nor North Beach is
+            // inside the play-area map.osm bbox (chunks_wintest is 1002 buildings, all Glen Park),
+            // so those two templates have not been seen in the Editor; this asserts the wiring, not
+            // the render.
             var reached = _templates.Values.SelectMany(PartIdsIn).ToHashSet(StringComparer.Ordinal);
             var unwired = _parts.Keys.Where(id => !reached.Contains(id))
                                      .OrderBy(id => id, StringComparer.Ordinal)
                                      .ToArray();
 
+            // Exact set, not a skip list: wiring a documented exception fails here too, so the note
+            // above can never quietly go stale.
             CollectionAssert.AreEqual(PresetsAwaitingANeighborhoodTemplate, unwired,
-                "the set of presets no template reaches has changed; update " +
-                nameof(PresetsAwaitingANeighborhoodTemplate) + " and say why");
+                "the set of presets placed by no template changed. Expected only the documented " +
+                "exceptions [" + string.Join(", ", PresetsAwaitingANeighborhoodTemplate) +
+                "] but found [" + string.Join(", ", unwired) +
+                "]. Wire the preset into a template, delete it, or update " +
+                nameof(PresetsAwaitingANeighborhoodTemplate) + " and say why.");
+        }
+
+        [Test]
+        public void TheSampleTemplateIsExcludedFromEveryDistrictThatAuthorsWeights()
+        {
+            // trivial_window's compatibility.neighborhoods is empty, so it admits every building in
+            // the city and competes in every district. Before #492, WeightFor treated an authored 0
+            // as "unset" and fell back to 1, so weights could only THIN the sample (#475 got it to
+            // ~1 building in 14) — a district could not switch it off. WeightFor now takes 0
+            // literally, and every district row spends one line saying so.
+            //
+            // The limit, recorded here because no test can catch it: this only works where a
+            // district row exists. In a neighborhood no template admits, trivial_window is the only
+            // match and wins regardless of weights.
+            var rows = _manifest.districtTemplateWeights ?? Array.Empty<NeighborhoodTemplateWeightsJson>();
+            Assert.IsNotEmpty(rows, "library.json authors no district weights at all");
+
+            foreach (var row in rows)
+            {
+                var entry = (row.weights ?? Array.Empty<TemplateWeightJson>())
+                    .FirstOrDefault(w => w.template == SampleTemplateId);
+                Assert.IsNotNull(entry.template,
+                    $"district '{row.neighborhood}' does not list '{SampleTemplateId}', so the " +
+                    "bundled MVP sample competes there at the default weight");
+                Assert.AreEqual(0f, entry.weight,
+                    $"district '{row.neighborhood}' gives '{SampleTemplateId}' weight {entry.weight}");
+            }
+        }
+
+        [Test]
+        public void AnAuthoredWeightOfZeroExcludesTheTemplate()
+        {
+            // The behaviour the row above depends on, asserted against the type itself: an entry at
+            // 0 resolves to 0 (exclusion), a negative is clamped to 0 rather than read as "unset",
+            // and only an ABSENT entry falls back to the default so that authoring a district does
+            // not silently exclude templates its author never mentioned.
+            var w = ScriptableObject.CreateInstance<NeighborhoodTemplateWeights>();
+            w.neighborhood = "Test";
+            w.weights = new[]
+            {
+                new TemplateWeight { templateId = "kept",     weight = 12f },
+                new TemplateWeight { templateId = "excluded", weight = 0f },
+                new TemplateWeight { templateId = "negative", weight = -3f },
+            };
+
+            Assert.AreEqual(12f, w.WeightFor("kept", 1f));
+            Assert.AreEqual(0f, w.WeightFor("excluded", 1f), "an authored 0 must mean zero, not unset");
+            Assert.AreEqual(0f, w.WeightFor("negative", 1f), "a negative weight must clamp to 0");
+            Assert.AreEqual(1f, w.WeightFor("unlisted", 1f), "an unlisted template still competes");
         }
 
         // ---- 2. the cornice is a roofPart, not a rule (#474) --------------------------------

@@ -2,22 +2,32 @@
   "version": 1,
   "exportedAt": "2026-08-03T00:00:00Z",
   "_comment": [
-    "#475. `neighborhoods` is informational - BuildingTemplateLibraryImporter reads it for one log",
-    "line and nothing matches against it. It now lists exactly the neighborhoods some template",
+    "#475/#492. `neighborhoods` is informational - BuildingTemplateLibraryImporter reads it for one",
+    "log line and nothing matches against it. It lists exactly the neighborhoods some template",
     "admits, spelled as python/data/sf_analysis_neighborhoods.geojson spells them: the slashes in",
     "\"Sunset/Parkside\" and the whole of \"South of Market\" are the match key the bake passes",
-    "through verbatim. The previous list carried \"Sunset\", which is not a neighborhood in that",
-    "geojson at all (only \"Inner Sunset\" and \"Sunset/Parkside\" are) - dropped.",
+    "through verbatim. (A slashed name is no longer a problem for the importer either - it",
+    "percent-encodes the generated asset's FILE NAME via AssetFileName.Encode while keeping the",
+    "slashed string as the lookup key. #464.)",
     "",
-    "`districtTemplateWeights` is load-bearing (#343). Two templates now admit the same",
-    "neighborhood on purpose - a shopfront cannot share floor 0 with a garage and a door, and the",
-    "schema has no way to say 'these two placements are mutually exclusive' inside one template -",
-    "so the split has to happen at template selection. Without weights TryMatch's tie-break is",
-    "uniform and every second building in the Victorian belt would be a shop.",
-    "Caveat: NeighborhoodTemplateWeights.WeightFor treats an authored 0 as 'unset' and falls back",
-    "to weight 1, so a weight cannot exclude a template. `trivial_window` (the bundled MVP sample,",
-    "compatibility.neighborhoods empty = admits every building in the city) therefore still draws",
-    "1 share everywhere; the weights below cut it from ~1 building in 2 to ~1 in 14."
+    "`districtTemplateWeights` is load-bearing (#343). Two templates admit one neighborhood on",
+    "purpose - a shopfront cannot share floor 0 with a garage and a door, and the schema has no way",
+    "to say 'these two placements are mutually exclusive' inside one template - so the split has to",
+    "happen at template selection. Without weights TryMatch's tie-break is uniform and every second",
+    "building in the Victorian belt, or in the Mission, would be a shop.",
+    "",
+    "EVERY ROW ALSO LISTS trivial_window AT 0. It is the bundled MVP sample (README): its",
+    "compatibility.neighborhoods is empty, which means it admits every building in the city, so it",
+    "competed in every district. #475 could only thin it - NeighborhoodTemplateWeights.WeightFor",
+    "treated an authored 0 as 'unset' and fell back to 1, leaving the sample at ~1 building in 14",
+    "with no way to exclude it. WeightFor now takes 0 literally (#492), so a district can switch a",
+    "template off. Two consequences worth knowing: (1) presence in the list is the signal, and",
+    "JsonUtility maps a MISSING \"weight\" field to 0, so omit the whole entry rather than the",
+    "number when you mean 'compete at the default' - the importer logs every zero it reads;",
+    "(2) this only helps where a district row exists. In a neighborhood no template admits,",
+    "trivial_window is still the ONLY match and still wins, weights or not. Giving the sample a",
+    "real compatibility is the fix for that, and it would change what the README documents, so it",
+    "was left alone."
   ],
   "neighborhoods": [
     "Noe Valley",
@@ -25,6 +35,8 @@
     "West of Twin Peaks",
     "Outer Mission",
     "Twin Peaks",
+    "Mission",
+    "North Beach",
     "Sunset/Parkside",
     "South of Market",
     "Marina"
@@ -34,54 +46,77 @@
       "neighborhood": "Noe Valley",
       "weights": [
         { "template": "noe_valley_victorian", "weight": 12 },
-        { "template": "noe_valley_corner_commercial", "weight": 1 }
+        { "template": "noe_valley_corner_commercial", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "Glen Park",
       "weights": [
         { "template": "noe_valley_victorian", "weight": 12 },
-        { "template": "noe_valley_corner_commercial", "weight": 1 }
+        { "template": "noe_valley_corner_commercial", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "West of Twin Peaks",
       "weights": [
         { "template": "noe_valley_victorian", "weight": 16 },
-        { "template": "noe_valley_corner_commercial", "weight": 1 }
+        { "template": "noe_valley_corner_commercial", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "Outer Mission",
       "weights": [
         { "template": "noe_valley_victorian", "weight": 10 },
-        { "template": "noe_valley_corner_commercial", "weight": 1 }
+        { "template": "noe_valley_corner_commercial", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "Twin Peaks",
       "weights": [
         { "template": "noe_valley_victorian", "weight": 20 },
-        { "template": "noe_valley_corner_commercial", "weight": 1 }
+        { "template": "noe_valley_corner_commercial", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
+      ]
+    },
+    {
+      "neighborhood": "Mission",
+      "weights": [
+        { "template": "mission_victorian", "weight": 10 },
+        { "template": "mission_storefront", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
+      ]
+    },
+    {
+      "neighborhood": "North Beach",
+      "weights": [
+        { "template": "north_beach_flats", "weight": 16 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "Sunset/Parkside",
       "weights": [
-        { "template": "sunset_parkside_postwar", "weight": 16 }
+        { "template": "sunset_parkside_postwar", "weight": 16 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "South of Market",
       "weights": [
         { "template": "soma_industrial", "weight": 8 },
-        { "template": "soma_loft_commercial", "weight": 1 }
+        { "template": "soma_loft_commercial", "weight": 1 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     },
     {
       "neighborhood": "Marina",
       "weights": [
-        { "template": "marina_mediterranean", "weight": 16 }
+        { "template": "marina_mediterranean", "weight": 16 },
+        { "template": "trivial_window", "weight": 0 }
       ]
     }
   ]
