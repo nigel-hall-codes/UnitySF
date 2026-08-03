@@ -111,6 +111,11 @@ namespace SFMap.Pipeline.Buildings
         public ConstraintsJson constraints;
         public JitterJson jitter;
         public string[] variants;
+        // #487: size the part to the rule's span in metres instead of its authored width, by
+        // overwriting one named parameter before the generator runs. `stretchParam` defaults to
+        // "w" when omitted (ProceduralRule.DefaultStretchParam).
+        public bool stretchToFacade;
+        public string stretchParam;
     }
 
     [Serializable] public struct RepeatJson { public float spacingMeters; public int countMin; public int countMax; }

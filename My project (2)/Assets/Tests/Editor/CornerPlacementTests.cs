@@ -203,6 +203,200 @@ namespace SFMap.Tests
             Assert.IsFalse(table.Blocked(facts.street_facades[0], 0.75f, -0.6f, 0.6f, 0f));
         }
 
+        // ---- 2b. the angle sweep (#488) -------------------------------------------------
+        //
+        // #459's clearance was written with no projecting geometry in existence and assumed every
+        // corner is a right angle. #473 built the first real projecting family and swept the rule
+        // against its measured bounds: convex corners hold at every angle from 45° to 160°, the
+        // 270° L-notch holds, and 290° and 315° admit overlapping pairs. This is that sweep,
+        // running as a test so the rule cannot silently regress at an untested angle.
+
+        /// <summary>#473's measured bay bounds: <c>x ∈ [−1.952, 1.952]</c>, <c>max.z 1.045</c>.
+        /// The projection is 40% more than the authored 0.75 because the face windows' trim stands
+        /// proud of the bay facets — a figure only the generated mesh knows.</summary>
+        const float SweepMinX = -1.952f, SweepMaxX = 1.952f, SweepProjection = 1.045f;
+        const float SweepFacadeLength = 20f;
+
+        /// <summary>Two facades meeting at the origin at an interior angle of
+        /// <paramref name="thetaDeg"/>, each with the corner at its <c>nx = 0</c> end.
+        /// <para>Facade 0 runs along +X with its outward normal along +Z. Facade 1 then runs along
+        /// <c>(cos θ, −sin θ)</c> with outward normal <c>(−sin θ, −cos θ)</c>, which is the one
+        /// arrangement putting the building's interior in the θ wedge between them — θ &lt; 180
+        /// gives a convex corner, θ &gt; 180 a notch.</para></summary>
+        static BuildingFactsJson CornerAtAngle(float thetaDeg)
+        {
+            float t = thetaDeg * Mathf.Deg2Rad;
+            float c = Mathf.Cos(t), s = Mathf.Sin(t);
+            return Facts(
+                Edge(0, 0f, 0f, 0f, SweepFacadeLength, 0f),
+                Edge(1, thetaDeg + 180f, 0f, 0f, SweepFacadeLength * c, -SweepFacadeLength * s));
+        }
+
+        /// <summary>A placement's plan footprint on facade <paramref name="index"/> of
+        /// <see cref="CornerAtAngle"/>, as the four corners of a rectangle in world (x, z):
+        /// the part's along-facade extent by its projection out from the wall.</summary>
+        static Vector2[] Footprint(float thetaDeg, int index, float nx)
+        {
+            Vector2 along, outward;
+            if (index == 0) { along = new Vector2(1f, 0f); outward = new Vector2(0f, 1f); }
+            else
+            {
+                float t = thetaDeg * Mathf.Deg2Rad;
+                along = new Vector2(Mathf.Cos(t), -Mathf.Sin(t));
+                outward = new Vector2(-Mathf.Sin(t), -Mathf.Cos(t));
+            }
+            float centre = nx * SweepFacadeLength;
+            return new[]
+            {
+                along * (centre + SweepMinX),
+                along * (centre + SweepMaxX),
+                along * (centre + SweepMaxX) + outward * SweepProjection,
+                along * (centre + SweepMinX) + outward * SweepProjection,
+            };
+        }
+
+        /// <summary>Separating-axis overlap of two convex polygons — the same test #473's suite
+        /// applies, and the ground truth the clearance rule is being checked against.</summary>
+        static bool Overlap(Vector2[] a, Vector2[] b)
+        {
+            for (int poly = 0; poly < 2; poly++)
+            {
+                var p = poly == 0 ? a : b;
+                for (int i = 0; i < p.Length; i++)
+                {
+                    Vector2 e = p[(i + 1) % p.Length] - p[i];
+                    var axis = new Vector2(-e.y, e.x);
+                    if (axis.sqrMagnitude < 1e-12f) continue;
+                    axis.Normalize();
+
+                    float aMin = float.MaxValue, aMax = float.MinValue;
+                    float bMin = float.MaxValue, bMax = float.MinValue;
+                    foreach (var v in a) { float d = Vector2.Dot(v, axis); aMin = Mathf.Min(aMin, d); aMax = Mathf.Max(aMax, d); }
+                    foreach (var v in b) { float d = Vector2.Dot(v, axis); bMin = Mathf.Min(bMin, d); bMax = Mathf.Max(bMax, d); }
+
+                    // A shared boundary is contact, not interpenetration.
+                    if (aMax <= bMin + 1e-4f || bMax <= aMin + 1e-4f) return false;
+                }
+            }
+            return true;
+        }
+
+        static bool SweepBlocked(FacadeCornerTable table, StreetFacadeJson f, float nx)
+            => table.Blocked(f, nx, SweepMinX, SweepMaxX, SweepProjection);
+
+        [Test]
+        public void NoOverlappingPairIsAdmittedAtAnyReflexAngle()
+        {
+            // The defect: the reflex clearance absorbed the neighbour's projection measured ALONG
+            // this facade, which is exact only at a right angle and degrades as the notch closes.
+            const int Steps = 100;   // 1% of the facade
+            int checkedPairs = 0;
+
+            for (float theta = 180f; theta <= 350.01f; theta += 2f)
+            {
+                var facts = CornerAtAngle(theta);
+                var table = FacadeCornerTable.Build(facts);
+                Assert.AreEqual(1, table.Corners.Count, $"theta {theta}");
+                Assert.IsFalse(table.Corners[0].convex, $"theta {theta} should read as reflex");
+                Assert.AreEqual(theta, table.Corners[0].interiorAngleDeg, 0.05f,
+                                $"theta {theta} was measured as " +
+                                $"{table.Corners[0].interiorAngleDeg}");
+
+                for (int i = 0; i <= Steps; i++)
+                {
+                    float nxA = i / (float)Steps;
+                    if (SweepBlocked(table, facts.street_facades[0], nxA)) continue;
+                    var a = Footprint(theta, 0, nxA);
+
+                    for (int j = 0; j <= Steps; j++)
+                    {
+                        float nxB = j / (float)Steps;
+                        if (SweepBlocked(table, facts.street_facades[1], nxB)) continue;
+                        checkedPairs++;
+                        Assert.IsFalse(Overlap(a, Footprint(theta, 1, nxB)),
+                            $"interior angle {theta}: parts admitted at nx {nxA} and {nxB} overlap");
+                    }
+                }
+            }
+
+            Assert.Greater(checkedPairs, 100000,
+                           "the rule must not be holding by refusing everything");
+        }
+
+        [Test]
+        public void ConvexCornersStillAdmitEveryNonOverlappingPairAndRefuseNone()
+        {
+            // #459 hedged that acute corners "need more than this gives"; #473 measured that they
+            // do not, for a structural reason. Guarding it means the exact reflex rule cannot be
+            // implemented by quietly tightening the convex one.
+            const int Steps = 100;
+
+            for (float theta = 45f; theta <= 160.01f; theta += 5f)
+            {
+                var facts = CornerAtAngle(theta);
+                var table = FacadeCornerTable.Build(facts);
+                Assert.IsTrue(table.Corners[0].convex, $"theta {theta}");
+                Assert.AreEqual(0f, table.Corners[0].reflexClearancePerProjection, 0f,
+                                "a convex corner asks for no reflex clearance at all");
+
+                for (int i = 0; i <= Steps; i++)
+                {
+                    float nxA = i / (float)Steps;
+                    if (SweepBlocked(table, facts.street_facades[0], nxA)) continue;
+                    var a = Footprint(theta, 0, nxA);
+
+                    for (int j = 0; j <= Steps; j++)
+                    {
+                        float nxB = j / (float)Steps;
+                        if (SweepBlocked(table, facts.street_facades[1], nxB)) continue;
+                        Assert.IsFalse(Overlap(a, Footprint(theta, 1, nxB)),
+                            $"convex {theta}: parts admitted at nx {nxA} and {nxB} overlap");
+                    }
+                }
+            }
+        }
+
+        [Test]
+        public void TheReflexClearanceIsExactlyTheOldRuleAtAThreeQuarterTurn()
+        {
+            // The one angle #459 was right about, kept as the anchor: at 270° the neighbour's
+            // projection does reach exactly its own depth along this facade, so the factor is 1 and
+            // the L-notch case behaves bit-for-bit as it did.
+            Assert.AreEqual(1f, FacadeCornerTable.Corner.ReflexClearanceFactor(270f), 1e-4f);
+
+            // Straightening the corner asks for nothing; closing it asks for more than #459 gave,
+            // which is the defect measured at 290° and 315°.
+            Assert.AreEqual(0f, FacadeCornerTable.Corner.ReflexClearanceFactor(180f), 1e-3f);
+            Assert.Greater(FacadeCornerTable.Corner.ReflexClearanceFactor(290f), 1.4f);
+            Assert.AreEqual(1f + Mathf.Sqrt(2f),
+                            FacadeCornerTable.Corner.ReflexClearanceFactor(315f), 1e-3f);
+            Assert.Less(FacadeCornerTable.Corner.ReflexClearanceFactor(225f), 1f,
+                        "a gentle notch needs less than a right-angle one, not the same");
+        }
+
+        [Test]
+        public void ANotchTooTightToClearRefusesTheFacadeRatherThanAdmittingAnOverlap()
+        {
+            // As the notch pinches shut no finite clearance separates the two walls. The arithmetic
+            // says so by diverging, and Blocked saturates it at the facade's own length — which is
+            // the explicit rejection #488 asks for, arrived at rather than special-cased.
+            var facts = CornerAtAngle(358f);
+            var table = FacadeCornerTable.Build(facts);
+
+            for (int i = 0; i <= 100; i++)
+                Assert.IsTrue(SweepBlocked(table, facts.street_facades[0], i / 100f),
+                              $"nx {i / 100f} in a 2 degree slot");
+        }
+
+        [Test]
+        public void EveryCornerCarriesTheInteriorAngleItSubtends()
+        {
+            Assert.AreEqual(90f, FacadeCornerTable.Build(CornerBuilding()).Corners[0].interiorAngleDeg, 1e-3f);
+            Assert.AreEqual(270f, FacadeCornerTable.Build(LPlanNotch()).Corners[0].interiorAngleDeg, 1e-3f);
+            foreach (var c in FacadeCornerTable.Build(IslandBuilding()).Corners)
+                Assert.AreEqual(90f, c.interiorAngleDeg, 1e-3f);
+        }
+
         // ---- 3. non-corner buildings are untouched --------------------------------------
 
         [Test]

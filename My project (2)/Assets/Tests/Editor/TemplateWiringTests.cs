@@ -17,16 +17,17 @@ namespace SFMap.Tests
     /// could: that door, garage, storefront, bay and cornice coexist on the same building without
     /// stacking, given the placement schema as it actually is.</para>
     ///
-    /// <para><b>The rule that shapes all of this.</b> <c>_exactMarks</c> is written by
-    /// <c>PlaceExact</c> and read by <c>PlaceProcedural</c> when a rule sets <c>avoidExact</c>.
-    /// The exclusion is therefore <i>exact → procedural only</i>: two procedural rules are blind to
-    /// each other, and <c>RuleJson</c> has no "mutually exclusive with rule N" field. So a template
-    /// may hold any number of <c>exact</c> placements on one floor (the author separates their
-    /// <c>x</c> by hand) plus <b>at most one</b> rule that dodges them. Every mutually-exclusive
-    /// ground-floor artifact — door, garage, storefront — is consequently authored as an
-    /// <c>exact</c>, and where two of them cannot fit at all (a shopfront vs a garage) the split
-    /// happens one level up, at template selection, via <c>districtTemplateWeights</c>. Lifting the
-    /// limitation is #491.</para>
+    /// <para><b>The rule that used to shape all of this.</b> Until #491, <c>_exactMarks</c> was
+    /// written by <c>PlaceExact</c> and read by <c>PlaceProcedural</c> only, so the exclusion ran
+    /// <i>exact → procedural</i> and a template could hold any number of <c>exact</c> placements on
+    /// one floor plus <b>at most one</b> rule that dodged them. The wiring below still reflects that
+    /// history — every mutually-exclusive ground-floor artifact is authored as an <c>exact</c>, and
+    /// a shopfront that cannot share floor 0 with a garage is split off into its own template via
+    /// <c>districtTemplateWeights</c> — but it is now a shape the author chose rather than one the
+    /// schema imposed: <c>BuildingAssembler</c> keeps a shared occupancy table of real extents that
+    /// every procedural placement joins and consults, so two rules can share a floor and an
+    /// artifact spanning two floors is felt on both. <c>FacadeOccupancyTests</c> is where that
+    /// behaviour is asserted; what stays here is the data.</para>
     /// </summary>
     public class TemplateWiringTests
     {
@@ -209,26 +210,12 @@ namespace SFMap.Tests
 
         // ---- 3. the ground floor: at most one rule, and exacts that clear each other --------
 
-        [Test]
-        public void AtMostOneRulePerTemplateClaimsAGivenFloor()
-        {
-            // Two rules on the same facade and floor cannot avoid each other — avoidExact reads
-            // _exactMarks, which only Exact placements write. Anything beyond one rule per floor is
-            // an authored guarantee of interpenetration (#491).
-            foreach (var t in Neighborhood)
-            {
-                for (int floor = 0; floor <= 8; floor++)
-                {
-                    var claimants = (t.rules ?? Array.Empty<RuleJson>())
-                        .Where(r => r.floorRange.min <= floor && floor <= r.floorRange.max)
-                        .Where(r => r.facade == "Street" || r.facade == "Front")
-                        .ToArray();
-                    Assert.LessOrEqual(claimants.Length, 1,
-                        $"template '{t.id}' has {claimants.Length} rules on floor {floor} of the " +
-                        "front/street facade; procedural rules cannot exclude one another");
-                }
-            }
-        }
+        // AtMostOneRulePerTemplateClaimsAGivenFloor lived here. It was a guard on a limitation, not
+        // a design: two rules on one floor could not avoid each other because only Exact placements
+        // wrote marks. #491 gave every procedural placement a share of one occupancy table, so a
+        // second rule on a floor is now ordinary rather than an authored guarantee of
+        // interpenetration — the guard has nothing left to guard. What replaces it is behavioural:
+        // FacadeOccupancyTests.TwoProceduralRulesOnOneFloorDoNotInterpenetrate.
 
         [Test]
         public void GroundFloorExactsClearEachOtherOnARealFacade()
@@ -386,29 +373,41 @@ namespace SFMap.Tests
         }
 
         [Test]
-        public void TheBayIsTheOneArtifactTheExclusionRadiusCannotFullyClear()
+        public void TheBayIsClearedOnEveryFloorItSpans()
         {
-            // Recorded rather than hidden. The Noe bay is 3.80 m wide, so a window clears it only
-            // at 2.45 m — above window_noe_2over2's 2.20 m repeat pitch, which the invariant above
-            // makes the ceiling. And _exactMarks is keyed (edge_index, floor) with no notion of
-            // floorsSpanned, so the bay's SECOND floor carries no mark at all.
+            // Was TheBayIsTheOneArtifactTheExclusionRadiusCannotFullyClear, which recorded the
+            // defect rather than a design: the Noe bay is 3.80 m wide so a window clears it only at
+            // 2.45 m, above window_noe_2over2's 2.20 m repeat pitch — the ceiling the invariant
+            // above imposes on a normalized exclusion radius; and _exactMarks was keyed
+            // (edge_index, floor) with no floorsSpanned, so the bay's SECOND floor carried no mark
+            // at all. Measured over chunks_wintest, 924 windows on 475 buildings were generated
+            // inside a bay shell — occluded rather than interpenetrating, so wasted triangles
+            // rather than a visible fault, but wasted on a quarter of every templated window.
             //
-            // Neither is a visible defect today: a window inside a projecting bay shell is occluded
-            // by it, not interpenetrating it — it costs triangles. Both would need schema work
-            // (a marked span rather than a marked point) to fix properly — #491.
+            // #491 replaced the point mark with a shared table of real extents, so neither ceiling
+            // exists. This test keeps the DATA half — that this pair really is the hard case, so
+            // the guarantee has something to bite on. The behaviour is asserted against the built
+            // meshes in FacadeOccupancyTests.ABaySpanningTwoFloorsSuppressesWindowSlotsOnBothOfThem
+            // and ClearingTheBayIsNoLongerCappedByTheWindowRulesRepeatPitch.
             var noe = _templates["noe_valley_victorian"];
             var bay = noe.exact.Single(e => Part(e.part).generatorId == "bay.projecting");
             var window = noe.rules.Single(r => Part(r.part).generatorId == "window.double_hung");
 
             Assert.AreEqual(1, bay.floor, "the bay starts one floor above the garage it sits over");
+
             float needed = HalfWidth(bay.part) + HalfWidth(window.part);
-            Assert.Greater(needed, window.constraints.minSpacingMeters,
-                "if a preset resize made the bay clearable, delete this test and tighten " +
-                nameof(TheExclusionRadiusClearsEveryGroundFloorExact) + " to cover every floor");
-            Assert.Greater(bay.floor + Part(bay.part).parameters
-                               .Where(p => p.name == "floorsSpanned").Select(p => (int)p.value).Single(),
-                           bay.floor + 1,
-                           "the bay spans more than one floor, and only its base floor is marked");
+            Assert.Greater(needed, window.repeat.spacingMeters,
+                $"clearing the bay needs {needed:F2} m, which used to be unreachable because it is " +
+                $"above the window rule's {window.repeat.spacingMeters:F2} m repeat pitch. If a " +
+                "preset resize brought it under the pitch this pair is no longer the hard case — " +
+                "name a new one here rather than deleting the coverage");
+
+            int spanned = Part(bay.part).parameters
+                .Where(p => p.name == "floorsSpanned").Select(p => (int)p.value).Single();
+            Assert.Greater(spanned, 1, "the bay rises through more than the floor it is placed on");
+            Assert.GreaterOrEqual(window.floorRange.max, bay.floor + spanned - 1,
+                "the window rule must still reach the floors the bay rises through, or there would " +
+                "be nothing on them to suppress");
         }
 
         // ---- 4. storefronts: what could not be gated, recorded where it is authored ---------

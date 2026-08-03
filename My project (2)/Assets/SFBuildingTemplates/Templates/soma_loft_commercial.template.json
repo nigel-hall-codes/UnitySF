@@ -2,13 +2,18 @@
   "id": "soma_loft_commercial",
   "displayName": "South of Market loft (ground-floor commercial)",
   "_comment": [
-    "#475. Same reason as noe_valley_corner_commercial: storefront_soma_loft is 9.60 m wide and",
-    "owns floor 0, so it cannot share a template with soma_industrial's roll-up and loading door.",
-    "One exact on floor 0, windows from floor 1 up, corbel cornice on the roofline.",
+    "#475/#487. Same reason as noe_valley_corner_commercial: storefront_soma_loft owns floor 0, so",
+    "it cannot share a template with soma_industrial's roll-up and loading door. One rule owns",
+    "floor 0, windows from floor 1 up, corbel cornice on the roofline.",
     "GATED BY NEIGHBORHOOD ONLY - building_type is \"yes\" for 93.3% of buildings (#486), so this",
-    "will dress non-commercial SoMa buildings as lofts until a real commercial fact is baked, and",
-    "the 9.60 m shopfront does not stretch to the facade it lands on (#487).",
-    "districtTemplateWeights in library.json holds it to 1 building in 9."
+    "will dress non-commercial SoMa buildings as lofts until a real commercial fact is baked.",
+    "districtTemplateWeights in library.json holds it to 1 building in 9.",
+    "",
+    "SIZING (#487). The shopfront is a RULE with stretchToFacade, so the placement overwrites `w`",
+    "with the rule's span in metres and the loft front is rebuilt at the facade's width rather than",
+    "scaled to it. span 0.15..0.85 leaves room for the surround, which stands 0.20 m beyond `w`,",
+    "and keeps the run clear of the corner on a corner building (FacadeCornerTable refuses an",
+    "overhang)."
   ],
   "compatibility": {
     "neighborhoods": [
@@ -29,19 +34,43 @@
       "max": 100
     }
   },
-  "exact": [
+  "exact": [],
+  "rules": [
     {
       "part": "storefront_soma_loft",
       "facade": "Front",
-      "floor": 0,
-      "x": 0.5,
-      "y": 0.0,
-      "scale": 1.0,
-      "rotation": 0.0,
-      "roles": []
-    }
-  ],
-  "rules": [
+      "floorRange": {
+        "min": 0,
+        "max": 0
+      },
+      "span": [
+        0.15,
+        0.85
+      ],
+      "repeat": {
+        "spacingMeters": 100.0,
+        "countMin": 1,
+        "countMax": 1
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 0.0,
+        "edgeMargin": 0.0,
+        "alignToFloorLine": true,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.0,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": [],
+      "stretchToFacade": true,
+      "stretchParam": "w"
+    },
     {
       "part": "window_soma_steel",
       "facade": "Street",

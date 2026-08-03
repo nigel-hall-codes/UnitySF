@@ -142,6 +142,39 @@ namespace SFMap.Pipeline.Buildings.Gen
             _keySuffix = sb.ToString();
         }
 
+        /// <summary>This block with one numeric parameter overwritten — the whole of what the
+        /// placement layer needs to size a part to its facade (#487). Returns a new block; parts
+        /// are import-time immutable and one <c>BuildingPart</c> asset is shared by every building
+        /// that places it, so mutating in place would leak one facade's width into the next.
+        ///
+        /// <para>Any <c>text</c> the name carried is cleared, since <c>text</c> wins over
+        /// <c>value</c> — otherwise the override would be silently ignored. The name is appended
+        /// when the block did not already carry it, which is what lets a rule stretch a parameter a
+        /// preset left at its generator default.</para>
+        ///
+        /// <para>The result keys the mesh cache exactly as any other block does: the overwritten
+        /// number joins the float vector, so <see cref="PartKey"/>'s quantisation collapses facades
+        /// that agree to 5 mm onto one shared mesh.</para></summary>
+        public PartParams WithOverride(string name, float value)
+        {
+            if (string.IsNullOrEmpty(name)) return this;
+            var src = values ?? Array.Empty<PartParam>();
+            var replacement = new PartParam { name = name, value = value, text = null };
+
+            for (int i = 0; i < src.Length; i++)
+            {
+                if (!string.Equals(src[i].name, name, StringComparison.Ordinal)) continue;
+                var copy = (PartParam[])src.Clone();
+                copy[i] = replacement;
+                return new PartParams { values = copy };
+            }
+
+            var appended = new PartParam[src.Length + 1];
+            Array.Copy(src, appended, src.Length);
+            appended[src.Length] = replacement;
+            return new PartParams { values = appended };
+        }
+
         bool TryFind(string name, out PartParam found)
         {
             if (values != null && !string.IsNullOrEmpty(name))

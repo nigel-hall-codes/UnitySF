@@ -271,6 +271,8 @@ namespace SFMap.Pipeline.Buildings.Editor
                     },
                     jitter = new Jitter { x = r.jitter.x, scale = r.jitter.scale ?? Array.Empty<float>(), rotation = r.jitter.rotation },
                     variants = r.variants ?? Array.Empty<string>(),
+                    stretchToFacade = r.stretchToFacade,
+                    stretchParam = r.stretchParam,
                 };
             }
             return outr;
