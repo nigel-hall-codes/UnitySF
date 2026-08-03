@@ -1,0 +1,46 @@
+{
+  "id": "door_sunset_flush",
+  "category": "Door",
+  "generatorId": "door.panel",
+  "parameters": [
+    { "name": "w", "value": 0.95 },
+    { "name": "h", "value": 2.05 },
+    { "name": "revealDepth", "value": 0.05 },
+    { "name": "infillInset", "value": 0.020 },
+
+    { "name": "leafCount", "value": 1 },
+    { "name": "panelCols", "value": 1 },
+    { "name": "panelRows", "value": 2 },
+    { "name": "glazedFraction", "value": 0.30 },
+    { "name": "panelBevel", "value": 0.0 },
+
+    { "name": "railW", "value": 0.18 },
+    { "name": "stileW", "value": 0.050 },
+    { "name": "barW", "value": 0.030 },
+    { "name": "barD", "value": 0.020 },
+    { "name": "frameD", "value": 0.030 },
+
+    { "name": "transomH", "value": 0.0 },
+
+    { "name": "surroundProfile", "text": "None" },
+
+    { "name": "thresholdProfile", "text": "Flat" },
+    { "name": "thresholdH", "value": 0.04 },
+    { "name": "thresholdProjection", "value": 0.03 },
+    { "name": "thresholdOverhang", "value": 0.02 },
+
+    { "name": "headerProfile", "text": "None" },
+
+    { "name": "hardware", "value": 0.30 },
+    { "name": "hardwareW", "value": 0.040 },
+    { "name": "hardwareD", "value": 0.045 },
+    { "name": "hardwareY", "value": 1.05 },
+
+    { "name": "frameRole", "text": "Accent1" },
+    { "name": "panelRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 0.95, "h": 2.09, "d": 0.12 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.07,
+  "version": 2
+}

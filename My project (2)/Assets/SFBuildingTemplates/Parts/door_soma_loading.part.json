@@ -1,0 +1,49 @@
+{
+  "id": "door_soma_loading",
+  "category": "Door",
+  "generatorId": "door.panel",
+  "parameters": [
+    { "name": "w", "value": 3.20 },
+    { "name": "h", "value": 3.40 },
+    { "name": "revealDepth", "value": 0.06 },
+    { "name": "infillInset", "value": 0.020 },
+
+    { "name": "leafCount", "value": 2 },
+    { "name": "panelCols", "value": 1 },
+    { "name": "panelRows", "value": 9 },
+    { "name": "glazedFraction", "value": 0.0 },
+    { "name": "panelBevel", "value": 0.012 },
+
+    { "name": "railW", "value": 0.16 },
+    { "name": "stileW", "value": 0.060 },
+    { "name": "barW", "value": 0.050 },
+    { "name": "barD", "value": 0.025 },
+    { "name": "frameD", "value": 0.035 },
+
+    { "name": "transomH", "value": 0.0 },
+
+    { "name": "surroundProfile", "text": "None" },
+
+    { "name": "thresholdProfile", "text": "Flat" },
+    { "name": "thresholdH", "value": 0.05 },
+    { "name": "thresholdProjection", "value": 0.04 },
+    { "name": "thresholdOverhang", "value": 0.03 },
+
+    { "name": "headerProfile", "text": "Flat" },
+    { "name": "headerH", "value": 0.20 },
+    { "name": "headerProjection", "value": 0.06 },
+    { "name": "headerOverhang", "value": 0.12 },
+
+    { "name": "hardware", "value": 0.45 },
+    { "name": "hardwareW", "value": 0.050 },
+    { "name": "hardwareD", "value": 0.060 },
+    { "name": "hardwareY", "value": 1.10 },
+
+    { "name": "frameRole", "text": "Metal" },
+    { "name": "panelRole", "text": "Metal" }
+  ],
+  "size_m": { "w": 3.44, "h": 3.60, "d": 0.14 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.08,
+  "version": 2
+}

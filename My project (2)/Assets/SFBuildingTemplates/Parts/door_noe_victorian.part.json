@@ -1,0 +1,47 @@
+{
+  "id": "door_noe_victorian",
+  "category": "Door",
+  "generatorId": "door.panel",
+  "parameters": [
+    { "name": "w", "value": 1.05 },
+    { "name": "h", "value": 2.35 },
+    { "name": "revealDepth", "value": 0.16 },
+    { "name": "infillInset", "value": 0.035 },
+
+    { "name": "leafCount", "value": 1 },
+    { "name": "panelCols", "value": 1 },
+    { "name": "panelRows", "value": 3 },
+    { "name": "glazedFraction", "value": 0.34 },
+    { "name": "panelBevel", "value": 0.022 },
+
+    { "name": "railW", "value": 0.26 },
+    { "name": "stileW", "value": 0.075 },
+    { "name": "barW", "value": 0.060 },
+    { "name": "barD", "value": 0.035 },
+    { "name": "frameD", "value": 0.050 },
+
+    { "name": "transomH", "value": 0.34 },
+    { "name": "transomCols", "value": 1 },
+
+    { "name": "surroundProfile", "text": "Ogee" },
+    { "name": "surroundW", "value": 0.12 },
+    { "name": "surroundD", "value": 0.045 },
+
+    { "name": "thresholdProfile", "text": "Bullnose" },
+    { "name": "thresholdH", "value": 0.08 },
+    { "name": "thresholdProjection", "value": 0.12 },
+    { "name": "thresholdOverhang", "value": 0.06 },
+
+    { "name": "hardware", "value": 0.14 },
+    { "name": "hardwareW", "value": 0.05 },
+    { "name": "hardwareD", "value": 0.06 },
+    { "name": "hardwareY", "value": 1.02 },
+
+    { "name": "frameRole", "text": "Accent1" },
+    { "name": "panelRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 1.29, "h": 2.55, "d": 0.32 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.195,
+  "version": 2
+}
