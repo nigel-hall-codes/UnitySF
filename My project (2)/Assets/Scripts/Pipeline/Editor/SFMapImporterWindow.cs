@@ -620,6 +620,9 @@ namespace SFMap.Pipeline.Editor
                     StopOp(ref _timings.assembleMs);
                 }
                 assembler.LogCoverage(coord, buildingParts.Count);   // fallback = merged buildings
+                // The chunk's generated part meshes were cloned into each building's combine, so
+                // the originals are done (#454).
+                assembler.ReleaseGeneratedMeshes();
             }
 
             return minElevM;

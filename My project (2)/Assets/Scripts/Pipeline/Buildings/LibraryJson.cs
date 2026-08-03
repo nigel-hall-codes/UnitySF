@@ -7,7 +7,7 @@ namespace SFMap.Pipeline.Buildings
     //
     // JsonUtility cannot deserialize string-keyed maps, so every place §2 specifies a
     // JSON object map this uses a JsonUtility-friendly array of explicit pairs instead:
-    //   roleSubmeshes {"0":"Base"}        -> [{ "submesh":0, "role":"Base" }]
+    //   parameters    {"w": 1.2}          -> [{ "name":"w", "value":1.2 }]
     //   exact[].roles {"Base":"Accent1"}  -> [{ "from":"Base", "to":"Accent1" }]
     //   palette roles {"Base":{...}}      -> [{ "role":"Base", "colors":[...], "mode":"pick" }]
     // This is a wire-shape refinement of §2 (semantically identical); the authoring
@@ -41,16 +41,20 @@ namespace SFMap.Pipeline.Buildings
     {
         public string id;
         public string category;            // PartCategory name
-        public string glb;                 // library-relative path to the GLB
+        public string generatorId;         // which IPartGenerator builds it (#454)
+        public PartParamJson[] parameters; // its parameter block
         public SizeJson size_m;
-        public RoleSubmeshJson[] roleSubmeshes;
         public string anchor;
         public float mountDepth_m;
         public int version;
     }
 
     [Serializable] public struct SizeJson { public float w; public float h; public float d; }
-    [Serializable] public struct RoleSubmeshJson { public int submesh; public string role; }
+
+    /// <summary>One generator parameter. <c>text</c> carries symbolic values (enum names) and wins
+    /// over <c>value</c> when non-empty — see <c>PartParams</c>. There is no <c>roleSubmeshes</c>
+    /// any more: the generator emits the submesh roles (#454).</summary>
+    [Serializable] public struct PartParamJson { public string name; public float value; public string text; }
 
     // ---- Templates ------------------------------------------------------------
 

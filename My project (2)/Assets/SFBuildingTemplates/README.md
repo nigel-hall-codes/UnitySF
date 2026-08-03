@@ -2,7 +2,7 @@
 
 This folder is the **one shared artifact** between the authoring loop (iPad → Home PC
 server → AI) and the offline generation loop (Python bake → Unity import). The server's
-`POST /export/unity` (#274) writes JSON + GLB + PNG here; a Unity importer converts them to
+`POST /export/unity` (#274) writes JSON + PNG here; a Unity importer converts them to
 ScriptableObjects the assembler (#270) consumes. See `sdlc/#266/data-model.md` §2–3.
 
 ## Layout
@@ -10,8 +10,7 @@ ScriptableObjects the assembler (#270) consumes. See `sdlc/#266/data-model.md` �
 ```
 SFBuildingTemplates/
   library.json                       # manifest: version, exportedAt, neighborhoods[]
-  Parts/      <id>.part.json         # PartDef → BuildingPart SO
-              <id>.glb               # authored geometry (submeshes tagged by material role)
+  Parts/      <id>.part.json         # PartDef → BuildingPart SO (generatorId + parameters)
   Palettes/   <neighborhood>.palette.json   # PaletteDef → NeighborhoodPalette SO
   Templates/  <id>.template.json     # TemplateDef → BuildingTemplate SO
   Overrides/  <osm_id>.override.json # BuildingSpecificDef (consumed by #273/#278)
@@ -27,22 +26,36 @@ Run **`SFMap ▸ Rebuild Building Template Library`** (menu). It parses every `*
 A bundled sample (`window_sunset_2x3` part, `Sunset` palette, `trivial_window` template) imports
 cleanly out of the box and demonstrates the round-trip.
 
-## glTF import (closing the #266 open question)
+## Parts are generated, not authored (design #452 D2, #454)
 
-GLB parts are imported by **glTFast** — `com.unity.cloud.gltfast`, the Khronos/Unity-backed,
-MIT-licensed, actively-maintained importer (chosen over the unmaintained UnityGLTF). With it
-installed, dropping `Parts/<id>.glb` makes the GLB load as a `GameObject`, which the importer
-wires into the part's `prefab` field.
-
-The importer **does not hard-depend** on glTFast: it references the imported GLB by asset path,
-so if the package is absent a part's `prefab` is simply left null (with a warning) and everything
-else still imports. To enable GLB geometry, add glTFast via **Window ▸ Package Manager ▸ + ▸ Add
-package by name** → `com.unity.cloud.gltfast`, or add this line to `Packages/manifest.json`
-(confirm the version against your Unity version):
+A part carries **no geometry**. It names an `IPartGenerator` and gives it numbers:
 
 ```jsonc
-"com.unity.cloud.gltfast": "6.9.0"
+{
+  "id": "window_sunset_2x3",
+  "category": "Window",
+  "generatorId": "window.double_hung",     // which generator builds it
+  "parameters": [                          // its parameter block — a flat, name-keyed bag
+    { "name": "w",             "value": 1.2 },
+    { "name": "frameRole",     "text":  "Metal" },   // `text` = symbolic value (enum name)
+    { "name": "detail",        "text":  "Full" }     // optional; the DetailLevel budget knob
+  ],
+  "anchor": "BottomCenter",
+  "mountDepth_m": -0.08
+}
 ```
 
-> The manifest edit is intentionally left to you — it is the one change that affects package
-> resolution for the whole project, so it is not made automatically by this feature.
+- Every value is either numeric (`value`) or symbolic (`text`, which wins when non-empty).
+- Names are matched **case-sensitively**; an unrecognised name silently takes the generator's
+  default, so the parameter names a generator reads are part of its documented contract.
+- Parameter **order does not matter** — the mesh cache canonicalises it, so two parts written in
+  different orders share one generated mesh.
+- There is no `roleSubmeshes`: the generator emits each submesh's material role, so role tagging
+  cannot drift from the geometry. There is no `glb`, and **no glTF package is required** by
+  anything in this project.
+- An empty or unknown `generatorId` means the part is **skipped** (with one warning per part id)
+  when a building is assembled. There is no placeholder geometry.
+
+> **Current state:** no generators exist yet — the first family (`window.double_hung`) is #457.
+> Until it lands, the bundled part's `generatorId` is empty, so templated buildings render as
+> bare mass with no artifacts. That is expected, not a regression.
