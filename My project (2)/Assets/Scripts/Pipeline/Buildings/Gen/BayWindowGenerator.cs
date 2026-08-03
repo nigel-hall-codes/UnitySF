@@ -355,7 +355,10 @@ namespace SFMap.Pipeline.Buildings.Gen
                         {
                             float offset = -available * 0.5f + slot * (k + 0.5f);
                             Vector3 origin = facetMid + alongX * offset + new Vector3(0f, y, 0f);
-                            Append(mb, face, origin, alongX, Vector3.up, outZ);
+                            // The window's own +X/+Y/+Z laid onto this facet. The frame is
+                            // orthonormal and right-handed, so winding survives and nothing needs
+                            // re-facing; MeshBuilder carries the roles across (#489).
+                            mb.Append(face, MeshBuilder.Frame(origin, alongX, Vector3.up, outZ));
                         }
                     }
                 }
@@ -424,48 +427,6 @@ namespace SFMap.Pipeline.Buildings.Gen
                 if (string.Equals(bag[i].name, name, System.StringComparison.Ordinal))
                     return string.IsNullOrEmpty(bag[i].text) ? fallback : bag[i].text;
             return fallback;
-        }
-
-        // ---- composing one generator's output into another's ----------------------------------
-
-        /// <summary>
-        /// Append <paramref name="src"/> into <paramref name="dst"/>, rotated into the facet frame
-        /// (<paramref name="axisX"/>, <paramref name="axisY"/>, <paramref name="axisZ"/>) and moved
-        /// to <paramref name="origin"/>.
-        ///
-        /// <para><b>This is the composition seam, and it costs a round trip.</b>
-        /// <see cref="IPartGenerator"/>'s unit of output is a finished <see cref="Mesh"/> and
-        /// <see cref="MeshBuilder"/> has no transform stack, so the only way one family can carry
-        /// another's geometry is to bake it and read it back. The frame is orthonormal and
-        /// right-handed (<c>X × Y = Z</c>), so winding is preserved and no re-facing is needed; UVs
-        /// are re-derived from the transformed position, which is what puts the window's
-        /// <c>uv1</c> into the <i>bay's</i> rect — the thing the facade-decal remap wants.</para>
-        /// </summary>
-        static void Append(MeshBuilder dst, PartMesh src, Vector3 origin,
-                           Vector3 axisX, Vector3 axisY, Vector3 axisZ)
-        {
-            if (!src.IsValid) return;
-            Vector3[] verts = src.mesh.vertices;
-            Vector3[] norms = src.mesh.normals;
-            if (verts == null || verts.Length == 0) return;
-
-            var map = new int[verts.Length];
-            for (int i = 0; i < verts.Length; i++)
-            {
-                Vector3 v = verts[i];
-                Vector3 n = norms != null && i < norms.Length ? norms[i] : Vector3.forward;
-                map[i] = dst.Vert(origin + axisX * v.x + axisY * v.y + axisZ * v.z,
-                                  (axisX * n.x + axisY * n.y + axisZ * n.z).normalized);
-            }
-
-            int subs = Mathf.Min(src.mesh.subMeshCount, src.submeshRoles.Length);
-            for (int s = 0; s < subs; s++)
-            {
-                dst.BeginRole(src.submeshRoles[s]);
-                int[] tris = src.mesh.GetTriangles(s);
-                for (int t = 0; t + 2 < tris.Length; t += 3)
-                    dst.Tri(map[tris[t]], map[tris[t + 1]], map[tris[t + 2]]);
-            }
         }
 
         /// <summary>The scratch meshes exist only to be read back; nothing outside this call ever

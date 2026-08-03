@@ -438,15 +438,24 @@ namespace SFMap.Pipeline.Buildings.Gen
         // ---- panel fields ------------------------------------------------------------------
 
         /// <summary>
-        /// A grid of infill cells over an explicit x-range: <see cref="Kernels.PanelGrid"/>'s steps
-        /// 2–4, but positioned rather than centred.
-        /// <para><b>Why not <c>Kernels.PanelGrid</c> itself.</b> It centres its grid on <c>x = 0</c>
-        /// and offsets only in Y and Z, which is right for every family that occupies one opening.
-        /// A storefront's bays are side by side along X and the entry bay must be <i>skipped</i>, so
-        /// a single centred call cannot express the field. The kernel wants an <c>offsetX</c>
-        /// alongside its <c>offsetY</c>/<c>offsetZ</c>; adding one is a follow-up (noted in the PR)
-        /// rather than something this family should have changed under four sibling families landing
-        /// on the same file.</para>
+        /// A grid of infill cells over an explicit x-range: <see cref="Kernels.PanelGrid"/>'s step 4
+        /// alone, positioned rather than centred.
+        /// <para><b>Why not <c>Kernels.PanelGrid</c> itself.</b> The lateral offset this originally
+        /// wanted now exists — <c>PanelGridParams.offsetX</c> (#481) — and with it two of the five
+        /// call sites below (the display light and the entry door's leaves) <i>are</i> exactly a
+        /// <c>PanelGrid</c>. The other three are not, for reasons the offset does not touch:</para>
+        /// <list type="bullet">
+        /// <item><description>the bulkhead tiles and the entry kick are multi-cell fields with
+        /// <b>no bars at all</b>, and <c>PanelGrid</c> puts a muntin on every interior cell edge
+        /// unconditionally — a zero-width one is still a degenerate <see cref="Kernels.Box"/>, not
+        /// nothing;</description></item>
+        /// <item><description>the transom's bars sit flush with the mullion faces, i.e. on a plane
+        /// the glazing's own inset does not determine, while <c>PanelGrid</c> fixes its bars at
+        /// <c>infill + barD/2</c>.</description></item>
+        /// </list>
+        /// <para>Both are further kernel changes rather than uses of one, so this stays a local
+        /// field for now and the two that could route through the kernel are left with it for the
+        /// sake of one readable loop (#481).</para>
         /// </summary>
         static void Cells(MeshBuilder mb, float x0, float x1, float y0, float y1, float z,
                           int cols, int rows, float bevel, MaterialRole role)
