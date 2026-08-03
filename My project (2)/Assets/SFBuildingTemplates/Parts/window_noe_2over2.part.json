@@ -1,0 +1,43 @@
+{
+  "id": "window_noe_2over2",
+  "category": "Window",
+  "generatorId": "window.double_hung",
+  "parameters": [
+    { "name": "w", "value": 0.9 },
+    { "name": "h", "value": 2.0 },
+    { "name": "revealDepth", "value": 0.10 },
+
+    { "name": "sashCount", "value": 2 },
+    { "name": "meetingRailH", "value": 0.07 },
+    { "name": "lowerCols", "value": 2 },
+    { "name": "lowerRows", "value": 1 },
+    { "name": "upperCols", "value": 2 },
+    { "name": "upperRows", "value": 1 },
+    { "name": "frameW", "value": 0.07 },
+    { "name": "frameD", "value": 0.045 },
+    { "name": "muntinW", "value": 0.035 },
+    { "name": "muntinD", "value": 0.025 },
+    { "name": "glassInset", "value": 0.035 },
+
+    { "name": "casingProfile", "text": "Ogee" },
+    { "name": "casingW", "value": 0.10 },
+    { "name": "casingD", "value": 0.035 },
+
+    { "name": "head", "text": "Hooded" },
+    { "name": "headProfile", "text": "Ogee" },
+    { "name": "headProjection", "value": 0.16 },
+    { "name": "headH", "value": 0.12 },
+    { "name": "headOverhang", "value": 0.09 },
+
+    { "name": "sillProfile", "text": "Sill" },
+    { "name": "sillProjection", "value": 0.12 },
+    { "name": "sillH", "value": 0.10 },
+    { "name": "sillOverhang", "value": 0.07 },
+
+    { "name": "frameRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 1.10, "h": 2.32, "d": 0.31 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.145,
+  "version": 2
+}

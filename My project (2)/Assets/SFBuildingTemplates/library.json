@@ -1,5 +1,11 @@
 {
   "version": 1,
-  "exportedAt": "2026-06-30T00:00:00Z",
-  "neighborhoods": ["Sunset"]
+  "exportedAt": "2026-08-03T00:00:00Z",
+  "neighborhoods": [
+    "Sunset",
+    "Noe Valley",
+    "Sunset/Parkside",
+    "South of Market",
+    "Marina"
+  ]
 }

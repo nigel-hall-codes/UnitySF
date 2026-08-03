@@ -1,0 +1,61 @@
+{
+  "id": "soma_industrial",
+  "displayName": "South of Market Industrial",
+  "compatibility": {
+    "neighborhoods": [
+      "South of Market"
+    ],
+    "building_types": [],
+    "footprint_shapes": [],
+    "width_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "depth_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "floor_count": {
+      "min": 1,
+      "max": 100
+    }
+  },
+  "exact": [],
+  "rules": [
+    {
+      "part": "window_soma_steel",
+      "facade": "Street",
+      "floorRange": {
+        "min": 0,
+        "max": 8
+      },
+      "span": [
+        0.05,
+        0.95
+      ],
+      "repeat": {
+        "spacingMeters": 3.6,
+        "countMin": 1,
+        "countMax": 6
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.7,
+        "edgeMargin": 0.04,
+        "alignToFloorLine": false,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.05,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    }
+  ],
+  "roofParts": [],
+  "version": 1
+}

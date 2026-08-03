@@ -32,6 +32,21 @@ namespace SFMap.Pipeline.Buildings.Gen
     /// quad, which makes it a safe floor rather than a new failure mode.</summary>
     public enum DetailLevel { Full, Reduced, Flat }
 
+    /// <summary>Where the triangle budget's default lives.</summary>
+    public static class DetailBudget
+    {
+        /// <summary>
+        /// The <see cref="DetailLevel"/> a part that does not author a <c>detail</c> parameter is
+        /// generated at.
+        /// <para><b>Unvalidated.</b> #456 — the Editor profiling pass that measures import time and
+        /// triangle count per level on a representative chunk — is what decides this number, and it
+        /// has not run. This constant is the merged #454 behaviour hoisted into one place so that
+        /// acting on #456's answer is a one-line edit; it is not a measurement and no level here is
+        /// known to be affordable (design #452 §6, §7.1).</para>
+        /// </summary>
+        public const DetailLevel Default = DetailLevel.Full;
+    }
+
     /// <summary>A named cross-section from the <see cref="Profiles"/> table. This enum plus that
     /// table is where the architectural vocabulary lives — a dozen arrays of numbers, not a
     /// modelling task (design #452 generators.md §3).</summary>

@@ -1,0 +1,39 @@
+{
+  "id": "window_marina_arched",
+  "category": "Window",
+  "generatorId": "window.double_hung",
+  "parameters": [
+    { "name": "w", "value": 1.0 },
+    { "name": "h", "value": 1.9 },
+    { "name": "revealDepth", "value": 0.18 },
+
+    { "name": "sashCount", "value": 1 },
+    { "name": "lowerCols", "value": 1 },
+    { "name": "lowerRows", "value": 2 },
+    { "name": "frameW", "value": 0.06 },
+    { "name": "frameD", "value": 0.04 },
+    { "name": "muntinW", "value": 0.03 },
+    { "name": "muntinD", "value": 0.025 },
+    { "name": "glassInset", "value": 0.03 },
+
+    { "name": "casingProfile", "text": "Flat" },
+    { "name": "casingW", "value": 0.06 },
+    { "name": "casingD", "value": 0.025 },
+
+    { "name": "head", "text": "Round" },
+    { "name": "headProfile", "text": "Bullnose" },
+    { "name": "headProjection", "value": 0.05 },
+    { "name": "headH", "value": 0.10 },
+
+    { "name": "sillProfile", "text": "Bullnose" },
+    { "name": "sillProjection", "value": 0.08 },
+    { "name": "sillH", "value": 0.07 },
+    { "name": "sillOverhang", "value": 0.05 },
+
+    { "name": "frameRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 1.12, "h": 2.69, "d": 0.27 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.22,
+  "version": 2
+}
