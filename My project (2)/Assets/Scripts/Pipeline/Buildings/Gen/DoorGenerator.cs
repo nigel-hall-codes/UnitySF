@@ -96,8 +96,8 @@ namespace SFMap.Pipeline.Buildings.Gen
                 // The floor, not a new failure mode (design #452 D6): one role-coloured quad. A door
                 // is mostly solid, so the role follows the infill that dominates it — a glazed shop
                 // door still degrades to Glass, a panelled one to its own paint.
-                FlatQuad(mb, w, h, -(revealDepth + infillInset),
-                         glazed >= 0.5f ? MaterialRole.Glass : frameRole);
+                Detail.FlatQuad(mb, w, h, -(revealDepth + infillInset),
+                                glazed >= 0.5f ? MaterialRole.Glass : frameRole);
                 return mb.Finish(GeneratorId);
             }
 
@@ -131,7 +131,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                 if (bandH <= 1e-3f) return;
                 grid.h = bandH;
                 grid.cols = PanelGridParams.Even(cols);
-                grid.rows = PanelGridParams.Even(Divisions(rows, detail));
+                grid.rows = PanelGridParams.Even(Detail.Divisions(rows, detail));
                 grid.panelBevel = bevel;
                 grid.infillRole = infill;
                 Kernels.PanelGrid(mb, grid, offsetY: atY, offsetZ: leafZ);
@@ -151,7 +151,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             // Both leaves are one grid: PanelGrid divides across the whole opening, and at
             // leafCount 2 the division at x = 0 is exactly the leaf boundary. Detail halves the
             // divisions *within* a leaf, never the leaf count — a double door stays a double door.
-            int leafCols = Divisions(Mathf.Max(p.GetInt("panelCols", 1), 1), detail) * leafCount;
+            int leafCols = Detail.Divisions(Mathf.Max(p.GetInt("panelCols", 1), 1), detail) * leafCount;
             float glazedH = fieldH * glazed;
             float solidH = fieldH - glazedH;
 
@@ -160,7 +160,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             // makes Reduced cheap. The element set is unchanged; only the relief goes.
             float bevel = detail == DetailLevel.Full ? Mathf.Max(p.GetFloat("panelBevel", 0.02f), 0f) : 0f;
 
-            Band(transomH, h - transomH, Divisions(p.GetInt("transomCols", 1), detail), 1,
+            Band(transomH, h - transomH, Detail.Divisions(p.GetInt("transomCols", 1), detail), 1,
                  0f, MaterialRole.Glass);
             Band(solidH, railW, leafCols, Mathf.Max(panelRows - glazedRows, 1),
                  bevel, p.GetEnum("panelRole", MaterialRole.Base));
@@ -185,7 +185,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             var surroundProfile = p.GetEnum("surroundProfile", ProfileId.None);
             float band = surroundProfile != ProfileId.None ? Mathf.Max(p.GetFloat("surroundW", 0.11f), 0f) : 0f;
             if (band > 0f)
-                Kernels.ProfileSweep(mb, Profiles.Scaled(Sectioned(surroundProfile, detail),
+                Kernels.ProfileSweep(mb, Profiles.Scaled(Detail.Sectioned(surroundProfile, detail),
                                                          Mathf.Max(p.GetFloat("surroundD", 0.04f), 0f), band),
                                      Paths.Rect(w + band, h + band, new Vector3(0f, h * 0.5f, 0f)),
                                      frameRole, closedPath: true, capEnds: false, smoothAlong: false);
@@ -237,7 +237,7 @@ namespace SFMap.Pipeline.Buildings.Gen
         {
             if (id == ProfileId.None || thickness <= 1e-4f) return;
             float y = atY(thickness);
-            Kernels.ProfileSweep(mb, Profiles.Scaled(Sectioned(id, detail), projection, thickness),
+            Kernels.ProfileSweep(mb, Profiles.Scaled(Detail.Sectioned(id, detail), projection, thickness),
                                  Paths.Line(new Vector3(-halfRun, y, 0f), new Vector3(halfRun, y, 0f)),
                                  MaterialRole.Accent2, closedPath: false, capEnds: true, smoothAlong: false);
         }
@@ -249,45 +249,6 @@ namespace SFMap.Pipeline.Buildings.Gen
         {
             if (glazedFraction <= 0f) return 0;
             return Mathf.Clamp(Mathf.RoundToInt(panelRows * glazedFraction), 1, panelRows);
-        }
-
-        // ---- DetailLevel degradation, local to this family (design #452 D6) -----------------
-
-        /// <summary>Cells across one axis of a grid. <see cref="DetailLevel.Reduced"/> halves them,
-        /// which halves the bars between them: <c>n</c> cells carry <c>n-1</c> bars.</summary>
-        static int Divisions(int n, DetailLevel detail)
-            => detail == DetailLevel.Full ? Mathf.Max(n, 1) : Mathf.Max((n + 1) / 2, 1);
-
-        /// <summary>The cross-section a moulding is swept with at this budget — the authored profile
-        /// at <see cref="DetailLevel.Full"/>, a 3-point <see cref="ProfileId.Chamfer"/> below it.
-        /// Same reasoning as the window family: degrading the <i>profile</i> rather than swapping the
-        /// kernel for a bevelled <see cref="Kernels.Box"/> keeps one code path and is what actually
-        /// gets cheaper.
-        /// <para><b>A budget must never make something more expensive.</b> The window family's
-        /// version of this substitutes Chamfer unconditionally, which <i>upgrades</i> a 2-point
-        /// <see cref="ProfileId.Flat"/> band to 3 points — measured, that turned the flush Sunset
-        /// door's steel threshold from 2 triangles into 6 and made its whole <c>Reduced</c> mesh
-        /// larger than its <c>Full</c> one. So the substitution is guarded by point count: a section
-        /// already at or below Chamfer's cost is left alone.</para></summary>
-        static ProfileId Sectioned(ProfileId id, DetailLevel detail)
-        {
-            if (detail == DetailLevel.Full || id == ProfileId.None) return id;
-            var authored = Profiles.Get(id);
-            return authored != null && authored.Length <= Profiles.Chamfer.Length ? id : ProfileId.Chamfer;
-        }
-
-        // ---- the Flat floor ------------------------------------------------------------------
-
-        static void FlatQuad(MeshBuilder mb, float w, float h, float z, MaterialRole role)
-        {
-            mb.BeginRole(role);
-            Vector3 n = Vector3.forward;
-            float hw = w * 0.5f;
-            int a = mb.Vert(new Vector3(-hw, 0f, z), n);
-            int b = mb.Vert(new Vector3(hw, 0f, z), n);
-            int c = mb.Vert(new Vector3(hw, h, z), n);
-            int d = mb.Vert(new Vector3(-hw, h, z), n);
-            mb.QuadFacing(a, b, c, d, n);
         }
     }
 }

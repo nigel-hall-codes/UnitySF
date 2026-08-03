@@ -91,7 +91,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             {
                 // The floor, not a new failure mode: one role-coloured quad on the leaf plane —
                 // exactly the placeholder this pipeline replaced (design #452 D6, §6 mitigation 2).
-                FlatQuad(mb, w, h, -trackReveal, leafRole);
+                Detail.FlatQuad(mb, w, h, -trackReveal, leafRole);
                 return mb.Finish(GeneratorId);
             }
 
@@ -109,15 +109,15 @@ namespace SFMap.Pipeline.Buildings.Gen
             {
                 w = w,
                 h = h,
-                cols = PanelGridParams.Even(Cells(cols, detail)),
-                rows = PanelGridParams.Even(Cells(rows, detail)),
+                cols = PanelGridParams.Even(Detail.Divisions(cols, detail)),
+                rows = PanelGridParams.Even(Detail.Divisions(rows, detail)),
                 barW = Mathf.Max(p.GetFloat("railW", 0.05f), 0f),
                 barD = Mathf.Max(p.GetFloat("railD", 0.03f), 0f),
                 frameW = Mathf.Max(p.GetFloat("frameW", 0.06f), 0f),
                 frameD = Mathf.Max(p.GetFloat("frameD", 0.04f), 0f),
                 infillInset = Mathf.Max(p.GetFloat("panelInset", 0.03f), 0f),
                 // Raised panels are five faces a cell instead of one, so they are the first thing a
-                // Reduced budget gives up — see Cells' remarks. A Flush leaf never had any.
+                // Reduced budget gives up — see Detail.Divisions' remarks. A Flush leaf never had any.
                 panelBevel = bevelled && detail == DetailLevel.Full
                              ? Mathf.Max(p.GetFloat("panelBevel", 0.03f), 0f) : 0f,
                 frameRole = leafRole,
@@ -145,7 +145,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                                      center + new Vector3(headerW * 0.5f, 0f, 0f))
                     : Paths.Arc(headerW, rise, HeadSegments(headerW, rise, detail), center);
 
-                Kernels.ProfileSweep(mb, Profiles.Scaled(Sectioned(headerProfile, detail),
+                Kernels.ProfileSweep(mb, Profiles.Scaled(Detail.Sectioned(headerProfile, detail),
                                                          Mathf.Max(p.GetFloat("headerProjection", 0.06f), 0f),
                                                          headerH),
                                      path, p.GetEnum("headerRole", MaterialRole.Accent2),
@@ -197,22 +197,6 @@ namespace SFMap.Pipeline.Buildings.Gen
                     return;
             }
         }
-
-        // ---- DetailLevel degradation, local to this family (generators.md §5.2) ---------------
-
-        /// <summary>Cells along one leaf axis. <see cref="DetailLevel.Reduced"/> halves them, which
-        /// halves the rail/stile boxes with them: <c>n</c> cells carry <c>n-1</c> bars. A 16-row
-        /// roll-up is where this matters — its slats, not its trim, are its whole cost.</summary>
-        static int Cells(int n, DetailLevel detail)
-            => detail == DetailLevel.Full ? Mathf.Max(n, 1) : Mathf.Max((n + 1) / 2, 1);
-
-        /// <summary>The cross-section a moulding is swept with at this budget: <c>Full</c> keeps the
-        /// authored profile, <c>Reduced</c> bevels it to a 3-point <see cref="ProfileId.Chamfer"/>.
-        /// Same choice the window family made and for the same reason — degrading the profile keeps
-        /// one code path and is what actually gets cheaper, where degrading the <i>kernel</i> to a
-        /// bevelled <see cref="Kernels.Box"/> would emit more triangles, not fewer.</summary>
-        static ProfileId Sectioned(ProfileId id, DetailLevel detail)
-            => detail == DetailLevel.Full || id == ProfileId.None ? id : ProfileId.Chamfer;
 
         // ---- head geometry --------------------------------------------------------------------
 
@@ -270,20 +254,6 @@ namespace SFMap.Pipeline.Buildings.Gen
                 new Vector2(1f,  0.5f - s),    // nose, top — dropped by the fall
                 new Vector2(0f,  0.5f),        // top, at the wall
             };
-        }
-
-        // ---- the Flat floor ---------------------------------------------------------------------
-
-        static void FlatQuad(MeshBuilder mb, float w, float h, float z, MaterialRole role)
-        {
-            mb.BeginRole(role);
-            Vector3 n = Vector3.forward;
-            float hw = w * 0.5f;
-            int a = mb.Vert(new Vector3(-hw, 0f, z), n);
-            int b = mb.Vert(new Vector3(hw, 0f, z), n);
-            int c = mb.Vert(new Vector3(hw, h, z), n);
-            int d = mb.Vert(new Vector3(-hw, h, z), n);
-            mb.QuadFacing(a, b, c, d, n);
         }
     }
 }
