@@ -336,10 +336,15 @@ namespace SFMap.Tests
                 var def = JsonUtility.FromJson<TemplateDefJson>(File.ReadAllText(path));
 
                 Assert.AreEqual(templateId, def.id);
-                CollectionAssert.AreEqual(new[] { neighborhood }, def.compatibility.neighborhoods);
-                Assert.AreEqual(1, def.rules.Length, templateId);
-                Assert.AreEqual(partId, def.rules[0].part, templateId);
-                Assert.AreEqual("Street", def.rules[0].facade, templateId);
+                // Contains, not equals: a template may admit more than its namesake neighborhood
+                // (#466 widened noe_valley_victorian to the whole play-area Victorian/Edwardian
+                // belt). What this guards is that the exact slashed string still matches.
+                CollectionAssert.Contains(def.compatibility.neighborhoods, neighborhood, templateId);
+                // Likewise the preset must be reachable, but not necessarily as the only rule —
+                // #475 adds door/garage/storefront/bay rules to these same templates.
+                var windowRule = def.rules.FirstOrDefault(r => r.part == partId);
+                Assert.IsNotNull(windowRule, $"{templateId} names no rule placing {partId}");
+                Assert.AreEqual("Street", windowRule.facade, templateId);
             }
         }
 
