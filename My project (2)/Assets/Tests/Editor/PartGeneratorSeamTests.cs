@@ -80,8 +80,8 @@ namespace SFMap.Tests
         }
 
         [Test]
-        public void DetailDefaultsToFullWhenUnauthored()
-            => Assert.AreEqual(DetailLevel.Full, PartParams.Empty.Detail);
+        public void DetailDefaultsToTheOneBudgetConstantWhenUnauthored()
+            => Assert.AreEqual(DetailBudget.Default, PartParams.Empty.Detail);
 
         [Test]
         public void AnEmptyOrNullParameterArrayIsTheEmptyBlock()

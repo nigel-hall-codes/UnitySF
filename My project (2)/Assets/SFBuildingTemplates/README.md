@@ -56,6 +56,34 @@ A part carries **no geometry**. It names an `IPartGenerator` and gives it number
 - An empty or unknown `generatorId` means the part is **skipped** (with one warning per part id)
   when a building is assembled. There is no placeholder geometry.
 
-> **Current state:** no generators exist yet — the first family (`window.double_hung`) is #457.
-> Until it lands, the bundled part's `generatorId` is empty, so templated buildings render as
-> bare mass with no artifacts. That is expected, not a regression.
+## Generators that exist
+
+| `generatorId` | Family | Parameters |
+|---|---|---|
+| `window.double_hung` | double-hung / slider / fixed window, with reveal, sash, casing, head and sill (#457) | documented on `DoubleHungWindowGenerator` — that XML doc is the contract, since the bag has no schema |
+
+Four neighborhood presets ship against it, each placed by a template of the same name's
+neighborhood (`Templates/*.template.json` → `compatibility.neighborhoods`):
+
+| Part | Neighborhood (`nhood`, **exact**) | Template |
+|---|---|---|
+| `window_noe_2over2` | `Noe Valley` | `noe_valley_victorian` |
+| `window_sunset_slider` | `Sunset/Parkside` | `sunset_parkside_postwar` |
+| `window_soma_steel` | `South of Market` | `soma_industrial` |
+| `window_marina_arched` | `Marina` | `marina_mediterranean` |
+
+Neighborhood strings must match `python/data/sf_analysis_neighborhoods.geojson` character for
+character — the bake passes `nhood` straight through, and several carry slashes.
+
+> **`mountDepth_m` is now positive for openings.** A generated window builds its reveal, sash and
+> glass at *negative* part-local z (into the wall) and its casing/head/sill at positive z, but the
+> building mass has no hole cut in it — so the part has to be mounted proud by at least
+> `revealDepth + glassInset` or the recessed half is swallowed by the wall. The shipped presets
+> use `revealDepth + glassInset + 0.01`. This is an authoring convention, not something the
+> generator enforces, and it has **not** been checked in the Editor.
+
+> **No palettes ship for the four neighborhoods.** #457 was scoped to leave palettes alone, so
+> `Noe Valley` / `Sunset/Parkside` / `South of Market` / `Marina` currently fall back rather than
+> resolving their own colours. Note that a palette for `Sunset/Parkside` cannot simply be added:
+> the importer writes `Generated/Palettes/<neighborhood>.asset`, and the slash makes that an
+> invalid asset path.

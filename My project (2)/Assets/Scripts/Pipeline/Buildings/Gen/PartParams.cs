@@ -95,8 +95,9 @@ namespace SFMap.Pipeline.Buildings.Gen
 
         /// <summary>The triangle budget this part is authored at (design #452 D6). Lives in the bag
         /// rather than as a <c>BuildingPart</c> field precisely because the bag is open: the knob
-        /// the §6 measurement will tune needed no schema change to exist.</summary>
-        public DetailLevel Detail => GetEnum("detail", DetailLevel.Full);
+        /// the §6 measurement will tune needed no schema change to exist. The fallback is
+        /// <see cref="DetailBudget.Default"/> — one constant, because #456 is what sets it.</summary>
+        public DetailLevel Detail => GetEnum("detail", DetailBudget.Default);
 
         /// <summary>
         /// The <see cref="PartMeshCache"/> key for running <paramref name="generatorId"/> over this
