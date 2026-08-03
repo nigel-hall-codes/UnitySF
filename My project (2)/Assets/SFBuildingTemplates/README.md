@@ -102,6 +102,10 @@ slash (`Sunset/Parkside`, `Financial District/South Beach`, `Castro/Upper Market
   `POST /export/unity` overwrites the file instead of adding a second source for the same
   neighborhood. `_safe()` is lossy and must not be used for the generated asset path.
 
-Palettes still ship for only some neighborhoods (`Sunset/Parkside`, plus the `Sunset` MVP sample);
-the rest fall back to `BuildingAssembler`'s neutral per-role defaults rather than resolving their
-own colours.
+A palette now ships for **every** neighborhood some template admits (#508), each defining all five
+rendered roles — `Base`, `Accent1`, `Accent2`, `Glass`, `Metal`. `Sign` is optional: sign parts keep
+their own textured material and are skipped by the vertex-colour bake, so nothing resolves `Sign`
+through a palette today. `Tests/Editor/PaletteCoverageTests.cs` is the guard on both halves — admit a
+neighborhood in a template without adding its palette, or omit a rendered role from a palette, and it
+fails. A neighborhood no template admits (most of the 41 in the geojson) needs no palette: no building
+there is templated. The `Sunset` MVP sample is not a real geojson nhood and resolves for nothing.

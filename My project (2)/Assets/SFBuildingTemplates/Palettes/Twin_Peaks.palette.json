@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "#508. The latest of the five belt districts: the hill was built out mostly in the 1940s-60s, so",
+    "this skews mid-century - plain stucco boxes, wide picture windows, aluminium sliders. Cooler and",
+    "greyer than Noe with almost no warm draw, because painted-wood 'painted lady' colour is not what",
+    "is up there.",
+    "",
+    "Consequences for the roles: Accent1 is near-white and a soft grey-green (mid-century trim is a",
+    "line, not a colour); Accent2 is a narrow grey-tan ramp for the same reason; Metal is the one",
+    "role that goes UP, to a bright aluminium, because the sliders and railings are the era's",
+    "signature and should catch the eye. Glass is a touch lighter and bluer to read as a big pane.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "Twin Peaks",
+  "roles": [
+    { "role": "Base",    "colors": ["#E2E3DE", "#D5D8D6", "#DCD8CD", "#CBD1D4", "#E7E3D8"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F3F3EE", "#AFB3AC"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#BDBCB0", "#8B8C84"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#41505A"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#8E9095"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}

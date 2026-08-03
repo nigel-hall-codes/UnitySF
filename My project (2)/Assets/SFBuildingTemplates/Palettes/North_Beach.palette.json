@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "#508. Italian flats: Mediterranean rather than Victorian, so the Base field is plaster - ochre,",
+    "wheat, a warm terracotta-tinted cream, one cool grey-green for relief, and an ivory. Warmer than",
+    "Noe Valley across the board and noticeably less grey than the belt.",
+    "",
+    "The identifying move is Accent1: cream, and a bottle green for the shutters and door leaves. It",
+    "is the only palette in the library with a saturated green in Accent1 and it is what makes a",
+    "North Beach block read as North Beach. Accent2 ramps a plaster tan into a deeper ochre for",
+    "sills, hoods and the cornice band.",
+    "",
+    "Sign is authored (an Italian-red awning/board note) - north_beach_flats is residential, but the",
+    "ground floor of that stock is shopfronts more often than not.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "North Beach",
+  "roles": [
+    { "role": "Base",    "colors": ["#E9DCC0", "#DFCBA6", "#E5D2C0", "#D8DCD0", "#EFE6D3"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F4EEDF", "#3F6147"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#CDB584", "#96703F"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#3A4852"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#6F6F6C"],                                             "mode": "constant" },
+    { "role": "Sign",    "colors": ["#9C3A32"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}

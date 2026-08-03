@@ -1,0 +1,23 @@
+{
+  "_comment": [
+    "#508. Same Edwardian/early-20th-century cottage stock, but a working-class version that has",
+    "been repainted by its owners rather than by a design review board - so this is the widest Base",
+    "in the belt (six draws) and the warmest. Cream and wheat next to a warm grey, a cool sage-grey",
+    "and a pinkish beige; the colours a street of small houses picks up one repaint at a time.",
+    "",
+    "Accent1 carries that further than Noe: cream, a terra brown and a teal-grey, so door leaves and",
+    "window frames disagree with each other down the block. Accent2 stays a warm tan-to-brown",
+    "shadow line so the trim reads as trim.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "Outer Mission",
+  "roles": [
+    { "role": "Base",    "colors": ["#E8DCC2", "#D9C9A9", "#DCD8C0", "#CBD6D2", "#EFE0CE", "#D6C6BC"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F2ECDD", "#B07A54", "#6F8A85"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#C4AE84", "#8A6E45"],                                             "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#39474F"],                                                        "mode": "constant" },
+    { "role": "Metal",   "colors": ["#70706B"],                                                        "mode": "constant" }
+  ],
+  "version": 1
+}
