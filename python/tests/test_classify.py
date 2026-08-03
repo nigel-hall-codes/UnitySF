@@ -246,11 +246,14 @@ def test_write_buildings_schema_and_sorted(tmp_path):
     assert out is not None
     assert out.name == "chunk_03_04_buildings.json"
     data = json.loads(out.read_text(encoding="utf-8"))
-    assert data["version"] == 3
+    assert data["version"] == 4
     ids = [b["osm_id"] for b in data["buildings"]]
     assert ids == [10, 20]                 # ascending osm_id (deterministic)
     b20 = data["buildings"][1]
     assert b20["neighborhood"] == "Sunset"
+    # #486 (version 4): the commercial signal, defaulting honestly with no evidence.
+    assert b20["use"] == "unknown"
+    assert b20["commercial_poi_count"] == 0
     assert b20["footprint_hash"] == "abcd1234"
     assert b20["base_y"] == 42.5
     assert b20["facade_height_m"] == 9.0

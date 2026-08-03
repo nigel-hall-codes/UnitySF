@@ -28,6 +28,11 @@ namespace SFMap.Pipeline.Editor
         public float depth_m;
         public float height_m;
         public int floor_count;
+        // Coarse commercial signal (#486, sidecar version 4): residential | commercial |
+        // mixed | unknown. "commercial" and "mixed" both mean floor 0 is commercial; they
+        // differ only in what is above. Null/empty on a pre-v4 sidecar — treat as unknown.
+        public string use;
+        public int commercial_poi_count; // shop/amenity/office premises inside the footprint (#486)
         public float base_y;            // mass foundation Y (#279)
         public float facade_height_m;   // floor_count × floor height (#279)
         public StreetFacadeJson[] street_facades;
@@ -241,7 +246,9 @@ namespace SFMap.Pipeline.Editor
                 if (t != null && t.compatibility != null &&
                     t.compatibility.Admits(facts.neighborhood, facts.building_type,
                                            facts.footprint_shape, facts.width_m, facts.depth_m,
-                                           facts.floor_count))
+                                           facts.floor_count,
+                                           // Pre-v4 sidecars carry no use → "unknown" (#486).
+                                           string.IsNullOrEmpty(facts.use) ? "unknown" : facts.use))
                 {
                     (matches ??= new List<BuildingTemplate>()).Add(t);
                 }

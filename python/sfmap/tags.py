@@ -159,6 +159,111 @@ def parse_oneway(
     return False, node_refs
 
 
+# ---------------------------------------------------------------------------
+# Commercial-use signal (#486)
+# ---------------------------------------------------------------------------
+#
+# The raw ``building=*`` tag is useless as a commercial signal in San Francisco:
+# across the whole city extract it is ``yes`` on 148,739 of 159,313 buildings
+# (93.4%), i.e. "a building exists here". The real signal is the *other* tags —
+# ``shop``/``amenity``/``office``/``craft``/``tourism``/``leisure`` — which SF
+# mappers overwhelmingly put on a **node inside the footprint** rather than on the
+# building way (measured: way tags alone reach 1,706 buildings; adding the
+# contained nodes reaches 7,011 — see ``sfmap.poi``).
+#
+# These sets are the semantic call about which tag values read as a commercial /
+# retail / hospitality use. They are deliberately *inclusion* lists for amenity and
+# friends: an exclusion list would sweep schools, churches and hospitals in as
+# "commercial", which is wrong for the storefront rules this signal exists to gate.
+# Institutional buildings therefore report ``unknown`` — this is a commercial
+# signal, not a complete use taxonomy.
+
+# ``building=*`` values that are themselves a commercial/retail/hospitality use.
+COMMERCIAL_BUILDING_VALUES = frozenset({
+    "retail", "commercial", "shop", "supermarket", "kiosk", "office",
+    "hotel", "restaurant", "mixed_use", "mixed",
+})
+
+# ``building=*`` values that are a dwelling. Ancillary structures (garage, shed,
+# roof, carport) are deliberately absent — they are not a residence, and calling
+# them one would let a residential template dress a garage.
+RESIDENTIAL_BUILDING_VALUES = frozenset({
+    "residential", "house", "apartments", "detached", "semidetached_house",
+    "terrace", "bungalow", "dormitory", "houseboat", "static_caravan",
+})
+
+# ``amenity=*`` values that read as a storefront/commercial use. Institutional
+# amenities (school, place_of_worship, library, hospital, townhall, …) are
+# intentionally excluded — see the note above.
+COMMERCIAL_AMENITY_VALUES = frozenset({
+    "restaurant", "cafe", "fast_food", "bar", "pub", "biergarten", "ice_cream",
+    "food_court", "juice_bar", "nightclub", "casino", "gambling", "cinema",
+    "theatre", "stripclub", "hookah_lounge", "internet_cafe",
+    "bank", "bureau_de_change", "money_transfer", "payment_centre",
+    "pharmacy", "clinic", "doctors", "dentist", "veterinary",
+    "marketplace", "post_office", "coworking_space", "studio", "childcare",
+    "car_rental", "car_wash", "driving_school", "fuel",
+})
+
+# ``tourism=*`` / ``leisure=*`` values that occupy a commercial premises.
+COMMERCIAL_TOURISM_VALUES = frozenset({
+    "hotel", "motel", "hostel", "guest_house", "museum", "gallery",
+})
+COMMERCIAL_LEISURE_VALUES = frozenset({
+    "fitness_centre", "sports_centre", "bowling_alley", "amusement_arcade",
+    "dance", "escape_game", "adult_gaming_centre",
+})
+
+# Values of an otherwise-commercial key that negate it.
+_NEGATED_TAG_VALUES = frozenset({"no", "none"})
+
+
+def is_commercial_poi(tags: Dict[str, str]) -> bool:
+    """True when these tags describe a commercial premises (shop, cafe, office, …).
+
+    Applied both to standalone OSM nodes (the dominant SF mapping style — a shop
+    node dropped inside the building footprint) and to a building way's own tags.
+    ``shop=vacant`` counts: an empty storefront is still a storefront, and it is
+    exactly the frontage a shopfront should be built on.
+    """
+    shop = (tags.get("shop") or "").strip().lower()
+    if shop and shop not in _NEGATED_TAG_VALUES:
+        return True
+    if (tags.get("amenity") or "").strip().lower() in COMMERCIAL_AMENITY_VALUES:
+        return True
+    office = (tags.get("office") or "").strip().lower()
+    if office and office not in _NEGATED_TAG_VALUES:
+        return True
+    craft = (tags.get("craft") or "").strip().lower()
+    if craft and craft not in _NEGATED_TAG_VALUES:
+        return True
+    if (tags.get("tourism") or "").strip().lower() in COMMERCIAL_TOURISM_VALUES:
+        return True
+    if (tags.get("leisure") or "").strip().lower() in COMMERCIAL_LEISURE_VALUES:
+        return True
+    return False
+
+
+def building_use_tag(tags: Dict[str, str]) -> str:
+    """The use a building *way's own* tags assert: ``commercial``, ``residential`` or ``""``.
+
+    ``""`` means the tags say nothing usable — which for San Francisco is the
+    common case (``building=yes`` and nothing else). Commercial wins over
+    residential when both are present (``building=apartments`` + ``shop=*`` on the
+    way is a mixed-use block, and the caller resolves that with the floor count).
+    """
+    value = (tags.get("building") or "").strip().lower()
+    use = (tags.get("building:use") or "").strip().lower()
+
+    if value in COMMERCIAL_BUILDING_VALUES or is_commercial_poi(tags):
+        return "commercial"
+    if any(k in use for k in ("retail", "commercial", "office")):
+        return "commercial"
+    if value in RESIDENTIAL_BUILDING_VALUES or use == "residential":
+        return "residential"
+    return ""
+
+
 def parse_building_height(tags: Dict[str, str]) -> float:
     """Building height in metres from OSM tags, or 0.0 when unknown.
 

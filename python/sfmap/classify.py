@@ -64,6 +64,13 @@ _BACK_OFFSET_DEG = 180.0
 _LEFT_OFFSET_DEG = -90.0
 _RIGHT_OFFSET_DEG = 90.0
 
+# The commercial-use signal (#486) — the four values ``ClassificationRecord.use``
+# can take. Deliberately coarse: templates gate on a use, not on raw OSM tags.
+USE_RESIDENTIAL = "residential"
+USE_COMMERCIAL = "commercial"
+USE_MIXED = "mixed"
+USE_UNKNOWN = "unknown"
+
 
 @dataclass
 class StreetFacade:
@@ -95,6 +102,8 @@ class ClassificationRecord:
     depth_m: float                   # oriented-bbox short edge
     height_m: float
     floor_count: int
+    use: str = USE_UNKNOWN           # residential | commercial | mixed | unknown (#486)
+    commercial_poi_count: int = 0    # shop/amenity/office nodes inside the footprint (#486)
     street_facades: List[StreetFacade] = field(default_factory=list)
     footprint_hash: str = ""
     base_y: float = 0.0              # foundation Y (mass wall flat bottom); facade decal anchor (#279)
@@ -507,6 +516,49 @@ def rank_street_facades(
 
 
 # ---------------------------------------------------------------------------
+# Commercial-use signal (#486)
+# ---------------------------------------------------------------------------
+
+def building_use(way_use: str, commercial_poi_count: int, floor_count: int) -> str:
+    """Coarse use for one building: ``residential`` | ``commercial`` | ``mixed`` | ``unknown``.
+
+    Inputs are the two things OSM actually tells us: what the building **way's own
+    tags** assert (``tags.building_use_tag`` — usually nothing, since 93% of SF
+    buildings are bare ``building=yes``) and how many commercial POI **nodes** sit
+    inside the footprint (``poi.commercial_poi_counts`` — where most of the real
+    signal lives).
+
+    The rules, and why:
+
+    * No commercial evidence at all → the way tag decides, and ``building=yes``
+      honestly yields ``unknown``. It is not evidence of a house; it is evidence of
+      a building. Templates that want "anything" simply leave the axis unconstrained.
+    * Commercial evidence on a single-storey building → ``commercial``: the shop *is*
+      the building.
+    * Commercial evidence on a multi-storey building whose way tag says residential,
+      or says nothing → ``mixed``. This is the canonical San Francisco block: a
+      storefront at floor 0 with flats above. ``mixed`` therefore carries the
+      ground-floor fact a storefront rule needs — **``commercial`` and ``mixed`` both
+      mean "floor 0 is commercial"**, and they differ only in what is above. That is
+      why there is no separate ground-floor field: it would be exactly derivable
+      from this one.
+    * Commercial evidence plus a commercial way tag (``building=retail`` /
+      ``commercial`` / ``office`` / ``hotel``) → ``commercial`` at every floor.
+
+    Institutional buildings (school, church, hospital) carry no commercial tag and
+    fall out as ``unknown``: this is a commercial signal, not a use taxonomy.
+    """
+    has_commercial = way_use == USE_COMMERCIAL or commercial_poi_count > 0
+    if not has_commercial:
+        return USE_RESIDENTIAL if way_use == USE_RESIDENTIAL else USE_UNKNOWN
+    if floor_count <= 1:
+        return USE_COMMERCIAL
+    if way_use == USE_COMMERCIAL:
+        return USE_COMMERCIAL
+    return USE_MIXED
+
+
+# ---------------------------------------------------------------------------
 # Top-level per-building classification
 # ---------------------------------------------------------------------------
 
@@ -518,6 +570,8 @@ def classify_building(
     roads: Sequence[Tuple[int, Sequence[Point]]],
     neighborhood: str = "",
     base_y: float = 0.0,
+    way_use: str = "",
+    commercial_poi_count: int = 0,
 ) -> ClassificationRecord:
     """Assemble the full ClassificationRecord for one building (facts only).
 
@@ -527,7 +581,10 @@ def classify_building(
     ``neighborhood`` is resolved by the caller from the centroid (``""`` if outside
     every polygon); ``base_y`` is the mass foundation Y from the heightmap (the caller
     supplies it via ``geometry.building.building_base_y`` — the facade-decal anchor,
-    #279). Pure function of these inputs.
+    #279). ``way_use``/``commercial_poi_count`` are the commercial-signal inputs the
+    parser attached to the ``BuildingWay`` (#486); both default to "no evidence", so
+    a caller that doesn't supply them gets ``use="unknown"``. Pure function of these
+    inputs.
     """
     eff_height = height if height > 0.0 else _DEFAULT_HEIGHT_M
     long_m, short_m = _oriented_bbox(_drop_closing(footprint))
@@ -545,6 +602,8 @@ def classify_building(
         depth_m=round(short_m, 1),
         height_m=round(eff_height, 1),
         floor_count=floor_count,
+        use=building_use(way_use, commercial_poi_count, floor_count),
+        commercial_poi_count=commercial_poi_count,
         street_facades=street_facades,
         footprint_hash=footprint_hash(footprint),
         base_y=round(base_y, 3),

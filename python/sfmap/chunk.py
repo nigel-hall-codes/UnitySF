@@ -278,6 +278,7 @@ def bake_chunk(
             record = classify.classify_building(
                 b.osm_id, b.footprint, b.height, b.building_type, roads,
                 neighborhood=nbhd, base_y=(base_y if base_y is not None else 0.0),
+                way_use=b.way_use, commercial_poi_count=b.commercial_poi_count,
             )
             b.footprint_hash = record.footprint_hash
             building_records.append(record)
