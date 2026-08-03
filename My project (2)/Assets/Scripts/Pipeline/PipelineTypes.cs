@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 
 namespace SFMap.Pipeline
@@ -47,6 +49,9 @@ namespace SFMap.Pipeline
         public static string RoadMaterial()                          => $"{Root}/Materials/RoadSurface.mat";
         public static string SidewalkMaterial()                      => $"{Root}/Materials/SidewalkSurface.mat";
         public static string BuildingMaterial()                      => $"{Root}/Materials/Building.mat";
+        // The preset manifest SFMapPresetsWindow scans for. Its presence in Assets/Generated/<preset>/
+        // is what makes a preset listable and loadable at all, so the importer writes it at the end
+        // of every successful run (#469) — before that it only ever read the source bake's copy.
         public static string ManifestPath()                          => $"{Root}/manifest.json";
 
         // Runtime Resources paths (prefab per chunk + manifest ScriptableObject)
@@ -64,6 +69,128 @@ namespace SFMap.Pipeline
         // Parked-car position sidecar — TextAsset imported from chunk_CC_RR_parked.json
         public static string ChunkParkedCarsAsset(ChunkCoord c)   => $"{ResourcesRoot}/{c}_parked.json";
         public static string RuntimeChunkParkedCars(ChunkCoord c) => $"Generated/{ActivePreset}/{c}_parked";
+
+        /// <summary>
+        /// EVERY asset root an import writes into for the active preset. A "clear this preset"
+        /// must delete all of them together (#494): the meshes/terrain live under <see cref="Root"/>
+        /// while the chunk prefabs and ChunkManifest.asset — which stores the incremental-import
+        /// fingerprints (#261) — live under <see cref="ResourcesRoot"/>. Clearing only the first
+        /// left every fingerprint and prefab in place, so the next import matched every chunk,
+        /// skipped every chunk, and shipped prefabs referencing meshes that had just been deleted.
+        /// Anything added here must also be picked up by the clear, which is the point of the list.
+        /// </summary>
+        public static string[] PresetRoots() => new[] { Root, ResourcesRoot };
+    }
+
+    /// <summary>
+    /// JSON layout of <c>manifest.json</c>: written by <c>python/sfmap/serialize.py write_manifest()</c>
+    /// for a bake, read by <c>SFMapImporterWindow</c> as its chunk list, and written again by that
+    /// importer into <c>Assets/Generated/&lt;preset&gt;/</c> so <c>SFMapPresetsWindow</c> can list and
+    /// load the preset (#469). Shared here rather than duplicated per-window on purpose: the browser
+    /// keeping its own private copy of this shape is how the contract drifted unnoticed. Extra fields
+    /// the bake emits (chunksX, osmBounds, …) are simply ignored by JsonUtility.
+    /// </summary>
+    [Serializable]
+    public class PresetManifestJson
+    {
+        // MUST equal the Assets/Generated/<dir> folder name this file sits in. SFMapPresetsWindow
+        // assigns it to BOTH GeneratedAssets.ActivePreset and ChunkStreamer.preset on load, so a
+        // value that disagrees with the folder points every subsequent asset lookup somewhere else.
+        public string preset;
+        public string generated;      // ISO-8601 UTC, shown as the browser's subtitle
+        public float  chunkSize;
+        public PresetManifestChunkJson[] chunks;
+        public float  minElevation;
+    }
+
+    [Serializable]
+    public class PresetManifestChunkJson
+    {
+        public int   col;
+        public int   row;
+        public float worldX;
+        public float worldZ;
+    }
+
+    /// <summary>
+    /// Pure construction/validation for <see cref="PresetManifestJson"/>, kept out of the Editor
+    /// window so it can be exercised without an AssetDatabase (see PresetManifestTests).
+    /// </summary>
+    public static class PresetManifests
+    {
+        public const string GeneratedFormat = "yyyy-MM-ddTHH:mm:ssZ";
+
+        /// <summary>
+        /// Build the manifest to write into <c>Assets/Generated/&lt;presetName&gt;/manifest.json</c>.
+        /// <paramref name="presetName"/> — the importer's own preset, i.e. the folder being written
+        /// into — always wins over <paramref name="source"/>.preset; see
+        /// <see cref="PresetNameMismatchWarning"/>. Chunks come from what was actually imported
+        /// (including chunks reused by the incremental skip), not from the source's full list, so a
+        /// bake whose .bin files are partly missing lists only the chunks that really exist.
+        /// </summary>
+        public static PresetManifestJson Build(string presetName,
+                                               PresetManifestJson source,
+                                               IList<ChunkManifestEntry> imported,
+                                               float minElevation,
+                                               DateTime generatedUtc)
+        {
+            int n = imported?.Count ?? 0;
+            var chunks = new PresetManifestChunkJson[n];
+            for (int i = 0; i < n; i++)
+            {
+                var e = imported[i];
+                chunks[i] = new PresetManifestChunkJson
+                {
+                    col = e.col, row = e.row, worldX = e.worldX, worldZ = e.worldZ,
+                };
+            }
+
+            return new PresetManifestJson
+            {
+                preset       = presetName,
+                generated    = generatedUtc.ToUniversalTime()
+                                           .ToString(GeneratedFormat, CultureInfo.InvariantCulture),
+                chunkSize    = source?.chunkSize ?? 0f,
+                chunks       = chunks,
+                minElevation = minElevation,
+            };
+        }
+
+        /// <summary>
+        /// The warning text for a manifest whose <c>preset</c> disagrees with the folder it belongs
+        /// to, or null when there is nothing to warn about. Worded to hold on both sides — the
+        /// importer writing a manifest and the browser reading one — because the resolution is the
+        /// same either way: the folder wins. Silent before (#469), so a manifest could load a preset
+        /// under one name and then resolve every asset path under another with no diagnostic.
+        /// </summary>
+        public static string PresetNameMismatchWarning(string folderName, string manifestPreset)
+        {
+            if (string.IsNullOrEmpty(manifestPreset)) return null;
+            if (string.Equals(folderName, manifestPreset, StringComparison.Ordinal)) return null;
+            return $"Preset name mismatch: folder Assets/Generated/{folderName}/ vs manifest.json " +
+                   $"preset \"{manifestPreset}\". The folder name wins — ChunkStreamer and every " +
+                   $"asset path resolve under \"{folderName}\". Rename one of them if that is wrong.";
+        }
+    }
+
+    /// <summary>
+    /// The incremental-import (#261) reuse decision, isolated from the Editor window so it can be
+    /// tested. Reuse requires a matching fingerprint AND that BOTH halves of a chunk's output are
+    /// still on disk — the prefab under Assets/Resources/Generated/ and the meshes/terrain under
+    /// Assets/Generated/. Checking only the prefab was #494: "Clear Generated Assets" removed the
+    /// second half, the guard still passed, and every chunk was skipped into a broken preset.
+    /// </summary>
+    public static class ChunkFreshness
+    {
+        public static bool CanReuse(string priorFingerprint,
+                                    string currentFingerprint,
+                                    bool prefabExists,
+                                    bool generatedAssetsExist)
+            => !string.IsNullOrEmpty(priorFingerprint)
+               && !string.IsNullOrEmpty(currentFingerprint)
+               && string.Equals(priorFingerprint, currentFingerprint, StringComparison.Ordinal)
+               && prefabExists
+               && generatedAssetsExist;
     }
 
     // JSON layout produced by python/sfmap/serialize.py write_parked_cars().

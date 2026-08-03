@@ -15,23 +15,10 @@ using SFMap.Pipeline.Buildings;
 
 namespace SFMap.Pipeline.Editor
 {
-    // JSON layout produced by python/sfmap/serialize.py write_manifest()
-    [Serializable]
-    class ManifestJson
-    {
-        public string             preset;
-        public float              chunkSize;
-        public ManifestChunkJson[] chunks;
-    }
-
-    [Serializable]
-    class ManifestChunkJson
-    {
-        public int   col;
-        public int   row;
-        public float worldX;
-        public float worldZ;
-    }
+    // The manifest.json layout (produced by python/sfmap/serialize.py write_manifest) now lives in
+    // SFMap.Pipeline.PresetManifestJson — shared with SFMapPresetsWindow, which reads the copy this
+    // importer writes into Assets/Generated/<preset>/ (#469). One declaration, so the two windows
+    // cannot drift apart again.
 
     public class SFMapImporterWindow : EditorWindow
     {
@@ -228,12 +215,19 @@ namespace SFMap.Pipeline.Editor
                 return;
             }
 
-            var manifest = JsonUtility.FromJson<ManifestJson>(File.ReadAllText(manifestPath));
+            var manifest = JsonUtility.FromJson<PresetManifestJson>(File.ReadAllText(manifestPath));
             if (manifest?.chunks == null || manifest.chunks.Length == 0)
             {
                 Debug.LogError("[SFMapImporter] manifest.json parsed but has no chunks.");
                 return;
             }
+
+            // A source manifest whose preset disagrees with the folder we're importing into is easy
+            // to create by hand and used to fail silently (#469): the browser would load the preset
+            // under one name and then resolve every asset path under the other.
+            string mismatch = PresetManifests.PresetNameMismatchWarning(presetName, manifest.preset);
+            if (mismatch != null)
+                Debug.LogWarning($"[SFMapImporter] {mismatch}");
 
             _timings = new ImportTimings();
             var totalWatch = Stopwatch.StartNew();
@@ -291,15 +285,22 @@ namespace SFMap.Pipeline.Editor
                     }
 
                     // Incremental skip (#261): reuse this chunk if its inputs are unchanged since the
-                    // last import AND its prefab is still on disk. Carry the prior entry forward so
-                    // the manifest stays complete, then continue — skipping the mesh/terrain/collider
-                    // bake, the prefab save, AND the #447 authoring uploads (no re-render of unchanged
+                    // last import AND BOTH halves of its output survive — the prefab under
+                    // Assets/Resources/Generated/ and the chunk's assets under Assets/Generated/.
+                    // The prefab alone was not enough (#494): a "Clear Generated Assets" wiped only
+                    // the latter, so the guard still passed and every chunk was skipped, leaving
+                    // prefabs pointing at meshes that had just been deleted. Terrain.asset stands in
+                    // for the whole chunk directory because ImportChunk writes it unconditionally for
+                    // every chunk, before any mesh. Carry the prior entry forward so the manifest
+                    // stays complete, then continue — skipping the mesh/terrain/collider bake, the
+                    // prefab save, AND the #447 authoring uploads (no re-render of unchanged
                     // buildings). mapRoot is torn down at the end, so nothing needs instantiating.
                     string fingerprint = ComputeChunkFingerprint(chunkDir, coord, fpPreamble);
                     if (priorEntries.TryGetValue((mc.col, mc.row), out var priorEntry)
-                        && !string.IsNullOrEmpty(priorEntry.fingerprint)
-                        && priorEntry.fingerprint == fingerprint
-                        && File.Exists(GeneratedAssets.ChunkPrefabPath(coord)))
+                        && ChunkFreshness.CanReuse(
+                               priorEntry.fingerprint, fingerprint,
+                               prefabExists:         File.Exists(GeneratedAssets.ChunkPrefabPath(coord)),
+                               generatedAssetsExist: File.Exists(GeneratedAssets.TerrainAsset(coord))))
                     {
                         coordList.Add(new ChunkManifestEntry
                         {
@@ -358,14 +359,27 @@ namespace SFMap.Pipeline.Editor
 
                 if (globalMinElev == float.MaxValue) globalMinElev = 0f;
                 SaveChunkManifest(manifest, coordList, globalMinElev);
+                // Written unconditionally, not only when chunks were rebuilt: an all-skipped
+                // re-import of a preset produced before #469 is exactly how a preset with no
+                // manifest.json gets one, without paying for a full rebuild.
+                WritePresetManifest(manifest, coordList, globalMinElev);
 
                 StartOp();
                 AssetDatabase.SaveAssets();
                 AssetDatabase.Refresh();
                 StopOp(ref _timings.finalSaveMs);
 
-                Debug.Log($"[SFMapImporter] Imported {coordList.Count} chunk(s) for preset " +
-                          $"'{presetName}' ({skippedChunks} unchanged, reused).");
+                // Split built-vs-reused rather than reporting one total (#494): "4 chunks, 4 reused"
+                // and "4 chunks, 4 built" used to read the same at a glance, which is how an import
+                // that skipped everything and produced nothing passed for a success.
+                int builtChunks = coordList.Count - skippedChunks;
+                if (coordList.Count == 0)
+                    Debug.LogError($"[SFMapImporter] Imported NO chunks for preset '{presetName}' — " +
+                                   $"every chunk in manifest.json was missing its .bin. Nothing was " +
+                                   $"written to {GeneratedAssets.Root}.");
+                else
+                    Debug.Log($"[SFMapImporter] Imported {coordList.Count} chunk(s) for preset " +
+                              $"'{presetName}': {builtChunks} built, {skippedChunks} unchanged and reused.");
 
                 totalWatch.Stop();
                 _timings.chunks = coordList.Count;
@@ -720,16 +734,42 @@ namespace SFMap.Pipeline.Editor
             return _carPrefabCache;
         }
 
-        void SaveChunkManifest(ManifestJson src, List<ChunkManifestEntry> entries, float minElev)
+        void SaveChunkManifest(PresetManifestJson src, List<ChunkManifestEntry> entries, float minElev)
         {
             var asset = ScriptableObject.CreateInstance<ChunkManifest>();
-            asset.preset          = src.preset;
+            // presetName, not src.preset: this asset's folder is Assets/Resources/Generated/<presetName>/
+            // and ChunkStreamer resolves everything else relative to it, so the two must agree (#469).
+            // A disagreement was already warned about at the top of RunImport.
+            asset.preset          = presetName;
             asset.chunkSizeMeters = src.chunkSize;
             asset.minElevation    = minElev;
             asset.chunks          = entries.ToArray();
 
             string path = GeneratedAssets.ChunkManifestPath();
             CreateOrReplaceAsset(asset, path);
+        }
+
+        // Write Assets/Generated/<presetName>/manifest.json (#469). Without it SFMapPresetsWindow
+        // skips the directory entirely — a 108-chunk, 39-minute import completed "successfully" and
+        // was then unloadable, the browser reporting only the generic "No presets found". This is a
+        // plain File.Write + ImportAsset rather than a copy of the source manifest, because the
+        // preset field must name THIS folder and the chunk list must be what was actually imported.
+        void WritePresetManifest(PresetManifestJson src, List<ChunkManifestEntry> entries, float minElev)
+        {
+            string path = GeneratedAssets.ManifestPath();
+            try
+            {
+                var pm = PresetManifests.Build(presetName, src, entries, minElev, DateTime.UtcNow);
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.WriteAllText(path, JsonUtility.ToJson(pm, prettyPrint: true));
+                AssetDatabase.ImportAsset(path);
+            }
+            catch (Exception e)
+            {
+                // Loud: a missing manifest is precisely the silent, expensive failure #469 is about.
+                Debug.LogError($"[SFMapImporter] Failed to write {path}: {e.Message}. The preset will " +
+                               $"not appear in the Preset Browser until this file exists.");
+            }
         }
 
         // -------------------------------------------- incremental-import fingerprints (#261)
@@ -1262,16 +1302,35 @@ namespace SFMap.Pipeline.Editor
             return go;
         }
 
+        // "Clear Generated Assets" means forget this preset entirely, so it deletes BOTH roots an
+        // import writes into (#494). Clearing only Assets/Generated/<preset>/ left the chunk prefabs
+        // and — critically — ChunkManifest.asset, which holds the incremental fingerprints (#261),
+        // under Assets/Resources/Generated/<preset>/. Every fingerprint then still matched, every
+        // chunk was skipped, and the next import logged success over a preset whose prefabs pointed
+        // at meshes that no longer existed. The fingerprints must go with the assets they describe.
         void ClearGenerated()
         {
             GeneratedAssets.ActivePreset = presetName;
-            string presetDir = GeneratedAssets.Root;
-            if (AssetDatabase.IsValidFolder(presetDir))
+
+            int cleared = 0;
+            foreach (string dir in GeneratedAssets.PresetRoots())
             {
-                AssetDatabase.DeleteAsset(presetDir);
-                AssetDatabase.Refresh();
-                Debug.Log($"[SFMapImporter] Cleared {presetDir}");
+                if (!AssetDatabase.IsValidFolder(dir)) continue;
+                if (AssetDatabase.DeleteAsset(dir))
+                {
+                    cleared++;
+                    Debug.Log($"[SFMapImporter] Cleared {dir}");
+                }
+                else
+                {
+                    // Half a clear is the #494 failure mode, so never let it pass quietly.
+                    Debug.LogError($"[SFMapImporter] Failed to clear {dir} — delete it by hand before " +
+                                   $"re-importing '{presetName}', or the import will reuse stale chunks.");
+                }
             }
+
+            if (cleared > 0) AssetDatabase.Refresh();
+            else Debug.Log($"[SFMapImporter] Nothing to clear for preset '{presetName}'.");
         }
     }
 }

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
@@ -9,19 +8,10 @@ namespace SFMap.Pipeline.Editor
 {
     public class SFMapPresetsWindow : EditorWindow
     {
-        [Serializable]
-        class ManifestChunk { public int col; public int row; public float worldX; public float worldZ; }
-
-        [Serializable]
-        class PresetManifest
-        {
-            public string preset;
-            public string generated;
-            public ManifestChunk[] chunks;
-            public float minElevation;
-        }
-
-        List<PresetManifest> _presets = new List<PresetManifest>();
+        // The manifest shape is SFMap.Pipeline.PresetManifestJson, shared with the importer that
+        // writes these files. This window used to declare its own private copy, which is how the
+        // importer came to never write one at all without anything noticing (#469).
+        List<PresetManifestJson> _presets = new List<PresetManifestJson>();
         Vector2 _scroll;
 
         [MenuItem("Window/SF Map Preset Browser")]
@@ -41,9 +31,23 @@ namespace SFMap.Pipeline.Editor
                 if (!File.Exists(manifestPath)) continue;
                 try
                 {
-                    var m = JsonUtility.FromJson<PresetManifest>(File.ReadAllText(manifestPath));
-                    if (m != null && !string.IsNullOrEmpty(m.preset))
-                        _presets.Add(m);
+                    var m = JsonUtility.FromJson<PresetManifestJson>(File.ReadAllText(manifestPath));
+                    if (m == null || string.IsNullOrEmpty(m.preset)) continue;
+
+                    // The preset name drives every asset path once loaded, so a manifest that
+                    // disagrees with the folder it sits in would resolve assets somewhere else
+                    // entirely. The importer warns when it writes one (#469); warn again here,
+                    // because these files can also be hand-edited or copied between folders — and
+                    // take the folder name as authoritative, since that is where the assets are.
+                    string dirName  = new DirectoryInfo(dir).Name;
+                    string mismatch = PresetManifests.PresetNameMismatchWarning(dirName, m.preset);
+                    if (mismatch != null)
+                    {
+                        Debug.LogWarning($"[PresetBrowser] {mismatch}");
+                        m.preset = dirName;
+                    }
+
+                    _presets.Add(m);
                 }
                 catch { }
             }
@@ -84,7 +88,7 @@ namespace SFMap.Pipeline.Editor
             EditorGUILayout.EndScrollView();
         }
 
-        static void LoadPreset(PresetManifest m)
+        static void LoadPreset(PresetManifestJson m)
         {
             if (!EditorUtility.DisplayDialog("Load Preset",
                 $"Load preset \"{m.preset}\"? Current scene objects will be replaced.",
