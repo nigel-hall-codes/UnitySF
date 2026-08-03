@@ -46,6 +46,24 @@ namespace SFMap.Tests
         /// bookkeeping below rather than being treated as a neighborhood template.</summary>
         const string SampleTemplateId = "trivial_window";
 
+        /// <summary>Presets that no template reaches yet, and why. Asserted as an exact set (not a
+        /// skip list), so wiring one — or deleting it — fails here and forces this note to be
+        /// updated.
+        /// <para>#492 emptied this list by standing up <c>mission_storefront</c>,
+        /// <c>mission_victorian</c> and <c>north_beach_flats</c>. The three <c>stoop_*</c> presets
+        /// (#495) refill it, for a different and temporary reason: a stoop is a floor-0,
+        /// front-facade, projecting artifact that must line up with the door, so it lands in exactly
+        /// the ground-floor contention #475 resolved. The rule shape is settled — an <c>exact</c>
+        /// placement at the door's own <c>nx</c>, floor 0, <c>facade: "Front"</c> — but wiring it
+        /// also has to raise that door by <c>stepCount·rise</c> (1.05 m for
+        /// <c>stoop_noe_victorian</c>), and nothing expresses that yet. Wiring them before that
+        /// lands would leave every door floating at grade behind its own steps.</para></summary>
+        static readonly string[] PresetsAwaitingANeighborhoodTemplate =
+        {
+            "stoop_glenpark_short", "stoop_noe_victorian", "stoop_soma_flush",
+        };
+
+
         /// <summary>One generator per family (#457, #470–#474). Every one must be reachable from
         /// some template, or that family renders on nothing.</summary>
         static readonly string[] FamilyGenerators =
@@ -170,9 +188,14 @@ namespace SFMap.Tests
                                      .OrderBy(id => id, StringComparer.Ordinal)
                                      .ToArray();
 
-            CollectionAssert.IsEmpty(unwired,
-                "these shipped presets are placed by no template, so they render on nothing: " +
-                string.Join(", ", unwired) + ". Wire each into a template, or delete it.");
+            // Exact set, not a skip list: wiring a documented exception fails here too, so the note
+            // above can never quietly go stale.
+            CollectionAssert.AreEqual(PresetsAwaitingANeighborhoodTemplate, unwired,
+                "the set of presets placed by no template changed. Expected only the documented " +
+                "exceptions [" + string.Join(", ", PresetsAwaitingANeighborhoodTemplate) +
+                "] but found [" + string.Join(", ", unwired) +
+                "]. Wire the preset into a template, delete it, or update " +
+                nameof(PresetsAwaitingANeighborhoodTemplate) + " and say why.");
         }
 
         [Test]

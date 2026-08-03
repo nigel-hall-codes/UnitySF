@@ -1,0 +1,38 @@
+{
+  "id": "stoop_noe_victorian",
+  "category": "Door",
+  "generatorId": "stoop.flight",
+  "parameters": [
+    { "name": "stepCount", "value": 6 },
+    { "name": "rise", "value": 0.175 },
+    { "name": "run", "value": 0.28 },
+    { "name": "width", "value": 1.35 },
+    { "name": "landingDepth", "value": 0.95 },
+    { "name": "treadThickness", "value": 0.13 },
+    { "name": "noseProjection", "value": 0.035 },
+
+    { "name": "cheekWall", "value": 0.20 },
+    { "name": "cheekCapProfile", "text": "Bullnose" },
+    { "name": "cheekCapH", "value": 0.10 },
+    { "name": "cheekCapOverhang", "value": 0.03 },
+
+    { "name": "railingStyle", "text": "Balustrade" },
+    { "name": "balusterPitch", "value": 0.16 },
+    { "name": "balusterW", "value": 0.05 },
+    { "name": "bottomRailY", "value": 0.10 },
+    { "name": "bottomRailProfile", "text": "Flat" },
+    { "name": "handrailProfile", "text": "Ogee" },
+    { "name": "handrailH", "value": 0.92 },
+    { "name": "handrailW", "value": 0.12 },
+    { "name": "handrailD", "value": 0.08 },
+    { "name": "newelW", "value": 0.13 },
+
+    { "name": "stepRole", "text": "Base" },
+    { "name": "copingRole", "text": "Accent1" },
+    { "name": "railRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 1.81, "h": 2.11, "d": 2.79 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.0,
+  "version": 2
+}

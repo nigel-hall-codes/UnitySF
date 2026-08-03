@@ -1,0 +1,33 @@
+{
+  "id": "stoop_glenpark_short",
+  "category": "Door",
+  "generatorId": "stoop.flight",
+  "parameters": [
+    { "name": "stepCount", "value": 3 },
+    { "name": "rise", "value": 0.16 },
+    { "name": "run", "value": 0.29 },
+    { "name": "width", "value": 1.25 },
+    { "name": "landingDepth", "value": 0.80 },
+    { "name": "treadThickness", "value": 0.11 },
+    { "name": "noseProjection", "value": 0.03 },
+
+    { "name": "cheekWall", "value": 0.0 },
+    { "name": "cheekCapProfile", "text": "None" },
+
+    { "name": "railingStyle", "text": "Posts" },
+    { "name": "postPitch", "value": 0.55 },
+    { "name": "postW", "value": 0.075 },
+    { "name": "handrailProfile", "text": "Bullnose" },
+    { "name": "handrailH", "value": 0.90 },
+    { "name": "handrailW", "value": 0.09 },
+    { "name": "handrailD", "value": 0.06 },
+    { "name": "newelW", "value": 0.11 },
+
+    { "name": "stepRole", "text": "Base" },
+    { "name": "railRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 1.29, "h": 1.41, "d": 1.71 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.0,
+  "version": 2
+}
