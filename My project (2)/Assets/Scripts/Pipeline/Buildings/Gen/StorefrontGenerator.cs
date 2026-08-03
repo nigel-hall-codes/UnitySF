@@ -129,8 +129,8 @@ namespace SFMap.Pipeline.Buildings.Gen
             {
                 // The floor, not a new failure mode: one role-coloured quad on the glazing plane —
                 // exactly the placeholder this pipeline replaced (design #452 D6).
-                FlatQuad(mb, w, h, -(revealDepth + glassInset),
-                         p.GetEnum("glassRole", MaterialRole.Glass));
+                Detail.FlatQuad(mb, w, h, -(revealDepth + glassInset),
+                                p.GetEnum("glassRole", MaterialRole.Glass));
                 return mb.Finish(GeneratorId);
             }
 
@@ -213,8 +213,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             int bulkRows = detail == DetailLevel.Full
                 ? Mathf.Max(p.GetInt("bulkheadPanelRows", 1), 1) : 1;
             int authoredBulkCols = Mathf.Max(p.GetInt("bulkheadPanelCols", 0), 0);
-            int transomLights = Mathf.Max(p.GetInt("transomLights", 3), 1);
-            if (detail != DetailLevel.Full) transomLights = Mathf.Max((transomLights + 1) / 2, 1);
+            int transomLights = Detail.Divisions(p.GetInt("transomLights", 3), detail);
 
             float mullionW = Mathf.Max(p.GetFloat("mullionW", 0.09f), 0f);
             float mullionD = Mathf.Max(p.GetFloat("mullionD", 0.06f), 0f);
@@ -237,7 +236,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                         ? authoredBulkCols
                         : Mathf.Clamp(Mathf.RoundToInt((bx1 - bx0) / Mathf.Max(bulkheadH / bulkRows, 0.05f)),
                                       1, MaxBulkheadCols);
-                    if (detail != DetailLevel.Full) cols = Mathf.Max((cols + 1) / 2, 1);
+                    cols = Detail.Divisions(cols, detail);
                     Cells(mb, bx0, bx1, 0f, bulkheadH, -revealDepth, cols, bulkRows,
                           bulkheadBevel, bulkheadRole);
                 }
@@ -314,7 +313,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             }
 
             // ---- 7. surround frame ---------------------------------------------------------
-            var frameProfile = Sectioned(p.GetEnum("frameProfile", ProfileId.Flat), detail);
+            var frameProfile = Detail.Sectioned(p.GetEnum("frameProfile", ProfileId.Flat), detail);
             float frameW = Mathf.Max(p.GetFloat("frameW", 0.14f), 0f);
             float frameD = Mathf.Max(p.GetFloat("frameD", 0.06f), 0f);
             if (frameProfile != ProfileId.None && frameW > 1e-3f)
@@ -525,20 +524,6 @@ namespace SFMap.Pipeline.Buildings.Gen
             int ia = mb.Vert(a, n), ib = mb.Vert(b, n);
             int ic = mb.Vert(c, n), id = mb.Vert(d, n);
             mb.QuadFacing(ia, ib, ic, id, n);
-        }
-
-        // ---- DetailLevel degradation, local to this family (design #452 D6) -----------------
-
-        /// <summary>The cross-section a moulding is swept with at this budget — the same rule the
-        /// window family settled on in #457: degrade the <i>profile</i>, not the kernel, because a
-        /// bevelled <see cref="Kernels.Box"/> stand-in costs more than the sweep it replaces.</summary>
-        static ProfileId Sectioned(ProfileId id, DetailLevel detail)
-            => detail == DetailLevel.Full || id == ProfileId.None ? id : ProfileId.Chamfer;
-
-        static void FlatQuad(MeshBuilder mb, float w, float h, float z, MaterialRole role)
-        {
-            mb.BeginRole(role);
-            Quad(mb, -w * 0.5f, w * 0.5f, 0f, h, z);
         }
     }
 }

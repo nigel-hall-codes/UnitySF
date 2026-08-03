@@ -77,7 +77,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             {
                 // The floor, not a new failure mode: one role-coloured quad on the glass plane —
                 // exactly the placeholder this pipeline replaced (design #452 D6, §6 mitigation 2).
-                FlatQuad(mb, w, h, -(revealDepth + glassInset));
+                Detail.FlatQuad(mb, w, h, -(revealDepth + glassInset), MaterialRole.Glass);
                 return mb.Finish(GeneratorId);
             }
 
@@ -119,8 +119,10 @@ namespace SFMap.Pipeline.Buildings.Gen
                 // s == 0 is the lower sash; a 2-over-2 may divide its upper light differently.
                 int cols = s == 0 ? lowerCols : upperCols;
                 int rows = s == 0 ? lowerRows : upperRows;
-                sash.cols = PanelGridParams.Even(Lights(cols, detail));
-                sash.rows = PanelGridParams.Even(Lights(rows, detail));
+                // Lights across a sash axis: halving them halves the muntins, because n lights
+                // carry n-1 bars.
+                sash.cols = PanelGridParams.Even(Detail.Divisions(cols, detail));
+                sash.rows = PanelGridParams.Even(Detail.Divisions(rows, detail));
                 Kernels.PanelGrid(mb, sash,
                                   offsetY: s * (sashH + meetingRailH),
                                   offsetZ: -revealDepth);
@@ -141,7 +143,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             float casingBand = casingProfile != ProfileId.None ? casingW : 0f;
 
             if (casingBand > 0f)
-                Kernels.ProfileSweep(mb, Profiles.Scaled(Sectioned(casingProfile, detail), casingD, casingW),
+                Kernels.ProfileSweep(mb, Profiles.Scaled(Detail.Sectioned(casingProfile, detail), casingD, casingW),
                                      Paths.Rect(w + casingW, h + casingW, new Vector3(0f, h * 0.5f, 0f)),
                                      frameRole, closedPath: true, capEnds: false, smoothAlong: false);
 
@@ -165,7 +167,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                                      center + new Vector3(headWidth * 0.5f, 0f, 0f))
                     : Paths.Arc(headWidth, rise, HeadSegments(headWidth, rise, detail), center);
 
-                Kernels.ProfileSweep(mb, Profiles.Scaled(Sectioned(headProfile, detail),
+                Kernels.ProfileSweep(mb, Profiles.Scaled(Detail.Sectioned(headProfile, detail),
                                                          Mathf.Max(p.GetFloat("headProjection", 0.06f), 0f), headH),
                                      headPath, MaterialRole.Accent2,
                                      closedPath: false, capEnds: true, smoothAlong: curved);
@@ -178,7 +180,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                 float sillH = Mathf.Max(p.GetFloat("sillH", 0.08f), 1e-3f);
                 float halfRun = w * 0.5f + casingBand + Mathf.Max(p.GetFloat("sillOverhang", 0.05f), 0f);
                 float y = -sillH * 0.5f;               // sill top flush with the opening's bottom
-                Kernels.ProfileSweep(mb, Profiles.Scaled(Sectioned(sillProfile, detail),
+                Kernels.ProfileSweep(mb, Profiles.Scaled(Detail.Sectioned(sillProfile, detail),
                                                          Mathf.Max(p.GetFloat("sillProjection", 0.08f), 0f), sillH),
                                      Paths.Line(new Vector3(-halfRun, y, 0f), new Vector3(halfRun, y, 0f)),
                                      MaterialRole.Accent2, closedPath: false, capEnds: true, smoothAlong: false);
@@ -186,28 +188,6 @@ namespace SFMap.Pipeline.Buildings.Gen
 
             return mb.Finish(GeneratorId);
         }
-
-        // ---- DetailLevel degradation, local to this family (generators.md §5.2) ------------
-
-        /// <summary>Lights across one sash axis. <see cref="DetailLevel.Reduced"/> halves the
-        /// muntin count, which is the same thing as halving the light count: <c>n</c> lights carry
-        /// <c>n-1</c> bars.</summary>
-        static int Lights(int n, DetailLevel detail)
-            => detail == DetailLevel.Full ? Mathf.Max(n, 1) : Mathf.Max((n + 1) / 2, 1);
-
-        /// <summary>
-        /// The cross-section a moulding is swept with at this budget. <see cref="DetailLevel.Full"/>
-        /// keeps the authored moulding; <c>Reduced</c> bevels it — a 3-point
-        /// <see cref="ProfileId.Chamfer"/> instead of a 5–7 point Ogee/Sill/Bullnose.
-        /// <para><b>Deviation from generators.md §5.2</b>, which degrades swept profiles to "Box
-        /// with bevel". Against the kernels as they actually merged that is a <i>regression</i>: a
-        /// bevelled <see cref="Kernels.Box"/> emits its chamfer bands and corner triangles, so one
-        /// costs ~30 triangles where the whole Ogee casing sweep costs 48 and a Chamfer sweep of
-        /// the same run costs 16. Degrading the profile rather than the kernel keeps one code path
-        /// and is what actually gets cheaper.</para>
-        /// </summary>
-        static ProfileId Sectioned(ProfileId id, DetailLevel detail)
-            => detail == DetailLevel.Full || id == ProfileId.None ? id : ProfileId.Chamfer;
 
         // ---- head geometry -----------------------------------------------------------------
 
@@ -237,20 +217,6 @@ namespace SFMap.Pipeline.Buildings.Gen
             if (width <= 0f || Mathf.Abs(rise) < Paths.FlatRiseEpsilon) return 1;
             int cap = detail == DetailLevel.Full ? RoundHeadSegments : RoundHeadSegments / 2;
             return Mathf.Clamp(Mathf.CeilToInt(2f * RoundHeadSegments * Mathf.Abs(rise) / width), 2, cap);
-        }
-
-        // ---- the Flat floor ------------------------------------------------------------------
-
-        static void FlatQuad(MeshBuilder mb, float w, float h, float z)
-        {
-            mb.BeginRole(MaterialRole.Glass);
-            Vector3 n = Vector3.forward;
-            float hw = w * 0.5f;
-            int a = mb.Vert(new Vector3(-hw, 0f, z), n);
-            int b = mb.Vert(new Vector3(hw, 0f, z), n);
-            int c = mb.Vert(new Vector3(hw, h, z), n);
-            int d = mb.Vert(new Vector3(-hw, h, z), n);
-            mb.QuadFacing(a, b, c, d, n);
         }
     }
 }

@@ -215,7 +215,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             {
                 // Halved at Reduced, for the same reason the dentil band is.
                 float spacing = detail == DetailLevel.Full ? bracketSpacing : bracketSpacing * 2f;
-                var scroll = Banded(Sectioned(p.GetEnum("bracketProfile", ProfileId.Ogee), detail),
+                var scroll = Banded(Detail.Section(p.GetEnum("bracketProfile", ProfileId.Ogee), detail),
                                     Mathf.Max(p.GetFloat("bracketD", projection * 1.2f), 1e-3f), bracketH);
                 float bracketW = Mathf.Clamp(p.GetFloat("bracketW", 0.10f), 1e-3f, spacing);
                 var bracketRole = p.GetEnum("bracketRole", corniceRole);
@@ -403,7 +403,9 @@ namespace SFMap.Pipeline.Buildings.Gen
 
         // ---- DetailLevel degradation, local to this family -----------------------------------
 
-        /// <summary>The crown section for a family. <see cref="CorniceFamily.Bracketed"/> takes an
+        /// <summary>The crown section for a family — the one piece of section choice that is
+        /// genuinely this family's own, so it stays here while the degradation rule itself lives in
+        /// <see cref="Detail.Section"/>. <see cref="CorniceFamily.Bracketed"/> takes an
         /// Ogee crown — the brackets, not the moulding, are what make it bracketed — and
         /// <see cref="CorniceFamily.Parapet"/> a Bullnose, which is what a stucco coping reads
         /// as.</summary>
@@ -412,20 +414,12 @@ namespace SFMap.Pipeline.Buildings.Gen
             switch (family)
             {
                 case CorniceFamily.Ogee:
-                case CorniceFamily.Bracketed: return Sectioned(ProfileId.Ogee, detail);
-                case CorniceFamily.Corbel: return Sectioned(ProfileId.Corbel, detail);
-                case CorniceFamily.Parapet: return Sectioned(ProfileId.Bullnose, detail);
-                default: return Sectioned(ProfileId.Cove, detail);
+                case CorniceFamily.Bracketed: return Detail.Section(ProfileId.Ogee, detail);
+                case CorniceFamily.Corbel: return Detail.Section(ProfileId.Corbel, detail);
+                case CorniceFamily.Parapet: return Detail.Section(ProfileId.Bullnose, detail);
+                default: return Detail.Section(ProfileId.Cove, detail);
             }
         }
-
-        /// <summary>As the window family's <c>Sectioned</c>: below <see cref="DetailLevel.Full"/> a
-        /// moulding is swept as a 3-point <see cref="ProfileId.Chamfer"/> instead of its authored
-        /// 5–7 point section. Degrading the profile rather than the kernel keeps one code path and
-        /// is what actually gets cheaper (design #452 generators.md §5.2 and the note on it in
-        /// <c>DoubleHungWindowGenerator</c>).</summary>
-        static Vector2[] Sectioned(ProfileId id, DetailLevel detail)
-            => Profiles.Get(detail == DetailLevel.Full || id == ProfileId.None ? id : ProfileId.Chamfer);
 
         // ---- UVs ------------------------------------------------------------------------------
 

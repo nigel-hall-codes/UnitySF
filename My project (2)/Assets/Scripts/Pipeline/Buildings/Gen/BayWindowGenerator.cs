@@ -147,7 +147,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             var trimRole = p.GetEnum("trimRole", MaterialRole.Accent2);
 
             // ---- 3. skirt — the sloped underside ----------------------------------------------
-            var skirtProfile = Sectioned(p.GetEnum("skirtProfile", ProfileId.Cove), detail);
+            var skirtProfile = Detail.Sectioned(p.GetEnum("skirtProfile", ProfileId.Cove), detail);
             if (skirtProfile != ProfileId.None)
             {
                 float drop = Mathf.Max(p.GetFloat("skirtDepth", 0.35f), 1e-3f);
@@ -160,7 +160,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             }
 
             // ---- 4. cap — the roofline over it -------------------------------------------------
-            var capProfile = Sectioned(p.GetEnum("capProfile", ProfileId.Ogee), detail);
+            var capProfile = Detail.Sectioned(p.GetEnum("capProfile", ProfileId.Ogee), detail);
             if (capProfile != ProfileId.None)
             {
                 float rise = Mathf.Max(p.GetFloat("capDepth", 0.30f), 1e-3f);
@@ -476,24 +476,5 @@ namespace SFMap.Pipeline.Buildings.Gen
             if (Application.isPlaying) Object.Destroy(m);
             else Object.DestroyImmediate(m);
         }
-
-        // ---- DetailLevel degradation ------------------------------------------------------------
-
-        /// <summary>
-        /// The cross-section a moulding is swept with at this budget — the window family's rule:
-        /// <see cref="DetailLevel.Full"/> keeps the authored moulding, anything below bevels it to a
-        /// 3-point <see cref="ProfileId.Chamfer"/>. Degrading the profile rather than the kernel
-        /// keeps one code path and is what actually gets cheaper.
-        /// <para><b>With one correction.</b> <see cref="ProfileId.Flat"/> is two points and
-        /// <see cref="ProfileId.Chamfer"/> is three, so "degrading" a Flat band to a Chamfer makes
-        /// it 50% <i>more</i> expensive. The section is only ever cheapened here.
-        /// <c>DoubleHungWindowGenerator.Sectioned</c> still has the unguarded form, which is why a
-        /// preset whose trim is entirely Flat measures the same at Full and Reduced — worth a
-        /// one-line fix in that family, out of scope for this one.</para>
-        /// </summary>
-        static ProfileId Sectioned(ProfileId id, DetailLevel detail)
-            => detail == DetailLevel.Full || id == ProfileId.None ||
-               id == ProfileId.Flat || id == ProfileId.Chamfer
-                ? id : ProfileId.Chamfer;
     }
 }
