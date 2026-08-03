@@ -1,0 +1,49 @@
+{
+  "id": "storefront_soma_loft",
+  "category": "Storefront",
+  "generatorId": "storefront.bay_row",
+  "parameters": [
+    { "name": "w", "value": 9.5 },
+    { "name": "h", "value": 4.2 },
+    { "name": "revealDepth", "value": 0.12 },
+    { "name": "glassInset", "value": 0.02 },
+
+    { "name": "bayCount", "value": 0 },
+    { "name": "bayPitch", "value": 2.6 },
+    { "name": "bayRhythm", "text": "Even" },
+
+    { "name": "bulkheadH", "value": 0.30 },
+    { "name": "bulkheadPanelRows", "value": 1 },
+    { "name": "bulkheadPanelCols", "value": 1 },
+    { "name": "bulkheadBevel", "value": 0 },
+    { "name": "bulkheadRole", "text": "Metal" },
+
+    { "name": "glazingH", "value": 0 },
+    { "name": "transomH", "value": 0.55 },
+    { "name": "transomLights", "value": 5 },
+
+    { "name": "mullionW", "value": 0.07 },
+    { "name": "mullionD", "value": 0.12 },
+
+    { "name": "entrySide", "text": "Left" },
+    { "name": "entryWidth", "value": 1.70 },
+    { "name": "entryRecessDepth", "value": 0.75 },
+    { "name": "entryLeaves", "value": 2 },
+    { "name": "entryKickH", "value": 0.25 },
+
+    { "name": "corner", "text": "Square" },
+
+    { "name": "frameProfile", "text": "Flat" },
+    { "name": "frameW", "value": 0.10 },
+    { "name": "frameD", "value": 0.05 },
+
+    { "name": "awningProjection", "value": 0 },
+
+    { "name": "frameRole", "text": "Metal" },
+    { "name": "glassRole", "text": "Glass" }
+  ],
+  "size_m": { "w": 9.60, "h": 4.30, "d": 0.94 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.89,
+  "version": 2
+}
