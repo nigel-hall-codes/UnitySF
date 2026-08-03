@@ -5,7 +5,8 @@
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "SFMap.Pipeline",
-        "SFMap.Pipeline.Editor"
+        "SFMap.Pipeline.Editor",
+        "SFMap.Pipeline.Buildings"
     ],
     "includePlatforms": [
         "Editor"
