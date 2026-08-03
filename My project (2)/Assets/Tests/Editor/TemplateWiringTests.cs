@@ -53,10 +53,18 @@ namespace SFMap.Tests
         /// and North Beach signature pieces from design #452 §3. Neither neighborhood has a
         /// template at all, and neither is inside the play-area <c>map.osm</c> bbox, so wiring them
         /// would be unverifiable and would also need a residential companion template plus weights
-        /// to stop 100% of the neighborhood becoming commercial. Tracked as #492.</para></summary>
+        /// to stop 100% of the neighborhood becoming commercial. Tracked as #492.</para>
+        /// <para>The three <c>stoop_*</c> presets (#495) are unwired <b>by instruction</b>: a stoop
+        /// is a floor-0, front-facade, projecting artifact that must line up with the door, so it
+        /// lands in exactly the ground-floor contention #475 resolved, and #495 says to ship the
+        /// generator and presets only and let a wiring pass apply the rule — the same split the five
+        /// families before it took. The rule shape is an <c>exact</c> placement at the door's own
+        /// <c>nx</c>, floor 0, <c>facade: "Front"</c>; wiring it also has to raise that door by
+        /// <c>stepCount·rise</c>, which nothing expresses yet (#487).</para></summary>
         static readonly string[] PresetsAwaitingANeighborhoodTemplate =
         {
-            "bay_northbeach_squared", "storefront_mission_tiled",
+            "bay_northbeach_squared", "stoop_glenpark_short", "stoop_noe_victorian",
+            "stoop_soma_flush", "storefront_mission_tiled",
         };
 
         /// <summary>One generator per family (#457, #470–#474). Every one must be reachable from

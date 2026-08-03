@@ -1,0 +1,24 @@
+{
+  "id": "stoop_soma_flush",
+  "category": "Door",
+  "generatorId": "stoop.flight",
+  "parameters": [
+    { "name": "stepCount", "value": 1 },
+    { "name": "rise", "value": 0.15 },
+    { "name": "run", "value": 0.34 },
+    { "name": "width", "value": 1.80 },
+    { "name": "landingDepth", "value": 1.10 },
+    { "name": "treadThickness", "value": 0.14 },
+    { "name": "noseProjection", "value": 0.0 },
+
+    { "name": "cheekWall", "value": 0.0 },
+    { "name": "cheekCapProfile", "text": "None" },
+    { "name": "railingStyle", "text": "None" },
+
+    { "name": "stepRole", "text": "Base" }
+  ],
+  "size_m": { "w": 1.80, "h": 0.15, "d": 1.44 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.0,
+  "version": 2
+}
