@@ -194,12 +194,11 @@ namespace SFMap.Tests
         [Test]
         public void TheBandProjectsOutwardHorizontallyAndItsHeightIsVertical()
         {
-            // The convention #459 left open. Its own tests swept with upHint = Vector3.up purely to
-            // get a well-conditioned band; taken literally that puts the Profiles table's
-            // "+across = outward from the wall" axis on world UP, i.e. a cornice that projects
-            // toward the sky and is `projection` tall. CorniceGenerator.Banded transposes the
-            // section back, and this is the guard on it: a 0.30 m projection must be 0.30 m of Z on
-            // a wall that faces −Z, and 0.35 m of band height must be 0.35 m of Y.
+            // The convention #459 left open and #483 settled: the sweep takes the run's own
+            // per-point outward, so the Profiles table's "+across = outward from the wall" axis
+            // means what it says here as much as it does for a slot artifact — no transpose. The
+            // guard on it: a 0.30 m projection must be 0.30 m of Z on a wall that faces −Z, and
+            // 0.35 m of band height must be 0.35 m of Y.
             var band = Build(Plain(), Run(MidBlockBuilding()));
             var b = band.mesh.bounds;
 
@@ -208,6 +207,39 @@ namespace SFMap.Tests
             Assert.AreEqual(10f, b.size.x, 1e-3f, "and the run itself is the along-facade axis");
             Assert.AreEqual(-Projection, b.min.z, 1e-3f, "a south-facing wall projects toward −Z");
             Assert.AreEqual(0f, b.max.z, 1e-3f, "…and nothing pokes back through the wall");
+        }
+
+        [Test]
+        public void ACorniceOnATurningRunProjectsOutOfBOTHFacadesWithNoTranspose()
+        {
+            // The #483 acceptance, and the case that motivated it. The run turns 90° at (10, ·, 0):
+            // the south facade's outward is −Z, the east facade's is +X, and no single up-hint
+            // describes both — feed either one in and the other collapses. Measured at each free
+            // end, where the ring is the plain section with no mitre widening in it.
+            var band = Build(Plain(), Run(CornerBuilding()));
+            var v = band.mesh.vertices;
+
+            var south = v.Where(p => p.x < 1e-3f).ToArray();      // the free end at x = 0
+            Assert.AreEqual(2 * CoveProfilePoints, south.Length, "the ring and its cap, once");
+            Assert.AreEqual(-Projection, south.Min(p => p.z), 1e-3f,
+                            "the south band projects out of a −Z wall");
+            Assert.AreEqual(0f, south.Max(p => p.z), 1e-3f, "…and nothing pokes back through it");
+            Assert.AreEqual(-HeightM, south.Min(p => p.y), 1e-3f);
+            Assert.AreEqual(0f, south.Max(p => p.y), 1e-3f,
+                            "the band's height is vertical, not its projection");
+
+            var east = v.Where(p => p.z > 8f - 1e-3f).ToArray();  // the free end at z = 8
+            Assert.AreEqual(2 * CoveProfilePoints, east.Length, "the ring and its cap, once");
+            Assert.AreEqual(10f + Projection, east.Max(p => p.x), 1e-3f,
+                            "the east band projects out of a +X wall");
+            Assert.AreEqual(10f, east.Min(p => p.x), 1e-3f, "…and nothing pokes back through it");
+            Assert.AreEqual(-HeightM, east.Min(p => p.y), 1e-3f);
+            Assert.AreEqual(0f, east.Max(p => p.y), 1e-3f);
+
+            // Both are true of the same mesh at the same time, which is the whole point: the section
+            // is the authored (across = outward, up = height) one, handed to the kernel untouched.
+            Assert.AreEqual(-Projection, band.mesh.bounds.min.z, 1e-3f);
+            Assert.AreEqual(10f + Projection, band.mesh.bounds.max.x, 1e-3f);
         }
 
         [Test]

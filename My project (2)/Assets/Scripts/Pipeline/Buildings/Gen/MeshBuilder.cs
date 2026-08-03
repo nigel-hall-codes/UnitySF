@@ -24,6 +24,14 @@ namespace SFMap.Pipeline.Buildings.Gen
     /// the facade so the decal path (#280/#281) keeps landing correctly. The generator stays
     /// ignorant of which building it is on, which is what keeps <see cref="PartMeshCache"/> valid.
     /// </para>
+    /// <para>
+    /// <b>Composition</b> (design #452 D3, #489). A bay window is a volume with <i>the window
+    /// family's</i> windows on it, a stoop is steps with the railing family's railing on it — so a
+    /// generator has to be able to carry another's geometry into its own output. The transform stack
+    /// (<see cref="PushTransform"/>/<see cref="PopTransform"/>) is what makes that a property of the
+    /// builder rather than a loop every composite family writes for itself; <see cref="Append"/> is
+    /// the one that does it for a finished <see cref="PartMesh"/>, roles intact.
+    /// </para>
     /// </summary>
     public sealed class MeshBuilder
     {
@@ -34,6 +42,10 @@ namespace SFMap.Pipeline.Buildings.Gen
         readonly List<Vector2> _uv0 = new List<Vector2>(512);
         readonly List<Vector2> _uv1 = new List<Vector2>(512);
         readonly List<int>[] _indices = NewBuckets();
+
+        /// <summary>Composed transforms, innermost last. Empty is the fast path every non-composite
+        /// generator takes: no matrix touches a vertex at all.</summary>
+        readonly List<Matrix4x4> _transforms = new List<Matrix4x4>(2);
 
         MaterialRole _role = MaterialRole.Base;
         Vector2 _localOrigin = Vector2.zero;
@@ -62,18 +74,108 @@ namespace SFMap.Pipeline.Buildings.Gen
         /// <summary>Triangles added from here on land in <paramref name="role"/>'s bucket.</summary>
         public void BeginRole(MaterialRole role) => _role = role;
 
+        // ---- transform stack (#489) ---------------------------------------------------------
+
+        /// <summary>
+        /// Every vertex added until the matching <see cref="PopTransform"/> is placed by
+        /// <paramref name="m"/>, composed with whatever is already on the stack. Both UV sets are
+        /// derived <i>after</i> the transform, so a child's <c>uv1</c> lands in the <b>parent's</b>
+        /// rect — the thing the facade-decal remap wants.
+        /// <para><b>Rigid and uniform-scale transforms only.</b> Normals go through
+        /// <c>MultiplyVector</c> and are renormalised, which is the inverse transpose exactly when
+        /// the rotation part is orthogonal. A non-uniform scale would need the real inverse
+        /// transpose and is not supported; composition places parts, it does not squash them.</para>
+        /// </summary>
+        public void PushTransform(Matrix4x4 m)
+            => _transforms.Add(_transforms.Count == 0 ? m : _transforms[_transforms.Count - 1] * m);
+
+        /// <summary>Undo the innermost <see cref="PushTransform"/>.</summary>
+        public void PopTransform()
+        {
+            if (_transforms.Count > 0) _transforms.RemoveAt(_transforms.Count - 1);
+        }
+
+        /// <summary>How many transforms are on the stack. Zero while a generator is emitting its own
+        /// geometry; a caller can assert on it to prove it balanced its pushes.</summary>
+        public int TransformDepth => _transforms.Count;
+
+        /// <summary>The matrix that places geometry authored in the frame
+        /// (<paramref name="axisX"/>, <paramref name="axisY"/>, <paramref name="axisZ"/>) with its
+        /// origin at <paramref name="origin"/> — a child part's own +X/+Y/+Z laid onto a facet of
+        /// the parent. Pass an orthonormal right-handed frame (<c>X × Y = Z</c>) and winding is
+        /// preserved, so nothing needs re-facing.</summary>
+        public static Matrix4x4 Frame(Vector3 origin, Vector3 axisX, Vector3 axisY, Vector3 axisZ)
+        {
+            var m = new Matrix4x4();
+            m.SetColumn(0, new Vector4(axisX.x, axisX.y, axisX.z, 0f));
+            m.SetColumn(1, new Vector4(axisY.x, axisY.y, axisY.z, 0f));
+            m.SetColumn(2, new Vector4(axisZ.x, axisZ.y, axisZ.z, 0f));
+            m.SetColumn(3, new Vector4(origin.x, origin.y, origin.z, 1f));
+            return m;
+        }
+
+        /// <summary>
+        /// Fold a finished child part into this builder at <paramref name="transform"/>, keeping
+        /// each submesh's <see cref="MaterialRole"/> (#489). This is the composition entry point:
+        /// before it, every composite family wrote its own read-back-and-retransform loop, and #473
+        /// shipped ~40 lines of one.
+        /// <para>The active role is restored afterwards, so appending a child never silently
+        /// redirects the geometry the caller emits next.</para>
+        /// </summary>
+        public void Append(in PartMesh src, Matrix4x4 transform)
+        {
+            if (!src.IsValid) return;
+            Vector3[] verts = src.mesh.vertices;
+            Vector3[] norms = src.mesh.normals;
+            if (verts == null || verts.Length == 0) return;
+
+            var map = new int[verts.Length];
+            PushTransform(transform);
+            for (int i = 0; i < verts.Length; i++)
+                map[i] = Vert(verts[i], norms != null && i < norms.Length ? norms[i] : Vector3.forward);
+            PopTransform();
+
+            MaterialRole resume = _role;
+            int subs = Mathf.Min(src.mesh.subMeshCount, src.submeshRoles.Length);
+            for (int s = 0; s < subs; s++)
+            {
+                BeginRole(src.submeshRoles[s]);
+                int[] tris = src.mesh.GetTriangles(s);
+                for (int t = 0; t + 2 < tris.Length; t += 3)
+                    Tri(map[tris[t]], map[tris[t + 1]], map[tris[t + 2]]);
+            }
+            BeginRole(resume);
+        }
+
+        // ---- vertices -------------------------------------------------------------------------
+
         /// <summary>Add a vertex, deriving both UV sets from its position (see the class remarks).</summary>
         public int Vert(Vector3 p, Vector3 n)
         {
+            Place(ref p, ref n);
             var uv0 = new Vector2(p.x, p.y);
             var uv1 = new Vector2((p.x - _localOrigin.x) / _localSize.x,
                                   (p.y - _localOrigin.y) / _localSize.y);
-            return Vert(p, n, uv0, uv1);
+            return Add(p, n, uv0, uv1);
         }
 
         /// <summary>Add a vertex with explicit UVs — for the rare generator that wants its own
         /// projection (a sign face, say) rather than the planar default.</summary>
         public int Vert(Vector3 p, Vector3 n, Vector2 uv0, Vector2 uv1)
+        {
+            Place(ref p, ref n);
+            return Add(p, n, uv0, uv1);
+        }
+
+        void Place(ref Vector3 p, ref Vector3 n)
+        {
+            if (_transforms.Count == 0) return;
+            Matrix4x4 m = _transforms[_transforms.Count - 1];
+            p = m.MultiplyPoint3x4(p);
+            n = m.MultiplyVector(n).normalized;
+        }
+
+        int Add(Vector3 p, Vector3 n, Vector2 uv0, Vector2 uv1)
         {
             _verts.Add(p);
             _normals.Add(n);
@@ -157,6 +259,7 @@ namespace SFMap.Pipeline.Buildings.Gen
             _uv0.Clear();
             _uv1.Clear();
             for (int i = 0; i < RoleCount; i++) _indices[i].Clear();
+            _transforms.Clear();
             _role = MaterialRole.Base;
             _localOrigin = Vector2.zero;
             _localSize = Vector2.one;

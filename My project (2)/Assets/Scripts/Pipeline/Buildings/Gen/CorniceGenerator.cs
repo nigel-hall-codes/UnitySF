@@ -26,17 +26,20 @@ namespace SFMap.Pipeline.Buildings.Gen
     /// different path. The only per-family code here is the parameter reading and the vertical
     /// stack-up.</para>
     ///
-    /// <para><b>Frame — the #459 question, settled.</b> <c>ProfileSweep</c> takes one
-    /// <c>upHint</c> for the whole sweep, so a cornice <i>cannot</i> build its profile axis from
-    /// <see cref="FacadeRun.outward"/>: outward changes at every turn, and feeding the first
-    /// point's outward into a run that turns 90° makes the frame exactly degenerate
-    /// (<c>across</c> collapses to zero and the guard swings the profile vertical). The convention
-    /// that works for a band that turns is <c>upHint = Vector3.up</c>, which for a horizontal
-    /// tangent gives <c>across = +Y</c> and <c>up = cross(+Y, tangent)</c> — i.e. the sweep frame's
-    /// two axes are the <b>transpose</b> of the (outward, height) frame the <see cref="Profiles"/>
-    /// table is authored in. <see cref="Banded"/> transposes each profile point back onto the right
-    /// axes. <c>outward</c> is still load-bearing, but as a <i>handedness oracle</i>
-    /// (see <see cref="Oriented"/>) and for the end returns — not as an up-hint.</para>
+    /// <para><b>Frame — the #459 question, settled by #483.</b> A band that turns needs a frame
+    /// that turns with it, so every sweep here goes through <c>ProfileSweep</c>'s <b>per-point</b>
+    /// overload and hands it the run's own <see cref="FacadeRun.outward"/> array. The sections are
+    /// therefore scaled with plain <see cref="Profiles.Scaled"/> in the authored <c>(across, up)</c>
+    /// convention — <c>+across</c> = outward from the wall, <c>+up</c> = the band's height —
+    /// exactly as a slot artifact's are, and generators.md §3's convention holds here too.
+    /// <c>outward</c> remains load-bearing as a <i>handedness oracle</i> as well
+    /// (see <see cref="Oriented"/>) and for the end returns.</para>
+    ///
+    /// <para>Before #483 the kernel took one <c>upHint</c> for a whole sweep. Feeding it the first
+    /// point's outward made <c>across</c> collapse to zero at a 90° turn (the guard then swung the
+    /// moulding vertical), so the family passed <c>Vector3.up</c> and transposed every section back
+    /// onto the resulting mirrored axes. That transpose is gone; every derived path below now
+    /// carries an outward direction per point instead.</para>
     ///
     /// <para><b>Anchor.</b> <c>y = 0</c> in the run's frame is the <c>PlacementY</c> roofline, and
     /// that is the right anchor: the crown's <b>top</b> sits on it and the moulding hangs below,
@@ -129,18 +132,19 @@ namespace SFMap.Pipeline.Buildings.Gen
             float returnDepth = r.closed || !p.GetBool("returnEnds", true)
                 ? 0f : Mathf.Max(p.GetFloat("returnDepth", projection), 0f);
 
-            // Two paths, both continuous through every corner of the run: the wall line itself, and
-            // the band's top edge. rise = 0 makes the second the first, lifted — so a flat roofline
-            // and a scalloped parapet are one code path with one parameter changed.
-            Vector3[] runPath = WithReturns(Shifted(r.points, 0f), r, returnDepth);
-            Vector3[] bandPath = curved
+            // Two paths, both continuous through every corner of the run and both carrying an
+            // outward direction per point (#483): the wall line itself, and the band's top edge.
+            // rise = 0 makes the second the first, lifted — so a flat roofline and a scalloped
+            // parapet are one code path with one parameter changed.
+            FacadeRun runPath = WithReturns(r, r, returnDepth);
+            FacadeRun bandPath = curved
                 ? WithReturns(ScallopedTop(r, parapetRise, scallopRise,
                                            Mathf.Max(p.GetFloat("scallopWidth", 1.2f), 0.1f),
                                            detail == DetailLevel.Full ? ScallopArcSegments : ScallopArcSegments / 2),
                               r, returnDepth)
                 : Shifted(runPath, parapetRise);
 
-            SetRunRect(mb, bandPath, parapetRise + heightM);
+            SetRunRect(mb, bandPath.points, parapetRise + heightM);
 
             var corniceRole = p.GetEnum("corniceRole", MaterialRole.Accent2);
 
@@ -151,10 +155,9 @@ namespace SFMap.Pipeline.Buildings.Gen
             if (detail == DetailLevel.Flat)
             {
                 float faceH = parapet ? Mathf.Max(parapetRise, heightM) : heightM;
-                Kernels.ProfileSweep(mb, Banded(Profiles.Flat, projection, faceH),
-                                     Shifted(runPath, (parapet ? parapetRise : 0f) - faceH * 0.5f),
-                                     corniceRole, closedPath: r.closed, capEnds: false,
-                                     smoothAlong: false, upHint: Vector3.up);
+                SweepRun(mb, Profiles.Scaled(Profiles.Flat, projection, faceH),
+                         Shifted(runPath, (parapet ? parapetRise : 0f) - faceH * 0.5f),
+                         corniceRole, capEnds: false, smoothAlong: false);
                 return mb.Finish(GeneratorId);
             }
 
@@ -167,12 +170,11 @@ namespace SFMap.Pipeline.Buildings.Gen
             // whose section is short enough for the widening to read as the cusp detail it is.
             float wallTop = parapetRise - scallopRise;
             if (parapet && wallTop > 1e-3f)
-                Kernels.ProfileSweep(mb, Banded(Profiles.Dentil,
-                                                Mathf.Max(p.GetFloat("parapetThickness", 0.18f), 1e-3f), wallTop),
-                                     Shifted(runPath, wallTop * 0.5f),
-                                     p.GetEnum("parapetRole", MaterialRole.Base),
-                                     closedPath: r.closed, capEnds: true, smoothAlong: false,
-                                     upHint: Vector3.up);
+                SweepRun(mb, Profiles.Scaled(Profiles.Dentil,
+                                             Mathf.Max(p.GetFloat("parapetThickness", 0.18f), 1e-3f), wallTop),
+                         Shifted(runPath, wallTop * 0.5f),
+                         p.GetEnum("parapetRole", MaterialRole.Base),
+                         capEnds: true, smoothAlong: false);
 
             // ---- 2. the crown — mitred through every corner --------------------------------
             // Its TOP sits on the band path, so a plain cornice hangs off the roofline and a
@@ -180,10 +182,9 @@ namespace SFMap.Pipeline.Buildings.Gen
             // precisely so it reaches down past the trough line at a crest and closes the lobe;
             // at rise 0 that term vanishes and the band is the authored moulding.
             float bandH = heightM + scallopRise;
-            Kernels.ProfileSweep(mb, Banded(Sectioned(family, detail), projection, bandH),
-                                 Shifted(bandPath, -bandH * 0.5f), corniceRole,
-                                 closedPath: r.closed, capEnds: true, smoothAlong: curved,
-                                 upHint: Vector3.up);
+            SweepRun(mb, Profiles.Scaled(Sectioned(family, detail), projection, bandH),
+                     Shifted(bandPath, -bandH * 0.5f), corniceRole,
+                     capEnds: true, smoothAlong: curved);
 
             // Everything below hangs off the roofline, not off the parapet, so it is laid along the
             // run rather than the (possibly scalloped, possibly lifted) band path.
@@ -199,11 +200,11 @@ namespace SFMap.Pipeline.Buildings.Gen
                 // it reads as the wrong building rather than as a coarser one. This is the same
                 // trade the window family makes when it halves the muntin count.
                 float pitch = detail == DetailLevel.Full ? dentilPitch : dentilPitch * 2f;
-                var block = Banded(Profiles.Dentil,
-                                   Mathf.Max(p.GetFloat("dentilProjection", projection * 0.5f), 1e-3f), dentilH);
+                var block = Profiles.Scaled(Profiles.Dentil,
+                                            Mathf.Max(p.GetFloat("dentilProjection", projection * 0.5f), 1e-3f), dentilH);
                 float dentilW = Mathf.Clamp(p.GetFloat("dentilW", 0.06f), 1e-3f, pitch);
                 RepeatAlong(r, pitch, dentilW, below - dentilH * 0.5f,
-                            (a, b, y) => Sweep(mb, block, a, b, y, corniceRole));
+                            (a, b, y, o) => Sweep(mb, block, a, b, y, o, corniceRole));
                 below -= dentilH;
             }
 
@@ -215,12 +216,12 @@ namespace SFMap.Pipeline.Buildings.Gen
             {
                 // Halved at Reduced, for the same reason the dentil band is.
                 float spacing = detail == DetailLevel.Full ? bracketSpacing : bracketSpacing * 2f;
-                var scroll = Banded(Detail.Section(p.GetEnum("bracketProfile", ProfileId.Ogee), detail),
-                                    Mathf.Max(p.GetFloat("bracketD", projection * 1.2f), 1e-3f), bracketH);
+                var scroll = Profiles.Scaled(Detail.Section(p.GetEnum("bracketProfile", ProfileId.Ogee), detail),
+                                             Mathf.Max(p.GetFloat("bracketD", projection * 1.2f), 1e-3f), bracketH);
                 float bracketW = Mathf.Clamp(p.GetFloat("bracketW", 0.10f), 1e-3f, spacing);
                 var bracketRole = p.GetEnum("bracketRole", corniceRole);
                 RepeatAlong(r, spacing, bracketW, below - bracketH * 0.5f,
-                            (a, b, y) => Sweep(mb, scroll, a, b, y, bracketRole));
+                            (a, b, y, o) => Sweep(mb, scroll, a, b, y, o, bracketRole));
             }
 
             return mb.Finish(GeneratorId);
@@ -229,21 +230,21 @@ namespace SFMap.Pipeline.Buildings.Gen
         // ---- frame ------------------------------------------------------------------------
 
         /// <summary>
-        /// The run, traversed so that <c>ProfileSweep</c>'s <c>up</c> axis lands on the outward side
-        /// of the wall. With <c>upHint = +Y</c> that axis is <c>cross(+Y, tangent)</c>, whose sign
-        /// depends purely on which way round the placement layer happened to chain the facades — and
-        /// getting it wrong builds the whole cornice <i>inside</i> the building. The handedness is
-        /// global along a run (every <see cref="FacadeRun.outward"/> points away from the same
-        /// footprint), so testing the first segment settles all of them.
-        /// <para>This is what <see cref="FacadeRun.outward"/> is actually for in this family; see
-        /// the frame remarks on the class.</para>
+        /// The run, traversed so that <c>ProfileSweep</c>'s <c>up</c> axis lands on the sky side of
+        /// the band. With a per-point outward frame that axis is <c>cross(outward, tangent)</c>,
+        /// whose sign depends purely on which way round the placement layer happened to chain the
+        /// facades — and getting it wrong builds the whole cornice upside down and inside the
+        /// building. The handedness is global along a run (every <see cref="FacadeRun.outward"/>
+        /// points away from the same footprint), so testing the first segment settles all of them.
+        /// <para>This is one of the two things <see cref="FacadeRun.outward"/> is for in this
+        /// family; see the frame remarks on the class.</para>
         /// </summary>
         static FacadeRun Oriented(FacadeRun run)
         {
             Vector3 t = run.points[1] - run.points[0];
             t.y = 0f;
             if (t.sqrMagnitude < 1e-10f) return run;
-            if (Vector3.Dot(Vector3.Cross(Vector3.up, t.normalized), run.outward[0]) >= 0f) return run;
+            if (Vector3.Dot(Vector3.Cross(run.outward[0], t.normalized), Vector3.up) >= 0f) return run;
 
             int n = run.points.Length;
             var pts = new Vector3[n];
@@ -252,30 +253,13 @@ namespace SFMap.Pipeline.Buildings.Gen
             return new FacadeRun(pts, outs, run.closed);
         }
 
-        /// <summary>
-        /// A <see cref="Profiles"/> cross-section put onto a horizontal run's sweep axes.
-        /// <para>The table is authored as <c>(across = outward from the wall, up = the band's own
-        /// height)</c>. A run swept with <c>upHint = +Y</c> gets those two the other way round —
-        /// <c>across</c> is world up and <c>up</c> is the wall's outward normal — so each point's
-        /// components swap. Swapping alone is a reflection, which would invert every surface normal
-        /// the winding rule derives; reversing the point order restores it, and the swept surface is
-        /// identical because the point <i>set</i> is unchanged.</para>
-        /// </summary>
-        static Vector2[] Banded(Vector2[] profile, float projection, float height)
-        {
-            if (profile == null) return null;
-            int m = profile.Length;
-            var s = new Vector2[m];
-            for (int i = 0; i < m; i++)
-            {
-                Vector2 q = profile[m - 1 - i];
-                s[i] = new Vector2(q.y * height, q.x * projection);
-            }
-            return s;
-        }
-
-        static Vector2[] Banded(ProfileId id, float projection, float height)
-            => Banded(Profiles.Get(id), projection, height);
+        /// <summary>One sweep along a derived run: the section in the authored
+        /// <c>(across = outward, up = height)</c> convention, the path and its per-point outward
+        /// straight off the <see cref="FacadeRun"/> (#483).</summary>
+        static void SweepRun(MeshBuilder mb, Vector2[] section, FacadeRun path, MaterialRole role,
+                             bool capEnds, bool smoothAlong)
+            => Kernels.ProfileSweep(mb, section, path.points, path.outward, role,
+                                    closedPath: path.closed, capEnds: capEnds, smoothAlong: smoothAlong);
 
         // ---- paths -------------------------------------------------------------------------
 
@@ -291,14 +275,20 @@ namespace SFMap.Pipeline.Buildings.Gen
         /// <para><c>rise &lt; </c><see cref="Paths.FlatRiseEpsilon"/> returns the run unchanged
         /// rather than a subdivided copy of it: <c>Paths.Arc</c> already degenerates to
         /// <c>Paths.Line</c> there, so this is the same geometry with fewer rings.</para>
+        ///
+        /// <para>Every point generated for segment <c>k</c> carries that segment's own
+        /// <c>r.outward[k]</c> as its frame hint. That is correct for the shared corner vertex too:
+        /// <c>ProfileSweep</c> makes the hint perpendicular to the tangent it is framing, and the
+        /// bisector at a corner resolves to the outward normal of whichever segment is asking.</para>
         /// </summary>
-        static Vector3[] ScallopedTop(FacadeRun r, float baseY, float rise, float width, int arcSegments)
+        static FacadeRun ScallopedTop(FacadeRun r, float baseY, float rise, float width, int arcSegments)
         {
-            if (rise < Paths.FlatRiseEpsilon) return Shifted(r.points, baseY);
+            if (rise < Paths.FlatRiseEpsilon) return Shifted(r, baseY);
 
             arcSegments = Mathf.Max(arcSegments, 2);
             int n = r.points.Length;
             var pts = new List<Vector3>(n * 4);
+            var outs = new List<Vector3>(n * 4);
 
             for (int k = 0; k < r.SegmentCount; k++)
             {
@@ -329,35 +319,71 @@ namespace SFMap.Pipeline.Buildings.Gen
                         // height, which is what keeps the scalloped top a single polyline.
                         pts.Add(a + dir * (i * w + w * 0.5f + arc[j].x)
                                   + new Vector3(0f, baseY - rise + arc[j].y, 0f));
+                        outs.Add(r.outward[k]);
                     }
             }
 
             // A closed run's last scallop lands back on points[0]; ProfileSweep closes the loop
             // itself, so the repeat has to go or the seam is a zero-length segment.
             if (r.closed && pts.Count > 1 && (pts[pts.Count - 1] - pts[0]).sqrMagnitude < 1e-6f)
+            {
                 pts.RemoveAt(pts.Count - 1);
+                outs.RemoveAt(outs.Count - 1);
+            }
 
-            return pts.ToArray();
+            return new FacadeRun(pts.ToArray(), outs.ToArray(), r.closed);
         }
 
-        /// <summary>The path with a short leg at each free end running back into the wall, so the
-        /// moulding dies into the masonry instead of ending in mid-air. The leg's own sweep frame is
-        /// the mitre of the turn, which is what a real mitred return is.</summary>
-        static Vector3[] WithReturns(Vector3[] path, FacadeRun r, float depth)
+        /// <summary>
+        /// The path with a short leg at each free end running back into the wall, so the moulding
+        /// dies into the masonry instead of ending in mid-air.
+        ///
+        /// <para>A return is a corner like any other, so it needs outward directions like any other
+        /// (#483). The leg's own outward is the direction the run <i>came from</i> — turn the band
+        /// into the wall and its face turns to look back along the facade — and the junction takes
+        /// the bisector of the two, which is exactly what makes the turn mitre. The along-run
+        /// directions are taken from <paramref name="r"/> rather than from
+        /// <paramref name="path"/> so a scalloped band's arc slope cannot tilt the leg.</para>
+        /// </summary>
+        static FacadeRun WithReturns(FacadeRun path, FacadeRun r, float depth)
         {
-            if (depth <= 0f || path == null || path.Length < 2) return path;
-            var s = new Vector3[path.Length + 2];
-            s[0] = path[0] - r.outward[0] * depth;
-            System.Array.Copy(path, 0, s, 1, path.Length);
-            s[s.Length - 1] = path[path.Length - 1] - r.outward[r.outward.Length - 1] * depth;
-            return s;
+            if (depth <= 0f || path.points == null || path.points.Length < 2) return path;
+
+            int n = path.points.Length, m = r.points.Length;
+            Vector3 oStart = r.outward[0], oEnd = r.outward[m - 1];
+            Vector3 tStart = Along(r.points[1] - r.points[0]);
+            Vector3 tEnd = Along(r.points[m - 1] - r.points[m - 2]);
+
+            var pts = new Vector3[n + 2];
+            var outs = new Vector3[n + 2];
+            System.Array.Copy(path.points, 0, pts, 1, n);
+            System.Array.Copy(path.outward, 0, outs, 1, n);
+
+            pts[0] = path.points[0] - oStart * depth;
+            outs[0] = -tStart;
+            outs[1] = (oStart - tStart).normalized;
+
+            pts[n + 1] = path.points[n - 1] - oEnd * depth;
+            outs[n + 1] = tEnd;
+            outs[n] = (oEnd + tEnd).normalized;
+
+            return new FacadeRun(pts, outs, false);
         }
 
-        static Vector3[] Shifted(Vector3[] pts, float dy)
+        /// <summary>The horizontal unit direction of a run segment — the along-facade axis, with any
+        /// slope a scalloped band introduced dropped.</summary>
+        static Vector3 Along(Vector3 d)
         {
-            var s = new Vector3[pts.Length];
-            for (int i = 0; i < pts.Length; i++) s[i] = new Vector3(pts[i].x, pts[i].y + dy, pts[i].z);
-            return s;
+            d.y = 0f;
+            return d.sqrMagnitude < 1e-10f ? Vector3.right : d.normalized;
+        }
+
+        static FacadeRun Shifted(FacadeRun run, float dy)
+        {
+            var s = new Vector3[run.points.Length];
+            for (int i = 0; i < s.Length; i++)
+                s[i] = new Vector3(run.points[i].x, run.points[i].y + dy, run.points[i].z);
+            return new FacadeRun(s, run.outward, run.closed);
         }
 
         // ---- repeated elements --------------------------------------------------------------
@@ -365,9 +391,10 @@ namespace SFMap.Pipeline.Buildings.Gen
         /// <summary>Lay a repeated element along every segment of the run at
         /// <paramref name="pitch"/>, centred on each segment so a facade reads as symmetrical and a
         /// corner is never straddled by half a block. The callback receives the element's two end
-        /// points on the wall line and the height its centre sits at.</summary>
+        /// points on the wall line, the height its centre sits at, and the outward direction of the
+        /// segment it lies on — an element is a one-segment sweep, so one direction frames it.</summary>
         static void RepeatAlong(FacadeRun r, float pitch, float itemLen, float y,
-                                System.Action<Vector3, Vector3, float> emit)
+                                System.Action<Vector3, Vector3, float, Vector3> emit)
         {
             int n = r.points.Length;
             for (int k = 0; k < r.SegmentCount; k++)
@@ -385,7 +412,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                 for (int i = 0; i < count; i++)
                 {
                     float s = lead + i * pitch;
-                    emit(a + dir * s, a + dir * (s + itemLen), y);
+                    emit(a + dir * s, a + dir * (s + itemLen), y, r.outward[k]);
                 }
             }
         }
@@ -395,11 +422,12 @@ namespace SFMap.Pipeline.Buildings.Gen
         /// bracket differ only in which section and how far — neither needs a kernel of its own, and
         /// a 4-point block costs the same 10 triangles a back-dropped <see cref="Kernels.Box"/>
         /// would while following a facade that runs along any bearing.</summary>
-        static void Sweep(MeshBuilder mb, Vector2[] section, Vector3 a, Vector3 b, float y, MaterialRole role)
+        static void Sweep(MeshBuilder mb, Vector2[] section, Vector3 a, Vector3 b, float y,
+                          Vector3 outward, MaterialRole role)
             => Kernels.ProfileSweep(mb, section,
                                     Paths.Line(new Vector3(a.x, a.y + y, a.z), new Vector3(b.x, b.y + y, b.z)),
-                                    role, closedPath: false, capEnds: true, smoothAlong: false,
-                                    upHint: Vector3.up);
+                                    new[] { outward, outward }, role,
+                                    closedPath: false, capEnds: true, smoothAlong: false);
 
         // ---- DetailLevel degradation, local to this family -----------------------------------
 

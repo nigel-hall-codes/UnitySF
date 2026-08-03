@@ -25,14 +25,62 @@ namespace SFMap.Pipeline.Buildings.Gen
         /// flat-shaded normals and a crisp corner, at the cost of double the vertices.</param>
         /// <param name="upHint">Which world direction the profile's <c>+across</c> axis leans
         /// toward. Default <c>+Z</c> — outward from the wall, the convention every facade part
-        /// wants.</param>
+        /// wants. One hint can only describe a path that stays in one plane; a path that turns in
+        /// plan needs the per-point overload below (#483).</param>
         public static void ProfileSweep(MeshBuilder mb, Vector2[] profile, Vector3[] path,
                                         MaterialRole role, bool closedPath = false,
                                         bool capEnds = true, bool smoothAlong = false,
                                         Vector3 upHint = default)
+            => Sweep(mb, profile, path, null, upHint, role, closedPath, capEnds, smoothAlong);
+
+        /// <summary>
+        /// <see cref="ProfileSweep(MeshBuilder, Vector2[], Vector3[], MaterialRole, bool, bool, bool, Vector3)"/>
+        /// with a <b>per-point</b> frame instead of one hint for the whole run (#483).
+        ///
+        /// <para>One <c>upHint</c> is enough only while the path stays in a plane. A band that
+        /// wraps a corner building turns in plan, and "which way is out of the wall" turns with it:
+        /// feeding the run's first outward in as the single hint makes <c>across</c> collapse to
+        /// zero at the turn and the degenerate guard swings the moulding vertical. Feeding
+        /// <c>Vector3.up</c> instead is well-conditioned but transposes the frame, so the family has
+        /// to transpose every section back — the trick #474 shipped and this overload removes.</para>
+        ///
+        /// <para><paramref name="outward"/> is exactly <c>FacadeRun.outward</c>: index-aligned to
+        /// <paramref name="path"/>, one unit direction per point, the bisector of the two adjacent
+        /// faces' outward normals at an interior vertex. The kernel makes it perpendicular to the
+        /// tangent itself, so a bisector at a corner correctly resolves to the outward normal of
+        /// whichever segment is being framed. With it the <c>(across, up)</c> convention
+        /// <see cref="Profiles"/> is authored in — <c>+across</c> = outward from the wall, <c>+up</c>
+        /// = the band's own height — holds for a turning path exactly as it does for a straight one
+        /// (design #452 generators.md §3).</para>
+        ///
+        /// <para><b>Handedness still matters.</b> <c>up</c> is <c>cross(across, tangent)</c>, so
+        /// traversing the same run the other way round flips it and builds the band upside down.
+        /// A caller whose path direction is not its own choice settles it once, before sweeping —
+        /// see <c>CorniceGenerator.Oriented</c>.</para>
+        ///
+        /// <para>A null or wrongly-sized <paramref name="outward"/> falls back to the default
+        /// <c>+Z</c> hint, i.e. to the planar overload's behaviour.</para>
+        /// </summary>
+        public static void ProfileSweep(MeshBuilder mb, Vector2[] profile, Vector3[] path,
+                                        Vector3[] outward, MaterialRole role,
+                                        bool closedPath = false, bool capEnds = true,
+                                        bool smoothAlong = false)
+            => Sweep(mb, profile, path,
+                     path != null && outward != null && outward.Length == path.Length ? outward : null,
+                     Vector3.forward, role, closedPath, capEnds, smoothAlong);
+
+        static void Sweep(MeshBuilder mb, Vector2[] profile, Vector3[] path, Vector3[] outward,
+                          Vector3 upHint, MaterialRole role,
+                          bool closedPath, bool capEnds, bool smoothAlong)
         {
             if (mb == null || profile == null || profile.Length < 2 || path == null) return;
             if (upHint == Vector3.zero) upHint = Vector3.forward;
+
+            // The frame hint at path point i — the per-point outward when there is one, otherwise
+            // the single hint. Every Frame() call below indexes by the point whose tangent it is
+            // framing, which is why one accessor covers ring positions, per-segment normals and the
+            // smoothed-along case alike.
+            Vector3 Hint(int i) => outward != null ? outward[i] : upHint;
 
             int n = path.Length;
             if (closedPath && n < 3) closedPath = false;
@@ -73,7 +121,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                 inDir[i] = dIn;
                 bisector[i] = mitreN;
 
-                Frame(dIn, upHint, out Vector3 across, out Vector3 up);
+                Frame(dIn, Hint(i), out Vector3 across, out Vector3 up);
                 float denom = Mathf.Max(Vector3.Dot(dIn, mitreN), MitreCosClamp);
 
                 ring[i] = new Vector3[m];
@@ -96,7 +144,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                 var idx = new int[n][];
                 for (int i = 0; i < n; i++)
                 {
-                    Frame(bisector[i], upHint, out Vector3 across, out Vector3 up);
+                    Frame(bisector[i], Hint(i), out Vector3 across, out Vector3 up);
                     idx[i] = new int[m];
                     for (int j = 0; j < m; j++)
                     {
@@ -105,7 +153,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                     }
                 }
                 for (int k = 0; k < segCount; k++)
-                    Stitch(mb, idx[k], idx[(k + 1) % n], pn, dir[k], upHint);
+                    Stitch(mb, idx[k], idx[(k + 1) % n], pn, dir[k], Hint(k));
             }
             else
             {
@@ -114,7 +162,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                 for (int k = 0; k < segCount; k++)
                 {
                     int i0 = k, i1 = (k + 1) % n;
-                    Frame(dir[k], upHint, out Vector3 across, out Vector3 up);
+                    Frame(dir[k], Hint(k), out Vector3 across, out Vector3 up);
                     var a = new int[m];
                     var b = new int[m];
                     for (int j = 0; j < m; j++)
@@ -123,7 +171,7 @@ namespace SFMap.Pipeline.Buildings.Gen
                         a[j] = mb.Vert(ring[i0][j], nrm);
                         b[j] = mb.Vert(ring[i1][j], nrm);
                     }
-                    Stitch(mb, a, b, pn, dir[k], upHint);
+                    Stitch(mb, a, b, pn, dir[k], Hint(k));
                 }
             }
 
@@ -136,13 +184,14 @@ namespace SFMap.Pipeline.Buildings.Gen
             }
         }
 
-        /// <summary>Orthonormal sweep frame for a tangent: <c>across</c> is <paramref name="upHint"/>
+        /// <summary>Orthonormal sweep frame for a tangent: <c>across</c> is <paramref name="hint"/>
         /// made perpendicular to the tangent (so it stays "outward from the wall" for every facade
         /// run), <c>up</c> completes the frame. Falls back to a world axis when the tangent runs
-        /// parallel to the hint — the degenerate guard generators.md §3 calls for.</summary>
-        static void Frame(Vector3 tangent, Vector3 upHint, out Vector3 across, out Vector3 up)
+        /// parallel to the hint — the degenerate guard generators.md §3 calls for. The hint is one
+        /// constant for a planar sweep and this point's own outward for a turning one (#483).</summary>
+        static void Frame(Vector3 tangent, Vector3 hint, out Vector3 across, out Vector3 up)
         {
-            across = upHint - tangent * Vector3.Dot(upHint, tangent);
+            across = hint - tangent * Vector3.Dot(hint, tangent);
             if (across.sqrMagnitude < 1e-8f)
             {
                 Vector3 alt = Mathf.Abs(tangent.y) > 0.99f ? Vector3.forward : Vector3.up;
@@ -178,9 +227,9 @@ namespace SFMap.Pipeline.Buildings.Gen
         // Stitch two rings into a quad strip, oriented by the profile's outward normal so the
         // surface faces the way the profile table says it should.
         static void Stitch(MeshBuilder mb, int[] a, int[] b,
-                           Vector2[] pn, Vector3 tangent, Vector3 upHint)
+                           Vector2[] pn, Vector3 tangent, Vector3 hint)
         {
-            Frame(tangent, upHint, out Vector3 across, out Vector3 up);
+            Frame(tangent, hint, out Vector3 across, out Vector3 up);
             for (int j = 0; j < a.Length - 1; j++)
             {
                 Vector2 f = (pn[j] + pn[j + 1]);

@@ -5,12 +5,26 @@ namespace SFMap.Pipeline.Buildings.Gen
     /// <summary>
     /// Parameters for <see cref="Kernels.PanelGrid"/> — every glazed or panelled opening: window
     /// sash, door leaf, garage door, storefront bay, transom (#453, design #452 generators.md §4).
-    /// The opening spans <c>x ∈ [-w/2, w/2]</c>, <c>y ∈ [0, h]</c> (BottomCenter anchor, matching
-    /// <c>BuildingAssembler.PlacePart</c>'s frame), with the wall plane at <c>z = 0</c>.
+    /// The opening spans <c>x ∈ [-w/2, w/2] + <see cref="offsetX"/></c>, <c>y ∈ [0, h]</c>
+    /// (BottomCenter anchor, matching <c>BuildingAssembler.PlacePart</c>'s frame), with the wall
+    /// plane at <c>z = 0</c>.
     /// </summary>
     public struct PanelGridParams
     {
         public float w, h;              // opening size (m)
+
+        /// <summary>
+        /// Where the grid's centreline sits along the part's X axis (#481). 0 — the default — centres
+        /// it on the part origin, which is what a family occupying one opening wants and is what
+        /// every caller before #481 got.
+        /// <para>It is here rather than on the call because it describes <i>which</i> grid this is,
+        /// not where one grid is being stamped: a part that holds several grids side by side holds
+        /// several genuinely independent ones — a double door's two leaves each want their own
+        /// frame, their own stile widths and their own panel rows, and only then their own X. The
+        /// per-call <c>offsetY</c>/<c>offsetZ</c> are the opposite case: a double-hung stamps
+        /// <i>one</i> sash block at two heights.</para>
+        /// </summary>
+        public float offsetX;
         public float[] cols, rows;      // relative weights; {1,1,1} = thirds, {2,1} = 2:1. Length 1 = undivided
         public float barW, barD;        // muntin width / depth
         public float frameW, frameD;    // surrounding frame (0 = no frame; storefront bays share mullions)
@@ -45,7 +59,9 @@ namespace SFMap.Pipeline.Buildings.Gen
         {
             if (mb == null || p.w <= 0f || p.h <= 0f) return;
 
-            Vector3 off = new Vector3(0f, offsetY, offsetZ);
+            // p.offsetX is what lets one part hold several independent grids side by side (#481);
+            // it defaults to 0, so a family occupying a single opening is unaffected.
+            Vector3 off = new Vector3(p.offsetX, offsetY, offsetZ);
             float fw = Mathf.Max(p.frameW, 0f);
             float innerW = p.w - 2f * fw;
             float innerH = p.h - 2f * fw;
