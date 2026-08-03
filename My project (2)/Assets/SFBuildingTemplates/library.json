@@ -1,11 +1,88 @@
 {
   "version": 1,
   "exportedAt": "2026-08-03T00:00:00Z",
+  "_comment": [
+    "#475. `neighborhoods` is informational - BuildingTemplateLibraryImporter reads it for one log",
+    "line and nothing matches against it. It now lists exactly the neighborhoods some template",
+    "admits, spelled as python/data/sf_analysis_neighborhoods.geojson spells them: the slashes in",
+    "\"Sunset/Parkside\" and the whole of \"South of Market\" are the match key the bake passes",
+    "through verbatim. The previous list carried \"Sunset\", which is not a neighborhood in that",
+    "geojson at all (only \"Inner Sunset\" and \"Sunset/Parkside\" are) - dropped.",
+    "",
+    "`districtTemplateWeights` is load-bearing (#343). Two templates now admit the same",
+    "neighborhood on purpose - a shopfront cannot share floor 0 with a garage and a door, and the",
+    "schema has no way to say 'these two placements are mutually exclusive' inside one template -",
+    "so the split has to happen at template selection. Without weights TryMatch's tie-break is",
+    "uniform and every second building in the Victorian belt would be a shop.",
+    "Caveat: NeighborhoodTemplateWeights.WeightFor treats an authored 0 as 'unset' and falls back",
+    "to weight 1, so a weight cannot exclude a template. `trivial_window` (the bundled MVP sample,",
+    "compatibility.neighborhoods empty = admits every building in the city) therefore still draws",
+    "1 share everywhere; the weights below cut it from ~1 building in 2 to ~1 in 14."
+  ],
   "neighborhoods": [
-    "Sunset",
     "Noe Valley",
+    "Glen Park",
+    "West of Twin Peaks",
+    "Outer Mission",
+    "Twin Peaks",
     "Sunset/Parkside",
     "South of Market",
     "Marina"
+  ],
+  "districtTemplateWeights": [
+    {
+      "neighborhood": "Noe Valley",
+      "weights": [
+        { "template": "noe_valley_victorian", "weight": 12 },
+        { "template": "noe_valley_corner_commercial", "weight": 1 }
+      ]
+    },
+    {
+      "neighborhood": "Glen Park",
+      "weights": [
+        { "template": "noe_valley_victorian", "weight": 12 },
+        { "template": "noe_valley_corner_commercial", "weight": 1 }
+      ]
+    },
+    {
+      "neighborhood": "West of Twin Peaks",
+      "weights": [
+        { "template": "noe_valley_victorian", "weight": 16 },
+        { "template": "noe_valley_corner_commercial", "weight": 1 }
+      ]
+    },
+    {
+      "neighborhood": "Outer Mission",
+      "weights": [
+        { "template": "noe_valley_victorian", "weight": 10 },
+        { "template": "noe_valley_corner_commercial", "weight": 1 }
+      ]
+    },
+    {
+      "neighborhood": "Twin Peaks",
+      "weights": [
+        { "template": "noe_valley_victorian", "weight": 20 },
+        { "template": "noe_valley_corner_commercial", "weight": 1 }
+      ]
+    },
+    {
+      "neighborhood": "Sunset/Parkside",
+      "weights": [
+        { "template": "sunset_parkside_postwar", "weight": 16 }
+      ]
+    },
+    {
+      "neighborhood": "South of Market",
+      "weights": [
+        { "template": "soma_industrial", "weight": 8 },
+        { "template": "soma_loft_commercial", "weight": 1 }
+      ]
+    },
+    {
+      "neighborhood": "Marina",
+      "weights": [
+        { "template": "marina_mediterranean", "weight": 16 }
+      ]
+    }
   ]
 }

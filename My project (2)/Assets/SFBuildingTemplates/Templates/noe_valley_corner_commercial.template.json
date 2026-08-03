@@ -1,0 +1,102 @@
+{
+  "id": "noe_valley_corner_commercial",
+  "displayName": "Noe Valley corner shop (Victorian belt, ground-floor commercial)",
+  "_comment": [
+    "#475. THIS TEMPLATE EXISTS BECAUSE OF A SCHEMA LIMIT, not because a corner shop wants its own",
+    "style. storefront_noe_corner is 5.55 m wide and owns the whole ground floor, so it cannot",
+    "share floor 0 with noe_valley_victorian's garage + door, and there is no 'exclusive with' or",
+    "'ground-floor slot' field to say so inside one template. Splitting into two templates that",
+    "both admit the belt is the expressible form: TryMatch collects every admitting template and",
+    "PickWeighted draws one per building, seeded by osm_id, so the split is deterministic and a",
+    "re-import is byte-stable. library.json's districtTemplateWeights sets the ratio (12:1).",
+    "The storefront carries its own recessed entry (entrySide/entryWidth/entryLeaves), so a shop",
+    "building needs no separate door part - which is why floor 0 holds exactly one exact here.",
+    "",
+    "GATED BY NEIGHBORHOOD ONLY. It is not gated to commercial buildings, because it cannot be:",
+    "BuildingFactsJson.building_type is the raw OSM `building` tag and reads \"yes\" for 93.3% of",
+    "the 11,111 buildings measured in #472, so compatibility.building_types would either match",
+    "everything or nothing. Until #486 bakes a real commercial fact, roughly 1 in 13 buildings in",
+    "the Victorian belt - houses included - will be dressed as a shop. Do not add a building_types",
+    "filter here expecting it to help; it will silently do nothing.",
+    "Sizing is also not expressible yet: PlacePart applies uniform scale only and nothing carries",
+    "the real facade width into the part's `w`, so the 5.55 m shopfront is 5.55 m on a 4 m facade",
+    "and on a 20 m one alike (#487).",
+    "",
+    "Windows start at floor 1: floor 0 is the shopfront.",
+    "The Mission and North Beach storefront/bay presets have no template yet - #492."
+  ],
+  "compatibility": {
+    "neighborhoods": [
+      "Noe Valley",
+      "Glen Park",
+      "West of Twin Peaks",
+      "Outer Mission",
+      "Twin Peaks"
+    ],
+    "building_types": [],
+    "footprint_shapes": [],
+    "width_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "depth_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "floor_count": {
+      "min": 1,
+      "max": 100
+    }
+  },
+  "exact": [
+    {
+      "part": "storefront_noe_corner",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.5,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
+  "rules": [
+    {
+      "part": "window_noe_2over2",
+      "facade": "Street",
+      "floorRange": {
+        "min": 1,
+        "max": 8
+      },
+      "span": [
+        0.05,
+        0.95
+      ],
+      "repeat": {
+        "spacingMeters": 2.2,
+        "countMin": 1,
+        "countMax": 6
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.2,
+        "edgeMargin": 0.04,
+        "alignToFloorLine": false,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.05,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    }
+  ],
+  "roofParts": [
+    "cornice_noe_bracketed"
+  ],
+  "version": 1
+}
