@@ -1,6 +1,35 @@
 {
   "id": "noe_valley_victorian",
   "displayName": "Noe Valley Victorian (south-central Victorian/Edwardian belt)",
+  "_comment": [
+    "#475 ground-floor slotting. The constraint the schema imposes: _exactMarks is written by",
+    "PlaceExact and read by PlaceProcedural, so exclusion runs exact -> procedural ONLY. Two",
+    "procedural rules are blind to each other and RuleJson has no 'exclusive with rule N' field.",
+    "A floor therefore supports any number of exacts (the author separates their x by hand) plus",
+    "at most ONE rule that dodges them. Floor 0 spends that budget on door (exact) + garage (rule);",
+    "floors 1..8 spend it on bay (exact) + window (rule). No windows on floor 0 - a Victorian",
+    "ground floor IS the garage and the entry.",
+    "",
+    "The garage is a rule, not an exact, because a rule can be gated on facade width and an exact",
+    "cannot. PlaceProcedural derives count = floor(spanMeters / spacing) before countMin/countMax,",
+    "so countMin 0 + spacingMeters 4.0 across a 0.76 span means no garage at all below 5.26 m, and",
+    "countMax 1 means never more than one above it. avoidExact then suppresses the remaining slot",
+    "whenever it lands within minSpacingMeters 2.0 of the door - i.e. below 5.13 m. Both gates sit",
+    "above the 4.90 m at which a 2.53 m garage and a 1.29 m door would actually touch, so the pair",
+    "cannot overlap at any facade width. Measured over the 990 buildings in chunks_wintest with a",
+    "usable front facade: 671 get a garage (67.8%), 319 get a door alone, 0 overlap.",
+    "#471 recommended minSpacingMeters 6.0; that was measured here to suppress the garage below a",
+    "16.7 m frontage, i.e. on every real building in the play area, because the same number is both",
+    "the exclusion radius and (via max(spacingMeters, minSpacingMeters)) the count divisor.",
+    "",
+    "The bay is an exact at floor 1, centred over the garage - the Victorian bay-over-garage. It",
+    "spans 2 floors but _exactMarks is keyed (edge_index, floor) and carries no floorsSpanned, so",
+    "floor 2 gets no mark; and even on floor 1 the window rule can only exclude 2.20 m (its repeat",
+    "pitch - past that, PlaceProcedural's spacing = max(spacingMeters, minSpacingMeters) would thin",
+    "the windows) where clearing a 3.80 m bay needs 2.45 m. Both leave window geometry inside the",
+    "bay shell, where it is occluded rather than interpenetrating; it costs triangles, not looks.",
+    "Both gaps are tracked as #491."
+  ],
   "compatibility": {
     "neighborhoods": [
       "Noe Valley",
@@ -24,13 +53,67 @@
       "max": 100
     }
   },
-  "exact": [],
+  "exact": [
+    {
+      "part": "door_noe_victorian",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.89,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    },
+    {
+      "part": "bay_noe_slanted",
+      "facade": "Front",
+      "floor": 1,
+      "x": 0.5,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
   "rules": [
+    {
+      "part": "garage_noe_flush",
+      "facade": "Front",
+      "floorRange": {
+        "min": 0,
+        "max": 0
+      },
+      "span": [
+        0.10,
+        0.90
+      ],
+      "repeat": {
+        "spacingMeters": 4.0,
+        "countMin": 0,
+        "countMax": 1
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.0,
+        "edgeMargin": 0.02,
+        "alignToFloorLine": true,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.0,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    },
     {
       "part": "window_noe_2over2",
       "facade": "Street",
       "floorRange": {
-        "min": 0,
+        "min": 1,
         "max": 8
       },
       "span": [
@@ -44,7 +127,7 @@
       },
       "probability": 1.0,
       "constraints": {
-        "minSpacingMeters": 1.6500000000000001,
+        "minSpacingMeters": 2.2,
         "edgeMargin": 0.04,
         "alignToFloorLine": false,
         "avoidExact": true
@@ -60,6 +143,8 @@
       "variants": []
     }
   ],
-  "roofParts": [],
+  "roofParts": [
+    "cornice_noe_bracketed"
+  ],
   "version": 1
 }

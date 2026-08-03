@@ -1,6 +1,20 @@
 {
   "id": "sunset_parkside_postwar",
   "displayName": "Sunset/Parkside Post-war",
+  "_comment": [
+    "#475. The Doelger plan literally is a garage leaf with a round-head entry beside it, so both",
+    "live on floor 0 and windows start at floor 1. Same slotting as noe_valley_victorian, and for",
+    "the same schema reason (see the long note there): exclusion is exact -> procedural only, so",
+    "floor 0 holds one exact (the door) plus one rule (the garage) and nothing else.",
+    "Gates: countMin 0 with spacingMeters 4.2 across a 0.76 span means no garage below 5.53 m;",
+    "avoidExact with minSpacingMeters 2.1 suppresses the slot below 5.38 m. A 2.99 m garage and a",
+    "0.95 m door touch below 5.05 m, so the pair cannot overlap. A Sunset lot is 25 ft (7.6 m), so",
+    "in practice every Doelger house gets both.",
+    "window minSpacingMeters 2.25 -> 2.40 stays under repeat.spacingMeters 3.0, so the slider",
+    "rhythm is unchanged and only the exclusion radius grows.",
+    "window_sunset_2x3 joins as a variant - postwar Sunset carries both the aluminium slider and",
+    "the 2x3 casement, and a variant list is the only way one rule reaches more than one preset."
+  ],
   "compatibility": {
     "neighborhoods": [
       "Sunset/Parkside"
@@ -20,13 +34,57 @@
       "max": 100
     }
   },
-  "exact": [],
+  "exact": [
+    {
+      "part": "door_sunset_flush",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.89,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
   "rules": [
+    {
+      "part": "garage_sunset_arch",
+      "facade": "Front",
+      "floorRange": {
+        "min": 0,
+        "max": 0
+      },
+      "span": [
+        0.10,
+        0.90
+      ],
+      "repeat": {
+        "spacingMeters": 4.2,
+        "countMin": 0,
+        "countMax": 1
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.1,
+        "edgeMargin": 0.02,
+        "alignToFloorLine": true,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.0,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    },
     {
       "part": "window_sunset_slider",
       "facade": "Street",
       "floorRange": {
-        "min": 0,
+        "min": 1,
         "max": 8
       },
       "span": [
@@ -40,7 +98,7 @@
       },
       "probability": 1.0,
       "constraints": {
-        "minSpacingMeters": 2.25,
+        "minSpacingMeters": 2.4,
         "edgeMargin": 0.04,
         "alignToFloorLine": false,
         "avoidExact": true
@@ -53,9 +111,14 @@
         ],
         "rotation": 0.0
       },
-      "variants": []
+      "variants": [
+        "window_sunset_slider",
+        "window_sunset_2x3"
+      ]
     }
   ],
-  "roofParts": [],
+  "roofParts": [
+    "cornice_sunset_parapet"
+  ],
   "version": 1
 }

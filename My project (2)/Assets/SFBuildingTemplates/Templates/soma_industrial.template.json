@@ -1,6 +1,21 @@
 {
   "id": "soma_industrial",
   "displayName": "South of Market Industrial",
+  "_comment": [
+    "#475. Both SoMa ground-floor openings are vehicle-sized - the roll-up is 4.60 m and the",
+    "loading door 3.44 m - so they need 4.02 m between centres and the width gate has to be set",
+    "much higher than in the residential templates. countMin 0 with spacingMeters 9.0 across a 0.76",
+    "span withholds the roll-up below 11.8 m of frontage, and avoidExact with minSpacingMeters 4.5",
+    "withholds it below 12.5 m; the pair would touch below 11.2 m, so they never overlap. Below",
+    "12.5 m a SoMa building gets the loading door alone, which is the honest answer for a narrow",
+    "infill - warehouse stock runs 15-30 m and gets both.",
+    "Same schema constraint as noe_valley_victorian (see the note there): exclusion is",
+    "exact -> procedural only, so floor 0 is one exact plus one rule, and windows start at floor 1.",
+    "window minSpacingMeters 2.7 -> 3.4 stays under repeat.spacingMeters 3.6, so the 6x4 steel-sash",
+    "rhythm is unchanged; 3.40 = 2.30 + 1.10 is exactly what clears the roll-up.",
+    "The storefront preset for this neighborhood lives in soma_loft_commercial, not here: a 9.6 m",
+    "shopfront cannot share floor 0 with a roll-up at any facade width."
+  ],
   "compatibility": {
     "neighborhoods": [
       "South of Market"
@@ -20,13 +35,57 @@
       "max": 100
     }
   },
-  "exact": [],
+  "exact": [
+    {
+      "part": "door_soma_loading",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.86,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
   "rules": [
+    {
+      "part": "garage_soma_rollup",
+      "facade": "Front",
+      "floorRange": {
+        "min": 0,
+        "max": 0
+      },
+      "span": [
+        0.10,
+        0.90
+      ],
+      "repeat": {
+        "spacingMeters": 9.0,
+        "countMin": 0,
+        "countMax": 1
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 4.5,
+        "edgeMargin": 0.02,
+        "alignToFloorLine": true,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.0,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    },
     {
       "part": "window_soma_steel",
       "facade": "Street",
       "floorRange": {
-        "min": 0,
+        "min": 1,
         "max": 8
       },
       "span": [
@@ -40,7 +99,7 @@
       },
       "probability": 1.0,
       "constraints": {
-        "minSpacingMeters": 2.7,
+        "minSpacingMeters": 3.4,
         "edgeMargin": 0.04,
         "alignToFloorLine": false,
         "avoidExact": true
@@ -56,6 +115,8 @@
       "variants": []
     }
   ],
-  "roofParts": [],
+  "roofParts": [
+    "cornice_soma_corbel"
+  ],
   "version": 1
 }

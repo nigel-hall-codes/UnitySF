@@ -1,6 +1,23 @@
 {
   "id": "marina_mediterranean",
   "displayName": "Marina Mediterranean",
+  "_comment": [
+    "#475. No family issue (#470-#474) authored a Marina preset, so this template borrows, and the",
+    "borrowing is bounded by design #452 section 3, which names the pieces that must stay exclusive",
+    "to one neighborhood so districts read as themselves: the slanted bay and bracketed cornice",
+    "(Noe), the stucco arch garage, scalloped parapet and aluminium slider (Sunset), the steel sash,",
+    "loading dock and corbel cornice (SoMa), the tiled bulkhead (Mission), the squared bay (North",
+    "Beach). The flush garage and the panelled door are on nobody's exclusive list, and a 1920s",
+    "Marina flat is exactly a flush garage with a panelled entry beside it - so those two are",
+    "borrowed and nothing else.",
+    "Marina therefore has no cornice, bay or storefront: every preset of those families is somebody",
+    "else's signature. Its own exclusives - tile eyebrow, stucco quatrefoil vent - have no generator",
+    "yet, so its identity still rests on window_marina_arched.",
+    "Slotting and gates are noe_valley_victorian's, same parts and same numbers (see the note",
+    "there): no garage below 5.26 m of frontage, never overlapping the door.",
+    "window minSpacingMeters 1.80 -> 2.40 = repeat.spacingMeters, the largest exclusion available",
+    "before PlaceProcedural's spacing = max(spacingMeters, minSpacingMeters) would thin the windows."
+  ],
   "compatibility": {
     "neighborhoods": [
       "Marina"
@@ -20,13 +37,57 @@
       "max": 100
     }
   },
-  "exact": [],
+  "exact": [
+    {
+      "part": "door_noe_victorian",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.89,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
   "rules": [
+    {
+      "part": "garage_noe_flush",
+      "facade": "Front",
+      "floorRange": {
+        "min": 0,
+        "max": 0
+      },
+      "span": [
+        0.10,
+        0.90
+      ],
+      "repeat": {
+        "spacingMeters": 4.0,
+        "countMin": 0,
+        "countMax": 1
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.0,
+        "edgeMargin": 0.02,
+        "alignToFloorLine": true,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.0,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    },
     {
       "part": "window_marina_arched",
       "facade": "Street",
       "floorRange": {
-        "min": 0,
+        "min": 1,
         "max": 8
       },
       "span": [
@@ -40,7 +101,7 @@
       },
       "probability": 1.0,
       "constraints": {
-        "minSpacingMeters": 1.7999999999999998,
+        "minSpacingMeters": 2.4,
         "edgeMargin": 0.04,
         "alignToFloorLine": false,
         "avoidExact": true
