@@ -1,0 +1,53 @@
+{
+  "id": "storefront_mission_tiled",
+  "category": "Storefront",
+  "generatorId": "storefront.bay_row",
+  "parameters": [
+    { "name": "w", "value": 7.2 },
+    { "name": "h", "value": 3.9 },
+    { "name": "revealDepth", "value": 0.10 },
+    { "name": "glassInset", "value": 0.02 },
+
+    { "name": "bayCount", "value": 0 },
+    { "name": "bayPitch", "value": 1.45 },
+    { "name": "bayRhythm", "text": "WideNarrowWide" },
+
+    { "name": "bulkheadH", "value": 0.75 },
+    { "name": "bulkheadPanelRows", "value": 2 },
+    { "name": "bulkheadPanelCols", "value": 0 },
+    { "name": "bulkheadBevel", "value": 0.02 },
+    { "name": "bulkheadRole", "text": "Accent2" },
+
+    { "name": "glazingH", "value": 0 },
+    { "name": "transomH", "value": 0.50 },
+    { "name": "transomLights", "value": 4 },
+
+    { "name": "mullionW", "value": 0.10 },
+    { "name": "mullionD", "value": 0.07 },
+
+    { "name": "entrySide", "text": "Center" },
+    { "name": "entryWidth", "value": 1.90 },
+    { "name": "entryRecessDepth", "value": 0.70 },
+    { "name": "entryLeaves", "value": 2 },
+    { "name": "entryKickH", "value": 0.30 },
+
+    { "name": "corner", "text": "Square" },
+
+    { "name": "frameProfile", "text": "Flat" },
+    { "name": "frameW", "value": 0.16 },
+    { "name": "frameD", "value": 0.07 },
+
+    { "name": "awningProjection", "value": 0.90 },
+    { "name": "awningDrop", "value": 0.45 },
+    { "name": "awningValance", "value": 0.25 },
+    { "name": "awningOverhang", "value": 0.15 },
+
+    { "name": "frameRole", "text": "Accent1" },
+    { "name": "glassRole", "text": "Glass" },
+    { "name": "awningRole", "text": "Accent1" }
+  ],
+  "size_m": { "w": 7.36, "h": 4.06, "d": 1.72 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.82,
+  "version": 2
+}

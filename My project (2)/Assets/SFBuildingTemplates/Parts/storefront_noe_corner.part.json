@@ -1,0 +1,50 @@
+{
+  "id": "storefront_noe_corner",
+  "category": "Storefront",
+  "generatorId": "storefront.bay_row",
+  "parameters": [
+    { "name": "w", "value": 4.6 },
+    { "name": "h", "value": 3.5 },
+    { "name": "revealDepth", "value": 0.09 },
+    { "name": "glassInset", "value": 0.02 },
+
+    { "name": "bayCount", "value": 0 },
+    { "name": "bayPitch", "value": 2.2 },
+    { "name": "bayRhythm", "text": "Even" },
+
+    { "name": "bulkheadH", "value": 0.60 },
+    { "name": "bulkheadPanelRows", "value": 1 },
+    { "name": "bulkheadPanelCols", "value": 2 },
+    { "name": "bulkheadBevel", "value": 0.015 },
+    { "name": "bulkheadRole", "text": "Accent2" },
+
+    { "name": "glazingH", "value": 0 },
+    { "name": "transomH", "value": 0.40 },
+    { "name": "transomLights", "value": 2 },
+
+    { "name": "mullionW", "value": 0.08 },
+    { "name": "mullionD", "value": 0.05 },
+
+    { "name": "entrySide", "text": "Right" },
+    { "name": "entryWidth", "value": 1.50 },
+    { "name": "entryRecessDepth", "value": 0.55 },
+    { "name": "entryLeaves", "value": 1 },
+    { "name": "entryKickH", "value": 0.28 },
+
+    { "name": "corner", "text": "Chamfered" },
+    { "name": "cornerChamfer", "value": 0.80 },
+
+    { "name": "frameProfile", "text": "Ogee" },
+    { "name": "frameW", "value": 0.15 },
+    { "name": "frameD", "value": 0.06 },
+
+    { "name": "awningProjection", "value": 0 },
+
+    { "name": "frameRole", "text": "Accent1" },
+    { "name": "glassRole", "text": "Glass" }
+  ],
+  "size_m": { "w": 5.55, "h": 3.65, "d": 0.72 },
+  "anchor": "BottomCenter",
+  "mountDepth_m": 0.66,
+  "version": 2
+}
