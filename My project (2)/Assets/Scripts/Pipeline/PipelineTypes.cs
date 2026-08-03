@@ -36,6 +36,11 @@ namespace SFMap.Pipeline
         public static string IntersectionMesh(ChunkCoord c, long id) => $"{ChunkDir(c)}/Intersections/intersection_{id}.mesh";
         public static string SidewalkMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Sidewalks/sidewalk_{id}.mesh";
         public static string BuildingMesh(ChunkCoord c, long id)     => $"{ChunkDir(c)}/Buildings/building_{id}.mesh";
+        // A templated building's collision proxy: the undecorated mass mesh, saved separately from
+        // the rendered (decorated) BuildingMesh so its MeshCollider cooks the wall planes only and
+        // not every muntin bar or cornice bracket (#455, cook cost measured in #263).
+        public static string BuildingCollisionMesh(ChunkCoord c, long id)
+            => $"{ChunkDir(c)}/Buildings/building_{id}_collision.mesh";
         // Combined static geometry — one mesh per chunk per type (see SFMapImporterWindow).
         public static string BuildingsCombinedMesh(ChunkCoord c)     => $"{ChunkDir(c)}/Buildings/buildings_combined.mesh";
         public static string IntersectionsCombinedMesh(ChunkCoord c) => $"{ChunkDir(c)}/Intersections/intersections_combined.mesh";
