@@ -1,0 +1,106 @@
+{
+  "id": "mission_storefront",
+  "displayName": "Mission ground-floor shopfront (Mission/Valencia corridor)",
+  "_comment": [
+    "#492. This template exists to make storefront_mission_tiled (#472, design #452 §3's",
+    "'tiled bulkhead storefront') reachable - it was one of the last two shipped presets no",
+    "template placed. It is the MINORITY half of the Mission: library.json's",
+    "districtTemplateWeights draws mission_victorian over it 10:1, so roughly 1 building in 11",
+    "gets a shopfront. Without weights TryMatch's tie-break is uniform and every second building",
+    "in the district would be a shop.",
+    "",
+    "WHY IT IS A SEPARATE TEMPLATE rather than another placement inside mission_victorian: the",
+    "shopfront IS the ground floor (it carries its own recessed entry via",
+    "entrySide/entryWidth/entryLeaves), so at 7.36 m it cannot share floor 0 with a garage and a",
+    "door at any facade width, and the schema has no 'these placements are mutually exclusive'",
+    "field to say so inside one template. One exact owns floor 0 per template; the choice happens",
+    "one level up, at template selection. Same shape as noe_valley_victorian /",
+    "noe_valley_corner_commercial (#475).",
+    "",
+    "GATED BY NEIGHBORHOOD ONLY, and it cannot be otherwise: BuildingFactsJson.building_type is",
+    "the raw OSM `building` tag and reads \"yes\" for 93.3% of the 11,111 buildings measured in",
+    "#472, so a compatibility.building_types list would match everything or nothing. Until #486",
+    "bakes a real commercial signal, ~1 in 11 Mission buildings - houses included - is dressed as a",
+    "shop. Do not add a building_types filter here expecting it to help; it will silently do",
+    "nothing.",
+    "Sizing is not expressible either: PlacePart applies uniform scale only and nothing carries the",
+    "real facade width into the part's `w`, so the 7.36 m shopfront is 7.36 m on a 5 m facade and",
+    "on a 25 m one alike (#487). storefront_mission_tiled is the widest shipped shopfront after",
+    "storefront_soma_loft, which makes that overhang the most visible here.",
+    "",
+    "No bay and no roofPart: design #452 §3 marks the slanted bay and all three shipped cornices",
+    "exclusive to Noe Valley / Sunset/Parkside / South of Market. Windows start at floor 1 -",
+    "floor 0 is the shopfront.",
+    "",
+    "NOT RENDERED. `Mission` is outside the play-area map.osm bbox, so this has never been looked",
+    "at in the Editor. What is verified is the authored data: TemplateWiringTests."
+  ],
+  "compatibility": {
+    "neighborhoods": [
+      "Mission"
+    ],
+    "building_types": [],
+    "footprint_shapes": [],
+    "width_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "depth_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "floor_count": {
+      "min": 1,
+      "max": 100
+    }
+  },
+  "exact": [
+    {
+      "part": "storefront_mission_tiled",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.5,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
+  "rules": [
+    {
+      "part": "window_noe_2over2",
+      "facade": "Street",
+      "floorRange": {
+        "min": 1,
+        "max": 8
+      },
+      "span": [
+        0.05,
+        0.95
+      ],
+      "repeat": {
+        "spacingMeters": 2.2,
+        "countMin": 1,
+        "countMax": 6
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.2,
+        "edgeMargin": 0.04,
+        "alignToFloorLine": false,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.05,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    }
+  ],
+  "roofParts": [],
+  "version": 1
+}

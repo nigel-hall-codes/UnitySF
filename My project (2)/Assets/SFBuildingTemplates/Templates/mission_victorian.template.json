@@ -1,0 +1,133 @@
+{
+  "id": "mission_victorian",
+  "displayName": "Mission Victorian/Edwardian flats (the residential majority)",
+  "_comment": [
+    "#492. The Mission needed TWO templates or it would have been 100% commercial:",
+    "storefront_mission_tiled is the only Mission preset design #452 §3 names that has a generator,",
+    "and a district whose single template carries a shopfront dresses every house as a shop. This",
+    "is the residential companion, and library.json's districtTemplateWeights makes it the",
+    "overwhelming majority (10:1 over mission_storefront).",
+    "",
+    "GROUND FLOOR: door (exact) + garage (rule), the same arrangement and the same numbers as",
+    "noe_valley_victorian, because it is the same schema constraint and the same two parts.",
+    "_exactMarks is written by PlaceExact and read by PlaceProcedural, so exclusion runs",
+    "exact -> procedural ONLY: a floor supports any number of exacts plus AT MOST ONE rule (#475,",
+    "lifting it is #491). The garage is the rule because only a rule can be width-gated -",
+    "count = floor(spanMeters / spacing) is computed before countMin/countMax, so countMin 0 with",
+    "spacingMeters 4.0 across a 0.76 span withholds the garage below a 5.26 m frontage, and",
+    "avoidExact + minSpacingMeters 2.0 withholds it below 5.13 m; a 2.53 m garage and a 1.29 m door",
+    "would only touch below 4.90 m, so the pair cannot overlap at any facade width.",
+    "",
+    "WHAT IT DOES NOT REUSE. design #452 §3 marks bay_noe_slanted (slanted bay) and",
+    "cornice_noe_bracketed (bracketed gingerbread) EXCLUSIVE to Noe Valley, and the other two",
+    "shipped cornices exclusive to Sunset/Parkside and South of Market. Borrowing one would blur",
+    "the districts, which is the one thing the exclusive list exists to prevent - so this template",
+    "carries no bay and no roofPart. The Mission's own remaining §3 pieces (folding scissor gate,",
+    "mural band) have no generator yet; when they land they belong here.",
+    "",
+    "NOT RENDERED. `Mission` is outside the play-area map.osm bbox (chunks_wintest is 1002",
+    "buildings, all Glen Park), so this template has never been looked at in the Editor - the same",
+    "reason #475 declined to add it. What is verified is the authored data: TemplateWiringTests."
+  ],
+  "compatibility": {
+    "neighborhoods": [
+      "Mission"
+    ],
+    "building_types": [],
+    "footprint_shapes": [],
+    "width_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "depth_m": {
+      "min": 0,
+      "max": 1000
+    },
+    "floor_count": {
+      "min": 1,
+      "max": 100
+    }
+  },
+  "exact": [
+    {
+      "part": "door_noe_victorian",
+      "facade": "Front",
+      "floor": 0,
+      "x": 0.89,
+      "y": 0.0,
+      "scale": 1.0,
+      "rotation": 0.0,
+      "roles": []
+    }
+  ],
+  "rules": [
+    {
+      "part": "garage_noe_flush",
+      "facade": "Front",
+      "floorRange": {
+        "min": 0,
+        "max": 0
+      },
+      "span": [
+        0.10,
+        0.90
+      ],
+      "repeat": {
+        "spacingMeters": 4.0,
+        "countMin": 0,
+        "countMax": 1
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.0,
+        "edgeMargin": 0.02,
+        "alignToFloorLine": true,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.0,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    },
+    {
+      "part": "window_noe_2over2",
+      "facade": "Street",
+      "floorRange": {
+        "min": 1,
+        "max": 8
+      },
+      "span": [
+        0.05,
+        0.95
+      ],
+      "repeat": {
+        "spacingMeters": 2.2,
+        "countMin": 1,
+        "countMax": 6
+      },
+      "probability": 1.0,
+      "constraints": {
+        "minSpacingMeters": 2.2,
+        "edgeMargin": 0.04,
+        "alignToFloorLine": false,
+        "avoidExact": true
+      },
+      "jitter": {
+        "x": 0.05,
+        "scale": [
+          1.0,
+          1.0
+        ],
+        "rotation": 0.0
+      },
+      "variants": []
+    }
+  ],
+  "roofParts": [],
+  "version": 1
+}

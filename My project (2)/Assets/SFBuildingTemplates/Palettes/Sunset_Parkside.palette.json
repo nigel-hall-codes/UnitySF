@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "#464 regression fixture AND a real palette. `neighborhood` is the slashed geojson `nhood`",
+    "string verbatim - that is the key BuildingAssembler.ResolvePalette compares against the fact",
+    "the bake copied out of python/data/sf_analysis_neighborhoods.geojson. Only the GENERATED",
+    "asset's file name is sanitised, by AssetFileName.Encode, to Generated/Palettes/",
+    "Sunset%2FParkside.asset.",
+    "",
+    "This source file's own name is arbitrary - BuildingTemplateLibraryImporter globs *.palette.json",
+    "and reads `neighborhood` from inside - but it is spelt the way server/app/export.py's _safe()",
+    "would spell it, so a later POST /export/unity overwrites this file instead of adding a second",
+    "source for the same neighborhood.",
+    "",
+    "Colours: the Doelger tract stucco of the outer Sunset - pastel fields with a white-ish trim",
+    "and a darker garage-door/metal note. Not verified in the Editor (no Unity available); they are",
+    "authored values, and the round trip they are here to prove is the path, not the hue."
+  ],
+  "neighborhood": "Sunset/Parkside",
+  "roles": [
+    { "role": "Base",    "colors": ["#E3E0D2", "#DCE3E0", "#E8DED2", "#D9DCE4", "#E6E2DA"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F2F0EA", "#E9E6DC"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#C4BFAE", "#94907F"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#41525C"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#7A7A76"],                                             "mode": "constant" },
+    { "role": "Sign",    "colors": ["#8C4A3C"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}
