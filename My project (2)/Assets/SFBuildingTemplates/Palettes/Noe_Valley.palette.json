@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "#508. The reference for the late-Victorian/Edwardian belt: painted wood siding and stucco,",
+    "domesticated 'painted lady' - cream, oatmeal, pale sage, pale blue-grey, ivory - with a bright",
+    "off-white sash trim, an ochre and a sage door leaf as the other two Accent1 draws. Accent2 is",
+    "the sill/lintel/hood/cornice-band/stoop-coping ramp: tan into a mid brown, so the secondary",
+    "trim reads as a shadow line rather than a second colour. Glass is the flat-lit glazing grey",
+    "the whole library shares; Metal is a neutral mid grey for sash hardware and railings.",
+    "",
+    "Base has five draws because `pick` is the only per-building variation there is - one colour",
+    "here is 1002 identical buildings (the fault #508 was filed for).",
+    "",
+    "Not verified in the Editor - no Unity was available to the author. These are authored values,",
+    "not eyeballed ones; retouch by eye is expected and welcome."
+  ],
+  "neighborhood": "Noe Valley",
+  "roles": [
+    { "role": "Base",    "colors": ["#EDE4CE", "#DCD3BC", "#E7EAE1", "#D9DFE2", "#F0EAD9"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F4F1E8", "#C9B27E", "#8FA090"],                       "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#C2B189", "#8C7748"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#3A4A55"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#6E6E6A"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}

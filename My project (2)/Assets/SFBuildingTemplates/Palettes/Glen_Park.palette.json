@@ -1,0 +1,21 @@
+{
+  "_comment": [
+    "#508. Same stock as Noe Valley (#466 widened noe_valley_victorian to admit it), read one step",
+    "down in saturation: a canyon village of small cottages that were repainted less often and in",
+    "quieter colours. Greyed oatmeal, stone, a green-grey and a cool grey-blue, no ivory. Accent1",
+    "keeps one near-white sash but its second draw is a soft khaki rather than Noe's ochre. Accent2",
+    "and Glass are half a step darker for the same reason - the district reads shaded, it sits in a",
+    "gap between two hills.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "Glen Park",
+  "roles": [
+    { "role": "Base",    "colors": ["#DED6C4", "#CFCBBA", "#DCE0D6", "#CBD2CF", "#E4DCCB"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#EFEBDF", "#A99A72"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#B3A585", "#7E7150"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#38464F"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#6A6C68"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}

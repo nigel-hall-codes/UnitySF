@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "#508. Mission Victorians carrying a Latino paint tradition: this is the most saturated palette",
+    "in the library and deliberately so - it is the district that should be visible from three blocks",
+    "away. Base runs cream and wheat next to ochre, terracotta, a teal-green and a dusty rose, and",
+    "the draw is even, so a block is genuinely mixed rather than cream with occasional colour.",
+    "",
+    "Accent1 is where the contrast lives: cream, a deep teal and an oxblood, which is how Mission",
+    "trim actually behaves - a strong colour outlining a strong colour. Accent2 ramps gold into burnt",
+    "orange for sills, hoods and cornice bands.",
+    "",
+    "Sign is authored here (unlike the residential palettes) because mission_storefront ships and the",
+    "district's shopfronts are half its character - see the note in the coverage test about Sign",
+    "being a texture role that nothing currently resolves through the palette.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "Mission",
+  "roles": [
+    { "role": "Base",    "colors": ["#E7D9B8", "#D9A86A", "#C97F5C", "#8FA9A2", "#E3C9C0", "#D8CDB4"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F5EFE0", "#2F5D63", "#A8322E"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#D8B45E", "#9E5B32"],                                             "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#36454E"],                                                        "mode": "constant" },
+    { "role": "Metal",   "colors": ["#6B6B68"],                                                        "mode": "constant" },
+    { "role": "Sign",    "colors": ["#B23A2E"],                                                        "mode": "constant" }
+  ],
+  "version": 1
+}

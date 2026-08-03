@@ -1,0 +1,25 @@
+{
+  "_comment": [
+    "#508. Mediterranean revival built in one go on the 1915 Exposition fill, so it is the palest and",
+    "the most uniform palette in the library: white-cream stucco, warm ivory, a barely-there sage and",
+    "a bone grey. The draws sit very close together on purpose - a Marina block IS uniform, and that",
+    "sameness is the district's read, not a bug of the kind #508 was filed about (compare Mission,",
+    "where the draws are deliberately far apart).",
+    "",
+    "What separates it from West of Twin Peaks, the other pale stucco district, is that Accent1 goes",
+    "brighter than the wall (a chalk white sash against cream) and the terracotta in the Accent2 ramp",
+    "is pinker and lighter - Marina tile is newer and sun-bleached where the residence-park tile is",
+    "deeper and shaded by trees.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "Marina",
+  "roles": [
+    { "role": "Base",    "colors": ["#F0EADA", "#E7E0CE", "#EDE3D3", "#E2E4DC", "#F3EFE2"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#FAF7EE", "#C7B58F"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#D3BE96", "#A5643F"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#3E4C56"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#7A7A74"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}

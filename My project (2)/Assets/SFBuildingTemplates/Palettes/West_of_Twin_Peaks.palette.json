@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "#508. The residence parks - St Francis Wood, Forest Hill, Balboa Terrace - are the 1920s-30s",
+    "end of the belt rather than the 1900s end: period-revival stucco, whiter and chalkier than Noe,",
+    "and much more uniform because they were built as tracts under design review. So the Base draws",
+    "sit close together on purpose; the variation the district actually has is small.",
+    "",
+    "The one strong note is Accent2, which ramps stucco tan into terracotta - that is the clay tile",
+    "roof and the tile hoods over the openings, the thing that makes these streets identifiably not",
+    "Noe Valley. Metal is a paler grey than the belt: these have more steel casements and less",
+    "painted wood sash.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "West of Twin Peaks",
+  "roles": [
+    { "role": "Base",    "colors": ["#EDE7D8", "#E4DECD", "#DFE0DA", "#EAE2D2", "#D8D6CA"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#F6F3EA", "#B8A98A"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#C8B69A", "#A0674C"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#3C4A52"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#77776F"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}

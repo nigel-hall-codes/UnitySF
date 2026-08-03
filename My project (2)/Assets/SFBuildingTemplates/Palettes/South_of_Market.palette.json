@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "#508. The only non-residential palette, and the only one whose Base is darker than its trim:",
+    "SoMa is unpainted brick, board-formed concrete and cement plaster, so the wall field runs red",
+    "brick, warm grey concrete, buff and a cool grey. Nothing here is a paint colour - these are",
+    "material colours, which is the whole difference between this district and the belt.",
+    "",
+    "Accent1 and Accent2 therefore go DOWN, not up: a mortar/limestone grey-brown for the sill and",
+    "lintel courses, so trim reads as a change of material rather than a coat of paint. Metal is the",
+    "load-bearing role here - dark steel sash and rollup doors are what soma_industrial and",
+    "soma_loft_commercial are made of - so it is the darkest, coolest Metal in the library.",
+    "",
+    "Sign is a painted-brick ghost-sign red.",
+    "",
+    "Authored, not verified in an Editor."
+  ],
+  "neighborhood": "South of Market",
+  "roles": [
+    { "role": "Base",    "colors": ["#B9A493", "#A8968A", "#C4B7A6", "#9E9A94", "#B0968A"], "mode": "pick" },
+    { "role": "Accent1", "colors": ["#8A7B6D", "#6E6A63"],                                  "mode": "pick" },
+    { "role": "Accent2", "ramp":   ["#9A8A78", "#5E564D"],                                  "mode": "lerp" },
+    { "role": "Glass",   "colors": ["#33424B"],                                             "mode": "constant" },
+    { "role": "Metal",   "colors": ["#5B5F62"],                                             "mode": "constant" },
+    { "role": "Sign",    "colors": ["#7C4A33"],                                             "mode": "constant" }
+  ],
+  "version": 1
+}
