@@ -4,6 +4,7 @@ using System.IO;
 using UnityEditor;
 using UnityEngine;
 using SFMap.Pipeline.Buildings;
+using SFMap.Pipeline.Buildings.Gen;
 
 namespace SFMap.Pipeline.Editor
 {
@@ -118,8 +119,19 @@ namespace SFMap.Pipeline.Editor
 
         // Parts placed for the current building, collected so BakeAndCombine can colour and fold
         // the non-sign ones into one mesh. Reset per building.
-        struct Placed { public GameObject go; public BuildingPart part; public string partId; public Facade facade; public int floor; public bool isSign; }
+        // `roles` is the generator's own submesh→role tagging (PartMesh.submeshRoles), carried on
+        // the placement rather than read off the part asset — the part no longer hand-authors it
+        // (#454), so it cannot drift from the geometry it describes.
+        struct Placed { public GameObject go; public BuildingPart part; public MaterialRole[] roles; public string partId; public Facade facade; public int floor; public bool isSign; }
         readonly List<Placed> _placed = new List<Placed>();
+
+        // Distinct (generator, quantised parameters, detail) → one shared Mesh, for this chunk's
+        // import (design #452 §6 mitigation 1). Thousands of placements, hundreds of meshes.
+        readonly PartMeshCache _partMeshes = new PartMeshCache();
+
+        // Part ids already reported as ungeneratable, so a template that references one doesn't
+        // log once per placement.
+        readonly HashSet<string> _warnedParts = new HashSet<string>(StringComparer.Ordinal);
 
         int _templated;
 
@@ -339,7 +351,7 @@ namespace SFMap.Pipeline.Editor
                     if (mf.sharedMesh == null) continue;
                     combines.Add(new CombineInstance
                     {
-                        mesh = CloneRoleColored(mf.sharedMesh, pl.part, osmId, palette),
+                        mesh = CloneRoleColored(mf.sharedMesh, pl.roles, osmId, palette),
                         transform = mf.transform.localToWorldMatrix,
                     });
                     folded = true;
@@ -424,19 +436,20 @@ namespace SFMap.Pipeline.Editor
             return m;
         }
 
-        static Mesh CloneRoleColored(Mesh src, BuildingPart part, long osmId, NeighborhoodPalette palette)
+        static Mesh CloneRoleColored(Mesh src, MaterialRole[] submeshRoles, long osmId, NeighborhoodPalette palette)
         {
             var m = UnityEngine.Object.Instantiate(src);
             var colors = new Color32[m.vertexCount];
             Color32 baseCol = ResolveRoleColor(osmId, palette, MaterialRole.Base);
             for (int i = 0; i < colors.Length; i++) colors[i] = baseCol;
-            // Override per submesh by its authored role (submeshRoles index-aligned to submeshes).
-            if (part != null && part.submeshRoles != null)
+            // Override per submesh by its role (index-aligned to submeshes, exactly as before — the
+            // array now comes from the generator instead of the part asset).
+            if (submeshRoles != null)
             {
-                int subs = Mathf.Min(m.subMeshCount, part.submeshRoles.Length);
+                int subs = Mathf.Min(m.subMeshCount, submeshRoles.Length);
                 for (int s = 0; s < subs; s++)
                 {
-                    Color32 c = ResolveRoleColor(osmId, palette, part.submeshRoles[s]);
+                    Color32 c = ResolveRoleColor(osmId, palette, submeshRoles[s]);
                     foreach (int vi in m.GetIndices(s))
                         if (vi >= 0 && vi < colors.Length) colors[vi] = c;
                 }
@@ -456,7 +469,8 @@ namespace SFMap.Pipeline.Editor
         public void LogCoverage(ChunkCoord coord, int fallback)
         {
             Debug.Log($"[BuildingAssembler] {coord}: {_templated} templated, {fallback} fallback " +
-                      $"(merged) of {_templated + fallback} buildings.");
+                      $"(merged) of {_templated + fallback} buildings; {_partMeshes.Generated} part " +
+                      $"mesh(es) generated, {_partMeshes.Hits} served from cache.");
         }
 
         // ---- building-specific overrides (#273, design §Placement Model) -------
@@ -625,25 +639,20 @@ namespace SFMap.Pipeline.Editor
             float mountDepth = part != null ? part.mountDepthMeters : 0f;
             pos += outward * mountDepth;   // outward is horizontal, so this leaves pos.y intact
 
-            var child = InstantiatePart(part, partId, out bool isPlaceholder);
+            var child = InstantiatePart(part, partId, out MaterialRole[] roles);
+            if (child == null) return;     // no generator → nothing to place (#454)
+
             child.transform.SetParent(parent, false);
             child.transform.position = pos;
-            // A real GLB part authors its front as +Z, so point +Z outward. The placeholder
-            // Quad's visible face is -Z, so face *that* to the street (else it's back-face-culled
-            // from outside). Either way apply the placement's roll about the outward normal.
-            Vector3 facing = isPlaceholder ? -outward : outward;
+            // A generated part authors +Z outward (design #452 generators.md, part-local frame), so
+            // point +Z along the facade's outward normal. Then apply the placement's roll about it.
             child.transform.rotation = Quaternion.AngleAxis(rotationDeg, outward) *
-                                       Quaternion.LookRotation(facing, Vector3.up);
-            // Scale = the placement scale, applied on top of the placeholder's authored size
-            // (a real prefab carries its own size, so its base is unit).
-            float s = scale <= 0f ? 1f : scale;
-            Vector3 baseScale = Vector3.one;
-            if (isPlaceholder && part != null && part.sizeMeters != Vector3.zero)
-                baseScale = new Vector3(Mathf.Max(part.sizeMeters.x, 0.1f),
-                                        Mathf.Max(part.sizeMeters.y, 0.1f), 1f);
-            child.transform.localScale = baseScale * s;
+                                       Quaternion.LookRotation(outward, Vector3.up);
+            // Scale = the placement scale only: the generated mesh already carries its real size,
+            // built from the part's own parameters.
+            child.transform.localScale = Vector3.one * (scale <= 0f ? 1f : scale);
 
-            _placed.Add(new Placed { go = child, part = part, partId = partId, facade = facadeEnum, floor = floor, isSign = isSign });
+            _placed.Add(new Placed { go = child, part = part, roles = roles, partId = partId, facade = facadeEnum, floor = floor, isSign = isSign });
         }
 
         // ---- procedural rule engine (#271) -------------------------------------
@@ -753,27 +762,54 @@ namespace SFMap.Pipeline.Editor
             return Mathf.Sqrt(dx * dx + dz * dz);
         }
 
-        GameObject InstantiatePart(BuildingPart part, string partId, out bool isPlaceholder)
+        /// <summary>The seam (design #452 D2, #454): resolve the part's generator, build (or reuse)
+        /// its mesh, and hand back a GameObject carrying it plus the generator's own submesh roles.
+        /// Null when the part cannot be generated — there is deliberately no fallback geometry, so
+        /// a missing generator is visibly missing rather than quietly a grey quad.</summary>
+        GameObject InstantiatePart(BuildingPart part, string partId, out MaterialRole[] roles)
         {
-            if (part != null && part.prefab != null)
-            {
-                isPlaceholder = false;
-                var go = (GameObject)PrefabUtility.InstantiatePrefab(part.prefab);
-                go.name = part.id;
-                return go;
-            }
-            // No imported GLB yet: a flat placeholder quad (sized by the caller to the authored
-            // part), so the placement is visible/correct before the geometry is authored — the
-            // GLB is wired into BuildingPart.prefab by the #269 importer once glTFast + the .glb land.
-            isPlaceholder = true;
-            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.name = $"{partId} (placeholder)";
-            // CreatePrimitive adds a MeshCollider; buildings are non-interactive, so drop it
-            // (it would otherwise bake a stray collider into the chunk prefab).
-            var col = quad.GetComponent<Collider>();
-            if (col != null) UnityEngine.Object.DestroyImmediate(col);
-            return quad;
+            roles = null;
+
+            if (part == null) return WarnOnce(partId, $"no BuildingPart with id '{partId}'");
+            if (string.IsNullOrEmpty(part.generatorId))
+                return WarnOnce(partId, $"part '{partId}' has no generatorId");
+            if (!PartGenerators.TryResolve(part.generatorId, out var generator))
+                return WarnOnce(partId, $"part '{partId}' names unknown generator " +
+                                        $"'{part.generatorId}' (known: {string.Join(", ", PartGenerators.Ids)})");
+
+            var parameters = part.parameters ?? PartParams.Empty;
+            var mesh = _partMeshes.GetOrCreate(parameters.KeyFor(part.generatorId),
+                                               mb => generator.Generate(parameters, mb));
+            if (!mesh.IsValid)
+                return WarnOnce(partId, $"generator '{part.generatorId}' produced no mesh for part '{partId}'");
+
+            var go = new GameObject(part.id);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh.mesh;
+            // Renderer for the same reason the placeholder quad had one: sign parts survive
+            // BakeAndCombine as live GameObjects and need to draw. Its material is owned by the
+            // sign/texture path (#274/#275), not by this seam.
+            go.AddComponent<MeshRenderer>();
+
+            roles = mesh.submeshRoles;
+            return go;
         }
+
+        GameObject WarnOnce(string partId, string reason)
+        {
+            if (_warnedParts.Add(partId ?? string.Empty))
+                Debug.LogWarning($"[BuildingAssembler] skipping placements of '{partId}': {reason}.");
+            return null;
+        }
+
+        /// <summary>Destroy the meshes generated for this chunk, once its buildings are assembled
+        /// and their decorated combines have been saved as assets.
+        /// <para>Safe because every generated mesh is either cloned into a per-building combine (and
+        /// the clone, not this mesh, is what the prefab references) or belongs to a part that was
+        /// never placed. The one part kind that survives the combine as a live GameObject is a
+        /// sign, and signs are texture-based, not generated (design #452 §5) — if a sign generator
+        /// is ever written, its mesh must be saved as an asset before this runs, exactly as the
+        /// per-building meshes are.</para></summary>
+        public void ReleaseGeneratedMeshes() => _partMeshes.Clear();
 
         BuildingPart ResolvePart(string id)
         {

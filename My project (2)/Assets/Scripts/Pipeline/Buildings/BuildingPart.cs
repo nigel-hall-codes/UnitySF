@@ -1,13 +1,17 @@
 using UnityEngine;
+using SFMap.Pipeline.Buildings.Gen;
 
 namespace SFMap.Pipeline.Buildings
 {
     /// <summary>
-    /// A reusable authored architectural part (window, door, sign, …), generated from a
-    /// <c>PartDef</c> JSON + GLB by <c>BuildingTemplateLibraryImporter</c> (design #266
-    /// data-model.md §3). The assembler (#270) instantiates <see cref="prefab"/> onto a
-    /// building's mass, mapping each submesh's <see cref="submeshRoles"/> entry to a
-    /// concrete colour via the neighborhood palette (or, for a sign, a PNG texture).
+    /// A reusable architectural part (window, door, sign, …), described entirely by <b>which
+    /// generator builds it and with what numbers</b> — no authored geometry (design #452 D2, #454).
+    /// <c>BuildingTemplateLibraryImporter</c> converts a <c>PartDef</c> JSON into one of these; the
+    /// assembler resolves <see cref="generatorId"/> to an <see cref="IPartGenerator"/>, runs it
+    /// through <see cref="PartMeshCache"/>, and instances the resulting shared mesh onto a
+    /// building's facade.
+    /// <para>The material role of each submesh is <b>emitted by the generator</b>, not authored
+    /// here: role tagging can no longer drift from the geometry it describes.</para>
     /// </summary>
     [CreateAssetMenu(menuName = "SFMap/Building Part", fileName = "BuildingPart")]
     public sealed class BuildingPart : ScriptableObject
@@ -17,15 +21,16 @@ namespace SFMap.Pipeline.Buildings
 
         public PartCategory category;
 
-        [Tooltip("Imported GLB geometry. Null until a glTF importer (glTFast) makes the GLB " +
-                 "loadable as a GameObject — the importer warns and leaves this null otherwise.")]
-        public GameObject prefab;
+        [Tooltip("Which IPartGenerator builds this part, e.g. \"window.double_hung\". Empty or " +
+                 "unknown → the part is skipped with a warning; there is no fallback geometry.")]
+        public string generatorId;
 
-        [Tooltip("Authored real-world size in metres (w, h, d).")]
+        [Tooltip("The generator's parameter block — a flat, name-keyed bag (see PartParams).")]
+        public PartParams parameters;
+
+        [Tooltip("Authored real-world size in metres (w, h, d). Informational: the generated mesh " +
+                 "carries its own size, taken from `parameters`.")]
         public Vector3 sizeMeters;
-
-        [Tooltip("Material role per prefab submesh, index-aligned to the prefab's submeshes.")]
-        public MaterialRole[] submeshRoles;
 
         [Tooltip("How the part's normalized placement maps to its mesh origin (e.g. BottomCenter).")]
         public string anchor;

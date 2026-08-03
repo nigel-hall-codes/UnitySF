@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using SFMap.Pipeline.Buildings.Gen;
 
 namespace SFMap.Pipeline.Buildings.Editor
 {
@@ -13,12 +14,9 @@ namespace SFMap.Pipeline.Buildings.Editor
     /// the assembler's (#270) inputs (design #266 data-model.md §2–3). Menu-driven (not an
     /// auto post-processor) so the conversion is explicit and re-runnable.
     ///
-    /// glTF package decision (closing the #266 open question): the GLB → GameObject import is
-    /// delegated to <b>glTFast</b> (<c>com.unity.cloud.gltfast</c>) — the Khronos/Unity-backed,
-    /// MIT-licensed, actively maintained importer (over the unmaintained UnityGLTF). This importer
-    /// does not hard-depend on it: it references the imported GLB by asset path, so if glTFast is
-    /// absent the part's prefab is simply null (warned) and everything else still imports. See
-    /// <c>Assets/SFBuildingTemplates/README.md</c> for the one-line manifest entry to add it.
+    /// Parts carry no geometry: a <c>PartDef</c> names an <c>IPartGenerator</c> and its parameter
+    /// block, and the assembler constructs the mesh at import time (design #452 D2, #454). There is
+    /// no GLB and no glTF package dependency.
     /// </summary>
     public static class BuildingTemplateLibraryImporter
     {
@@ -113,47 +111,44 @@ namespace SFMap.Pipeline.Buildings.Editor
             so.mountDepthMeters = def.mountDepth_m;
             so.isSign = so.category == PartCategory.Sign;
 
-            so.submeshRoles = BuildSubmeshRoles(def, ref warnings);
+            so.generatorId = def.generatorId;
+            so.parameters = PartParams.From(def.parameters);
+            WarnOnDuplicateParameters(def, ref warnings);
 
-            so.prefab = null;
-            if (!string.IsNullOrEmpty(def.glb))
+            if (string.IsNullOrEmpty(def.generatorId))
             {
-                string glbPath = $"{LibraryRoot}/{def.glb}";
-                so.prefab = AssetDatabase.LoadAssetAtPath<GameObject>(glbPath);
-                if (so.prefab == null)
-                {
-                    // A null prefab is an expected authoring state, not an error: the GLB may not
-                    // be authored yet, or glTFast (which makes a GLB load as a GameObject) may not
-                    // be installed. Inform, but don't count it as a warning — so a library whose
-                    // geometry isn't in yet still imports cleanly (see README).
-                    Debug.Log($"[SFBuildingTemplates] Part '{def.id}': GLB '{glbPath}' not loaded as a " +
-                              "GameObject yet (author the GLB / install glTFast — see README). Prefab left null.");
-                }
+                // An expected authoring state, not an error — informational so a library whose
+                // generators aren't written yet still imports cleanly. The part is skipped (with a
+                // warning) at assembly time, where it actually matters.
+                Debug.Log($"[SFBuildingTemplates] Part '{def.id}' has no generatorId; it will be " +
+                          "skipped when a building is assembled until one is authored.");
             }
 
             EditorUtility.SetDirty(so);
             return so;
         }
 
-        private static MaterialRole[] BuildSubmeshRoles(PartDefJson def, ref int warnings)
+        // Parameters are name-keyed and first-wins, so a repeated name means the second value is
+        // silently dead. Nothing else validates the bag (it has no compile-time schema), so this is
+        // the one authoring mistake worth catching at import.
+        private static void WarnOnDuplicateParameters(PartDefJson def, ref int warnings)
         {
-            if (def.roleSubmeshes == null || def.roleSubmeshes.Length == 0)
-                return Array.Empty<MaterialRole>();
-
-            // Place each role at its declared submesh index; gaps default to Base. The array is
-            // sized to the highest declared index (+1), not the prefab's submesh count — the
-            // assembler treats a missing trailing entry as Base. Authoring should declare a role
-            // per real submesh.
-            int max = -1;
-            foreach (var rs in def.roleSubmeshes) if (rs.submesh > max) max = rs.submesh;
-            var roles = new MaterialRole[max + 1];
-            foreach (var rs in def.roleSubmeshes)
+            if (def.parameters == null) return;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var p in def.parameters)
             {
-                if (rs.submesh < 0) { warnings++; continue; }
-                roles[rs.submesh] = ParseEnum(rs.role, MaterialRole.Base, ref warnings,
-                                              $"part '{def.id}' submesh {rs.submesh} role");
+                if (string.IsNullOrEmpty(p.name))
+                {
+                    warnings++;
+                    Debug.LogWarning($"[SFBuildingTemplates] Part '{def.id}': parameter with no name.");
+                }
+                else if (!seen.Add(p.name))
+                {
+                    warnings++;
+                    Debug.LogWarning($"[SFBuildingTemplates] Part '{def.id}': parameter '{p.name}' " +
+                                     "declared more than once; the first occurrence wins.");
+                }
             }
-            return roles;
         }
 
         private static void BuildPalette(PaletteDefJson def, ref int warnings)

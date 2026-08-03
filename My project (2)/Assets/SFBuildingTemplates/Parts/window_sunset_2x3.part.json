@@ -1,13 +1,27 @@
 {
   "id": "window_sunset_2x3",
   "category": "Window",
-  "glb": "Parts/window_sunset_2x3.glb",
-  "size_m": { "w": 1.2, "h": 1.6, "d": 0.15 },
-  "roleSubmeshes": [
-    { "submesh": 0, "role": "Base" },
-    { "submesh": 1, "role": "Glass" }
+  "generatorId": "",
+  "parameters": [
+    { "name": "w", "value": 1.2 },
+    { "name": "h", "value": 1.6 },
+    { "name": "revealDepth", "value": 0.06 },
+    { "name": "sashCount", "value": 1 },
+    { "name": "lowerCols", "value": 2 },
+    { "name": "lowerRows", "value": 1 },
+    { "name": "frameW", "value": 0.04 },
+    { "name": "frameD", "value": 0.03 },
+    { "name": "muntinW", "value": 0.02 },
+    { "name": "muntinD", "value": 0.02 },
+    { "name": "glassInset", "value": 0.03 },
+    { "name": "casingProfile", "text": "None" },
+    { "name": "sillProfile", "text": "Bullnose" },
+    { "name": "sillProjection", "value": 0.04 },
+    { "name": "head", "text": "Flat" },
+    { "name": "frameRole", "text": "Metal" }
   ],
+  "size_m": { "w": 1.2, "h": 1.6, "d": 0.15 },
   "anchor": "BottomCenter",
   "mountDepth_m": -0.08,
-  "version": 1
+  "version": 2
 }
